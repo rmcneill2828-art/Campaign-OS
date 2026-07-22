@@ -231,6 +231,17 @@ body[data-fog="on"] .map-tile:nth-child(3n) {
   text-transform: uppercase;
 }
 
+.token-source {
+  display: block;
+  max-width: 220px;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .token-editor,
 .hp-control,
 .attack-control {
@@ -378,6 +389,12 @@ body[data-fog="on"] .map-tile:nth-child(3n) {
   color: var(--accent);
   font-size: 0.76rem;
   text-transform: uppercase;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .campaign-browser {

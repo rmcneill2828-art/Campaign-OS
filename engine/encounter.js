@@ -115,6 +115,35 @@
     return { state: nextState, spawned };
   }
 
+  function addToken(state, draft) {
+    const nextState = clone(state);
+    const tile = findOpenTile(nextState, 4, 4);
+    const token = {
+      id: `${slugify(draft.name || "token")}-${Date.now()}`,
+      name: draft.name || "Campaign Token",
+      icon: draft.icon || String(draft.name || "CT").slice(0, 2).toUpperCase(),
+      type: draft.type || "hero",
+      x: tile.x,
+      y: tile.y,
+      hp: clampNumber(draft.hp ?? draft.maxHp ?? 10, 0, 999),
+      maxHp: clampNumber(draft.maxHp ?? draft.hp ?? 10, 1, 999),
+      ac: clampNumber(draft.ac ?? 12, 1, 99),
+      attackBonus: clampNumber(draft.attackBonus ?? 3, -20, 99),
+      damageDice: draft.damageDice || "1d6+1",
+      initiative: clampNumber(draft.initiative ?? rollDie(20), 0, 99),
+      conditions: draft.conditions || [],
+      sourcePath: draft.sourcePath || ""
+    };
+    token.hp = clampNumber(token.hp, 0, token.maxHp);
+    nextState.tokens.push(token);
+    nextState.selectedTokenId = token.id;
+    return { state: nextState, token };
+  }
+
+  function slugify(value) {
+    return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "token";
+  }
+
   function rollDie(sides) {
     return Math.floor(Math.random() * sides) + 1;
   }
@@ -308,6 +337,7 @@
     applyDamage,
     applyHealing,
     attack,
+    addToken,
     conditionList,
     createState,
     parseCommand,

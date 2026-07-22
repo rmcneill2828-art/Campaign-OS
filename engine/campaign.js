@@ -87,9 +87,43 @@
     return paragraphs[0]?.slice(0, 220) || "No preview text.";
   }
 
+  function tokenDraftFromItem(item) {
+    const fields = extractFields(item.text || "");
+    const name = item.title || fields.name || "Campaign Character";
+    const maxHp = readNumber(fields.hp || fields.hitpoints || fields["hit points"], 12);
+    return {
+      name,
+      icon: name.slice(0, 2).toUpperCase(),
+      type: /npc/i.test(item.path) ? "monster" : "hero",
+      hp: maxHp,
+      maxHp,
+      ac: readNumber(fields.ac || fields["armor class"], 12),
+      attackBonus: readNumber(fields.attack || fields["attack bonus"], 3),
+      damageDice: fields.damage || fields["damage dice"] || "1d6+1",
+      initiative: readNumber(fields.initiative || fields.init, 10),
+      conditions: [],
+      sourcePath: item.path
+    };
+  }
+
+  function extractFields(text) {
+    const fields = {};
+    text.split(/\r?\n/).forEach((line) => {
+      const match = line.match(/^\s*(?:[-*]\s*)?\*{0,2}([A-Za-z ]+)\*{0,2}\s*[:|-]\s*(.+?)\s*$/);
+      if (match) fields[match[1].trim().toLowerCase()] = match[2].replace(/\*+/g, "").trim();
+    });
+    return fields;
+  }
+
+  function readNumber(value, fallback) {
+    const match = String(value || "").match(/-?\d+/);
+    return match ? Number(match[0]) : fallback;
+  }
+
   window.CampaignOSCampaign = {
     categoryRules,
     createCampaign,
-    importMarkdownFiles
+    importMarkdownFiles,
+    tokenDraftFromItem
   };
 })();

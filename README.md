@@ -26,6 +26,9 @@ Current features:
 - Campaign search and category filtering
 - Template files hidden by default
 - Selected campaign item detail panel
+- Add imported characters to the encounter board
+- Open imported locations as the active map context
+- Use sessions and notes as quick DM context
 - Fog tiles
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`

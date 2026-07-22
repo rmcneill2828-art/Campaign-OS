@@ -97,6 +97,7 @@
         <div>
           <p>${token.type}</p>
           <h3>${escapeHtml(token.name)}</h3>
+          ${token.sourcePath ? `<span class="token-source">${escapeHtml(token.sourcePath)}</span>` : ""}
         </div>
         <strong>${token.hp} / ${token.maxHp}</strong>
       </div>
@@ -294,7 +295,37 @@
       </div>
       <span>${escapeHtml(item.path)}</span>
       <p>${escapeHtml(item.summary)}</p>
+      <div class="detail-actions"></div>
     `;
+
+    const actions = campaignDetail.querySelector(".detail-actions");
+    if (item.category === "characters") {
+      const spawnButton = document.createElement("button");
+      spawnButton.type = "button";
+      spawnButton.textContent = "Add Token";
+      spawnButton.addEventListener("click", () => addCampaignToken(item));
+      actions.appendChild(spawnButton);
+    }
+
+    if (item.category === "locations") {
+      const mapButton = document.createElement("button");
+      mapButton.type = "button";
+      mapButton.textContent = "Open Map";
+      mapButton.addEventListener("click", () => {
+        state.mapName = item.title;
+        commandResult.textContent = `${item.title} is now the active map context.`;
+        render();
+      });
+      actions.appendChild(mapButton);
+    }
+
+    if (["sessions", "notes"].includes(item.category)) {
+      const contextButton = document.createElement("button");
+      contextButton.type = "button";
+      contextButton.textContent = "Use Context";
+      contextButton.addEventListener("click", () => useCampaignContext(item));
+      actions.appendChild(contextButton);
+    }
   }
 
   function filteredCampaignFiles() {
@@ -331,6 +362,19 @@
       state.mapName = item.title;
       render();
     }
+  }
+
+  function addCampaignToken(item) {
+    const draft = window.CampaignOSCampaign.tokenDraftFromItem(item);
+    const result = window.CampaignOS.addToken(state, draft);
+    state = result.state;
+    commandResult.textContent = `${result.token.name} joined the encounter from ${item.title}.`;
+    render();
+  }
+
+  function useCampaignContext(item) {
+    commandInput.value = `Use ${item.title} as context.`;
+    commandResult.textContent = `${item.title} is ready as DM context: ${item.summary}`;
   }
 
   function ensureMapOption(mapName) {
