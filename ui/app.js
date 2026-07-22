@@ -1,6 +1,7 @@
 (function () {
-  const storageKey = "campaign-os-week-three";
+  const storageKey = "campaign-os-encounter-state";
   const campaignStorageKey = "campaign-os-campaign-import";
+  const preferencesStorageKey = "campaign-os-preferences";
   const map = document.querySelector("#battleMap");
   const initiativeList = document.querySelector("#initiativeList");
   const tokenSheet = document.querySelector("#tokenSheet");
@@ -17,9 +18,13 @@
   const commandResult = document.querySelector("#commandResult");
   const mapSelect = document.querySelector("#mapSelect");
 
-  let state = window.CampaignOS.createState();
+  let preferences = loadPreferences();
+  let state = loadEncounter();
   let campaign = loadCampaign();
-  let selectedCampaignItemId = null;
+  let selectedCampaignItemId = preferences.selectedCampaignItemId || null;
+  campaignSearch.value = preferences.search || "";
+  campaignFilter.value = preferences.filter || "all";
+  showTemplates.checked = Boolean(preferences.showTemplates);
 
   function selectedToken() {
     return state.tokens.find((token) => token.id === state.selectedTokenId);
@@ -62,7 +67,12 @@
       tokenButton.dataset.id = token.id;
       tokenButton.style.gridColumn = token.x;
       tokenButton.style.gridRow = token.y;
-      tokenButton.textContent = token.icon;
+      if (token.image) {
+        tokenButton.style.backgroundImage = `url("${token.image}")`;
+        tokenButton.classList.add("has-image");
+      } else {
+        tokenButton.textContent = token.icon;
+      }
       tokenButton.title = token.name;
       tokenButton.setAttribute("aria-label", token.name);
       if (token.id === state.selectedTokenId) tokenButton.classList.add("selected");
@@ -100,6 +110,14 @@
           ${token.sourcePath ? `<span class="token-source">${escapeHtml(token.sourcePath)}</span>` : ""}
         </div>
         <strong>${token.hp} / ${token.maxHp}</strong>
+      </div>
+      <div class="token-portrait">
+        <div class="portrait-preview">${token.image ? `<img src="${token.image}" alt="">` : `<span>${escapeHtml(token.icon)}</span>`}</div>
+        <label>
+          Token Image
+          <input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+        </label>
+        ${token.image ? `<button type="button" data-action="clear-image">Clear Image</button>` : ""}
       </div>
       <form class="token-editor">
         <label>
@@ -166,6 +184,18 @@
     `;
 
     const editor = tokenSheet.querySelector(".token-editor");
+    const imageInput = tokenSheet.querySelector('input[name="image"]');
+    imageInput.addEventListener("change", async () => {
+      const file = imageInput.files[0];
+      if (!file) return;
+      const image = await readFileAsDataUrl(file);
+      updateState(window.CampaignOS.updateToken(state, token.id, { image }));
+    });
+    const clearImageButton = tokenSheet.querySelector('[data-action="clear-image"]');
+    if (clearImageButton) {
+      clearImageButton.addEventListener("click", () => updateState(window.CampaignOS.updateToken(state, token.id, { image: "" })));
+    }
+
     editor.addEventListener("submit", (event) => {
       event.preventDefault();
       const form = new FormData(editor);
@@ -195,6 +225,7 @@
       const targetId = new FormData(attackControl).get("targetId");
       const result = window.CampaignOS.attack(state, token.id, targetId);
       state = result.state;
+      saveEncounter();
       commandResult.textContent = result.message;
       render();
     });
@@ -282,6 +313,12 @@
           addButton.textContent = "Add Token";
           addButton.addEventListener("click", () => addCampaignToken(item));
           actions.appendChild(addButton);
+
+          const sheetButton = document.createElement("button");
+          sheetButton.type = "button";
+          sheetButton.textContent = "Open Sheet";
+          sheetButton.addEventListener("click", () => openCharacterSheet(item));
+          actions.appendChild(sheetButton);
         }
         if (item.category === "locations") {
           const mapButton = document.createElement("button");
@@ -327,6 +364,12 @@
       spawnButton.textContent = "Add Token";
       spawnButton.addEventListener("click", () => addCampaignToken(item));
       actions.appendChild(spawnButton);
+
+      const sheetButton = document.createElement("button");
+      sheetButton.type = "button";
+      sheetButton.textContent = "Open Sheet";
+      sheetButton.addEventListener("click", () => openCharacterSheet(item));
+      actions.appendChild(sheetButton);
     }
 
     if (item.category === "locations") {
@@ -335,6 +378,7 @@
       mapButton.textContent = "Open Map";
       mapButton.addEventListener("click", () => {
         state.mapName = item.title;
+        saveEncounter();
         commandResult.textContent = `${item.title} is now the active map context.`;
         render();
       });
@@ -379,9 +423,11 @@
 
   function openCampaignItem(item) {
     selectedCampaignItemId = item.id;
+    savePreferences();
     commandResult.textContent = `${item.title}: ${item.summary}`;
     if (item.category === "locations") {
       state.mapName = item.title;
+      saveEncounter();
       render();
     }
   }
@@ -390,8 +436,14 @@
     const draft = window.CampaignOSCampaign.tokenDraftFromItem(item);
     const result = window.CampaignOS.addToken(state, draft);
     state = result.state;
+    saveEncounter();
     commandResult.textContent = `${result.token.name} joined the encounter from ${item.title}.`;
     render();
+  }
+
+  function openCharacterSheet(item) {
+    const url = `character.html?id=${encodeURIComponent(item.id)}`;
+    window.open(url, "_blank", "noopener");
   }
 
   function useCampaignContext(item) {
@@ -421,13 +473,24 @@
     return escapeHtml(value).replaceAll("`", "&#096;");
   }
 
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => resolve(reader.result));
+      reader.addEventListener("error", () => reject(reader.error));
+      reader.readAsDataURL(file);
+    });
+  }
+
   function selectToken(tokenId) {
     state.selectedTokenId = tokenId;
+    saveEncounter();
     render();
   }
 
   function updateState(nextState) {
     state = nextState;
+    saveEncounter();
     render();
   }
 
@@ -442,12 +505,14 @@
     event.preventDefault();
     const result = window.CampaignOS.parseCommand(state, commandInput.value);
     state = result.state;
+    saveEncounter();
     commandResult.textContent = result.message;
     render();
   });
 
   document.querySelector("#saveEncounter").addEventListener("click", () => {
-    localStorage.setItem(storageKey, JSON.stringify(state));
+    saveEncounter();
+    savePreferences();
     commandResult.textContent = "Encounter saved locally.";
   });
 
@@ -457,13 +522,14 @@
       commandResult.textContent = "No saved encounter found.";
       return;
     }
-    state = JSON.parse(saved);
+    state = normalizeEncounter(JSON.parse(saved));
     commandResult.textContent = "Encounter loaded.";
     render();
   });
 
   document.querySelector("#resetEncounter").addEventListener("click", () => {
     state = window.CampaignOS.createState();
+    saveEncounter();
     commandResult.textContent = "Encounter reset.";
     render();
   });
@@ -473,6 +539,7 @@
     campaign = await window.CampaignOSCampaign.importMarkdownFiles(campaignImport.files);
     selectedCampaignItemId = filteredCampaignFiles()[0]?.id || campaign.files[0]?.id || null;
     saveCampaign();
+    savePreferences();
     commandResult.textContent = `${campaign.name} imported.`;
     render();
   });
@@ -481,6 +548,7 @@
     campaign = window.CampaignOSCampaign.createCampaign();
     selectedCampaignItemId = null;
     localStorage.removeItem(campaignStorageKey);
+    savePreferences();
     campaignImport.value = "";
     commandResult.textContent = "Campaign import cleared.";
     render();
@@ -488,28 +556,68 @@
 
   campaignSearch.addEventListener("input", () => {
     selectedCampaignItemId = filteredCampaignFiles()[0]?.id || null;
+    savePreferences();
     render();
   });
 
   campaignFilter.addEventListener("change", () => {
     selectedCampaignItemId = filteredCampaignFiles()[0]?.id || null;
+    savePreferences();
     render();
   });
 
   showTemplates.addEventListener("change", () => {
     selectedCampaignItemId = filteredCampaignFiles()[0]?.id || null;
+    savePreferences();
     render();
   });
 
   document.querySelector("#toggleFog").addEventListener("click", () => {
     state.fogEnabled = !state.fogEnabled;
+    saveEncounter();
     render();
   });
 
   mapSelect.addEventListener("change", () => {
     state.mapName = mapSelect.value;
+    saveEncounter();
     document.querySelector("h1").textContent = state.mapName;
   });
+
+  function saveEncounter() {
+    localStorage.setItem(storageKey, JSON.stringify(state));
+  }
+
+  function loadEncounter() {
+    const saved = localStorage.getItem(storageKey);
+    if (!saved) return window.CampaignOS.createState();
+    try {
+      return normalizeEncounter(JSON.parse(saved));
+    } catch {
+      return window.CampaignOS.createState();
+    }
+  }
+
+  function normalizeEncounter(savedState) {
+    const fallback = window.CampaignOS.createState();
+    const tokens = Array.isArray(savedState?.tokens) ? removeLegacyDefaultTokens(savedState.tokens) : fallback.tokens;
+    const selectedTokenId = tokens.some((token) => token.id === savedState?.selectedTokenId)
+      ? savedState.selectedTokenId
+      : tokens[0]?.id || null;
+    return {
+      ...fallback,
+      ...savedState,
+      selectedTokenId,
+      tokens,
+      log: Array.isArray(savedState?.log) ? savedState.log : []
+    };
+  }
+
+  function removeLegacyDefaultTokens(tokens) {
+    return tokens.filter((token) => {
+      return !(token.id === "darkhawk" && token.name === "Darkhawk" && !token.sourcePath);
+    });
+  }
 
   function saveCampaign() {
     localStorage.setItem(campaignStorageKey, JSON.stringify(campaign));
@@ -546,6 +654,26 @@
     });
 
     return savedCampaign;
+  }
+
+  function savePreferences() {
+    preferences = {
+      search: campaignSearch.value,
+      filter: campaignFilter.value,
+      showTemplates: showTemplates.checked,
+      selectedCampaignItemId
+    };
+    localStorage.setItem(preferencesStorageKey, JSON.stringify(preferences));
+  }
+
+  function loadPreferences() {
+    const saved = localStorage.getItem(preferencesStorageKey);
+    if (!saved) return {};
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return {};
+    }
   }
 
   render();

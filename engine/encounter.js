@@ -14,25 +14,9 @@
   const initialState = {
     mapName: "The Standing Ring",
     fogEnabled: false,
-    selectedTokenId: "darkhawk",
+    selectedTokenId: null,
     log: [],
-    tokens: [
-      {
-        id: "darkhawk",
-        name: "Darkhawk",
-        icon: "DH",
-        type: "hero",
-        x: 3,
-        y: 4,
-        hp: 28,
-        maxHp: 28,
-        ac: 15,
-        attackBonus: 5,
-        damageDice: "1d8+3",
-        initiative: 18,
-        conditions: []
-      }
-    ]
+    tokens: []
   };
 
   function clone(value) {
@@ -221,6 +205,10 @@
 
     if (typeof changes.damageDice === "string") {
       token.damageDice = changes.damageDice.trim() || token.damageDice || "1d4";
+    }
+
+    if (typeof changes.image === "string") {
+      token.image = changes.image;
     }
 
     return nextState;

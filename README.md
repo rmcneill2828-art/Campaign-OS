@@ -27,8 +27,12 @@ Current features:
 - Template files hidden by default
 - Selected campaign item detail panel
 - Add imported characters to the encounter board
+- Open imported character sheets in a separate page
 - Open imported locations as the active map context
 - Use sessions and notes as quick DM context
+- Add persistent image portraits to tokens
+- Automatic encounter persistence across reloads
+- Remembered campaign search, filters, and selection
 - Fog tiles
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`
