@@ -1,5 +1,5 @@
 (function () {
-  const storageKey = "campaign-os-week-one";
+  const storageKey = "campaign-os-week-two";
   const map = document.querySelector("#battleMap");
   const initiativeList = document.querySelector("#initiativeList");
   const tokenSheet = document.querySelector("#tokenSheet");
@@ -82,19 +82,73 @@
       <div class="token-heading">
         <div>
           <p>${token.type}</p>
-          <h3>${token.name}</h3>
+          <h3>${escapeHtml(token.name)}</h3>
         </div>
         <strong>${token.hp} / ${token.maxHp}</strong>
       </div>
+      <form class="token-editor">
+        <label>
+          Name
+          <input name="name" type="text" value="${escapeAttribute(token.name)}">
+        </label>
+        <div class="stat-grid">
+          <label>
+            HP
+            <input name="hp" type="number" min="0" max="999" value="${token.hp}">
+          </label>
+          <label>
+            Max
+            <input name="maxHp" type="number" min="1" max="999" value="${token.maxHp}">
+          </label>
+          <label>
+            Init
+            <input name="initiative" type="number" min="0" max="99" value="${token.initiative}">
+          </label>
+        </div>
+        <button type="submit">Update</button>
+      </form>
+      <form class="hp-control">
+        <label>
+          Hit Damage
+          <input name="amount" type="number" min="1" max="999" value="5">
+        </label>
+        <div class="hp-actions">
+          <button type="button" data-action="damage">Damage</button>
+          <button type="button" data-action="heal">Heal</button>
+        </div>
+      </form>
       <div class="hp-actions">
-        <button type="button" data-action="damage">Damage 5</button>
-        <button type="button" data-action="heal">Heal 5</button>
+        <button type="button" data-action="bloodied">Bloodied</button>
+        <button type="button" data-action="drop">Drop</button>
+        <button type="button" data-action="full">Full HP</button>
       </div>
-      <div class="conditions"></div>
+      <div>
+        <h3 class="subheading">Conditions</h3>
+        <div class="conditions"></div>
+      </div>
+      <button class="danger-button" type="button" data-action="remove">Remove Token</button>
     `;
 
-    tokenSheet.querySelector('[data-action="damage"]').addEventListener("click", () => updateState(window.CampaignOS.applyDamage(state, token.id, 5)));
-    tokenSheet.querySelector('[data-action="heal"]').addEventListener("click", () => updateState(window.CampaignOS.applyHealing(state, token.id, 5)));
+    const editor = tokenSheet.querySelector(".token-editor");
+    editor.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = new FormData(editor);
+      updateState(window.CampaignOS.updateToken(state, token.id, {
+        name: form.get("name"),
+        hp: form.get("hp"),
+        maxHp: form.get("maxHp"),
+        initiative: form.get("initiative")
+      }));
+    });
+
+    const hpControl = tokenSheet.querySelector(".hp-control");
+    const hpAmount = () => Number(new FormData(hpControl).get("amount")) || 1;
+    tokenSheet.querySelector('[data-action="damage"]').addEventListener("click", () => updateState(window.CampaignOS.applyDamage(state, token.id, hpAmount())));
+    tokenSheet.querySelector('[data-action="heal"]').addEventListener("click", () => updateState(window.CampaignOS.applyHealing(state, token.id, hpAmount())));
+    tokenSheet.querySelector('[data-action="bloodied"]').addEventListener("click", () => updateState(window.CampaignOS.updateToken(state, token.id, { hp: Math.floor(token.maxHp / 2) })));
+    tokenSheet.querySelector('[data-action="drop"]').addEventListener("click", () => updateState(window.CampaignOS.updateToken(state, token.id, { hp: 0 })));
+    tokenSheet.querySelector('[data-action="full"]').addEventListener("click", () => updateState(window.CampaignOS.updateToken(state, token.id, { hp: token.maxHp })));
+    tokenSheet.querySelector('[data-action="remove"]').addEventListener("click", () => updateState(window.CampaignOS.removeToken(state, token.id)));
 
     const conditions = tokenSheet.querySelector(".conditions");
     window.CampaignOS.conditionList.forEach((condition) => {
@@ -103,6 +157,19 @@
       label.querySelector("input").addEventListener("change", () => updateState(window.CampaignOS.toggleCondition(state, token.id, condition)));
       conditions.appendChild(label);
     });
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function escapeAttribute(value) {
+    return escapeHtml(value).replaceAll("`", "&#096;");
   }
 
   function selectToken(tokenId) {

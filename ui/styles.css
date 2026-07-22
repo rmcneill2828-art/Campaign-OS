@@ -48,6 +48,11 @@ button:hover {
   border-color: var(--accent);
 }
 
+input {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
 .app-shell {
   min-height: 100vh;
   padding: 18px;
@@ -226,6 +231,39 @@ body[data-fog="on"] .map-tile:nth-child(3n) {
   text-transform: uppercase;
 }
 
+.token-editor,
+.hp-control {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.token-editor label,
+.hp-control label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.token-editor input,
+.hp-control input {
+  width: 100%;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.subheading {
+  margin: 12px 0 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
 .conditions {
   display: grid;
   gap: 8px;
@@ -237,6 +275,17 @@ body[data-fog="on"] .map-tile:nth-child(3n) {
   align-items: center;
   gap: 8px;
   color: var(--muted);
+}
+
+.danger-button {
+  width: 100%;
+  margin-top: 12px;
+  border-color: rgba(185, 83, 76, 0.72);
+  color: #ffd8d4;
+}
+
+.danger-button:hover {
+  border-color: var(--danger);
 }
 
 .command-form input {

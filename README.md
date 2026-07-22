@@ -15,7 +15,10 @@ Current features:
 - Live encounter board
 - Draggable tokens
 - Initiative tracker
-- HP and conditions panel
+- Editable token sheet
+- Flexible damage and healing
+- Expanded condition tracking
+- Remove defeated or accidental tokens
 - Fog tiles
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`

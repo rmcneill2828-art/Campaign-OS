@@ -1,5 +1,15 @@
 (function () {
-  const conditionList = ["Poisoned", "Prone", "Restrained"];
+  const conditionList = [
+    "Blinded",
+    "Charmed",
+    "Frightened",
+    "Grappled",
+    "Poisoned",
+    "Prone",
+    "Restrained",
+    "Stunned",
+    "Unconscious"
+  ];
 
   const initialState = {
     mapName: "The Standing Ring",
@@ -105,14 +115,55 @@
   function applyDamage(state, tokenId, amount) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
-    if (token) token.hp = Math.max(0, token.hp - amount);
+    if (token) token.hp = clampNumber(token.hp - amount, 0, token.maxHp);
     return nextState;
   }
 
   function applyHealing(state, tokenId, amount) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
-    if (token) token.hp = Math.min(token.maxHp, token.hp + amount);
+    if (token) token.hp = clampNumber(token.hp + amount, 0, token.maxHp);
+    return nextState;
+  }
+
+  function clampNumber(value, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return min;
+    return Math.min(max, Math.max(min, Math.round(number)));
+  }
+
+  function updateToken(state, tokenId, changes) {
+    const nextState = clone(state);
+    const token = nextState.tokens.find((item) => item.id === tokenId);
+    if (!token) return nextState;
+
+    if (typeof changes.name === "string") {
+      token.name = changes.name.trim() || token.name;
+      token.icon = token.name.slice(0, 2).toUpperCase();
+    }
+
+    if (changes.maxHp !== undefined) {
+      token.maxHp = clampNumber(changes.maxHp, 1, 999);
+      token.hp = clampNumber(token.hp, 0, token.maxHp);
+    }
+
+    if (changes.hp !== undefined) {
+      token.hp = clampNumber(changes.hp, 0, token.maxHp);
+    }
+
+    if (changes.initiative !== undefined) {
+      token.initiative = clampNumber(changes.initiative, 0, 99);
+    }
+
+    return nextState;
+  }
+
+  function removeToken(state, tokenId) {
+    const nextState = clone(state);
+    nextState.tokens = nextState.tokens.filter((token) => token.id !== tokenId);
+    if (nextState.selectedTokenId === tokenId) {
+      nextState.selectedTokenId = sortByInitiative(nextState.tokens)[0]?.id || null;
+    }
     return nextState;
   }
 
@@ -171,8 +222,10 @@
     conditionList,
     createState,
     parseCommand,
+    removeToken,
     setTokenPosition,
     sortByInitiative,
-    toggleCondition
+    toggleCondition,
+    updateToken
   };
 })();
