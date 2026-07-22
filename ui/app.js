@@ -1,8 +1,9 @@
 (function () {
-  const storageKey = "campaign-os-week-two";
+  const storageKey = "campaign-os-week-three";
   const map = document.querySelector("#battleMap");
   const initiativeList = document.querySelector("#initiativeList");
   const tokenSheet = document.querySelector("#tokenSheet");
+  const combatLog = document.querySelector("#combatLog");
   const commandForm = document.querySelector("#commandForm");
   const commandInput = document.querySelector("#commandInput");
   const commandResult = document.querySelector("#commandResult");
@@ -21,6 +22,7 @@
     renderMap();
     renderInitiative();
     renderTokenSheet();
+    renderCombatLog();
   }
 
   function renderMap() {
@@ -105,7 +107,28 @@
             <input name="initiative" type="number" min="0" max="99" value="${token.initiative}">
           </label>
         </div>
+        <div class="stat-grid">
+          <label>
+            AC
+            <input name="ac" type="number" min="1" max="99" value="${token.ac || 10}">
+          </label>
+          <label>
+            Attack
+            <input name="attackBonus" type="number" min="-20" max="99" value="${token.attackBonus || 0}">
+          </label>
+          <label>
+            Damage
+            <input name="damageDice" type="text" value="${escapeAttribute(token.damageDice || "1d4")}">
+          </label>
+        </div>
         <button type="submit">Update</button>
+      </form>
+      <form class="attack-control">
+        <label>
+          Target
+          <select name="targetId"></select>
+        </label>
+        <button type="submit">Attack</button>
       </form>
       <form class="hp-control">
         <label>
@@ -137,8 +160,30 @@
         name: form.get("name"),
         hp: form.get("hp"),
         maxHp: form.get("maxHp"),
-        initiative: form.get("initiative")
+        initiative: form.get("initiative"),
+        ac: form.get("ac"),
+        attackBonus: form.get("attackBonus"),
+        damageDice: form.get("damageDice")
       }));
+    });
+
+    const attackControl = tokenSheet.querySelector(".attack-control");
+    const targetSelect = attackControl.querySelector("select");
+    state.tokens
+      .filter((candidate) => candidate.id !== token.id)
+      .forEach((candidate) => {
+        const option = document.createElement("option");
+        option.value = candidate.id;
+        option.textContent = candidate.name;
+        targetSelect.appendChild(option);
+      });
+    attackControl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const targetId = new FormData(attackControl).get("targetId");
+      const result = window.CampaignOS.attack(state, token.id, targetId);
+      state = result.state;
+      commandResult.textContent = result.message;
+      render();
     });
 
     const hpControl = tokenSheet.querySelector(".hp-control");
@@ -156,6 +201,24 @@
       label.innerHTML = `<input type="checkbox" ${token.conditions.includes(condition) ? "checked" : ""}> ${condition}`;
       label.querySelector("input").addEventListener("change", () => updateState(window.CampaignOS.toggleCondition(state, token.id, condition)));
       conditions.appendChild(label);
+    });
+  }
+
+  function renderCombatLog() {
+    combatLog.innerHTML = "";
+    const entries = state.log || [];
+    if (!entries.length) {
+      const item = document.createElement("li");
+      item.className = "empty-log";
+      item.textContent = "No attacks yet.";
+      combatLog.appendChild(item);
+      return;
+    }
+
+    entries.forEach((entry) => {
+      const item = document.createElement("li");
+      item.textContent = entry;
+      combatLog.appendChild(item);
     });
   }
 

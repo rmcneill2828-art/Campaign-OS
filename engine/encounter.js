@@ -15,6 +15,7 @@
     mapName: "The Standing Ring",
     fogEnabled: false,
     selectedTokenId: "darkhawk",
+    log: [],
     tokens: [
       {
         id: "darkhawk",
@@ -25,6 +26,9 @@
         y: 4,
         hp: 28,
         maxHp: 28,
+        ac: 15,
+        attackBonus: 5,
+        damageDice: "1d8+3",
         initiative: 18,
         conditions: []
       }
@@ -97,6 +101,9 @@
         y: tile.y,
         hp: monsterName.toLowerCase() === "goblin" ? 7 : 10,
         maxHp: monsterName.toLowerCase() === "goblin" ? 7 : 10,
+        ac: monsterName.toLowerCase() === "goblin" ? 15 : 13,
+        attackBonus: monsterName.toLowerCase() === "goblin" ? 4 : 3,
+        damageDice: monsterName.toLowerCase() === "goblin" ? "1d6+2" : "1d8+1",
         initiative: rollDie(20) + 2,
         conditions: []
       };
@@ -110,6 +117,26 @@
 
   function rollDie(sides) {
     return Math.floor(Math.random() * sides) + 1;
+  }
+
+  function rollDice(notation) {
+    const match = String(notation).trim().match(/^(\d*)d(\d+)([+-]\d+)?$/i);
+    if (!match) return { total: 0, rolls: [], modifier: 0, notation };
+
+    const count = Number(match[1] || 1);
+    const sides = Number(match[2]);
+    const modifier = Number(match[3] || 0);
+    const rolls = [];
+    for (let index = 0; index < count; index += 1) {
+      rolls.push(rollDie(sides));
+    }
+
+    return {
+      total: rolls.reduce((sum, roll) => sum + roll, 0) + modifier,
+      rolls,
+      modifier,
+      notation
+    };
   }
 
   function applyDamage(state, tokenId, amount) {
@@ -155,7 +182,58 @@
       token.initiative = clampNumber(changes.initiative, 0, 99);
     }
 
+    if (changes.ac !== undefined) {
+      token.ac = clampNumber(changes.ac, 1, 99);
+    }
+
+    if (changes.attackBonus !== undefined) {
+      token.attackBonus = clampNumber(changes.attackBonus, -20, 99);
+    }
+
+    if (typeof changes.damageDice === "string") {
+      token.damageDice = changes.damageDice.trim() || token.damageDice || "1d4";
+    }
+
     return nextState;
+  }
+
+  function addLogEntry(state, text) {
+    const nextState = clone(state);
+    nextState.log = [text, ...(nextState.log || [])].slice(0, 12);
+    return nextState;
+  }
+
+  function attack(state, attackerId, targetId) {
+    let nextState = clone(state);
+    const attacker = nextState.tokens.find((token) => token.id === attackerId);
+    const target = nextState.tokens.find((token) => token.id === targetId);
+    if (!attacker || !target) {
+      return { state, message: "Attack failed: attacker or target was not found." };
+    }
+
+    const d20 = rollDie(20);
+    const attackBonus = Number(attacker.attackBonus || 0);
+    const total = d20 + attackBonus;
+    const targetAc = Number(target.ac || 10);
+    const isCritical = d20 === 20;
+    const isMiss = d20 === 1 || total < targetAc;
+
+    if (isMiss) {
+      const message = `${attacker.name} attacks ${target.name}: ${d20} + ${attackBonus} = ${total} vs AC ${targetAc}. Miss.`;
+      return { state: addLogEntry(nextState, message), message };
+    }
+
+    const damage = rollDice(attacker.damageDice || "1d4");
+    const damageTotal = isCritical ? damage.total * 2 : damage.total;
+    nextState = applyDamage(nextState, target.id, damageTotal);
+    const critText = isCritical ? " Critical hit." : "";
+    const message = `${attacker.name} attacks ${target.name}: ${d20} + ${attackBonus} = ${total} vs AC ${targetAc}. Hit.${critText} Damage ${damageTotal} (${damage.notation}).`;
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  function findTokenByName(state, name) {
+    const normalized = name.trim().toLowerCase();
+    return state.tokens.find((token) => token.name.toLowerCase() === normalized);
   }
 
   function removeToken(state, tokenId) {
@@ -203,6 +281,16 @@
     const actionFirst = new RegExp(`(?:spawn|summon|emerge|appear|add).*?${countPattern}\\s+${monsterPattern}`);
     const countFirst = new RegExp(`${countPattern}\\s+${monsterPattern}.*?(?:spawn|summon|emerge|appear|add)`);
     const spawnMatch = normalized.match(actionFirst) || normalized.match(countFirst);
+    const attackMatch = command.match(/^(.+?)\s+attacks?\s+(.+?)[.!?]?$/i);
+
+    if (attackMatch) {
+      const attacker = findTokenByName(state, attackMatch[1]);
+      const target = findTokenByName(state, attackMatch[2]);
+      if (!attacker || !target) {
+        return { state, message: "I could not find the attacker or target." };
+      }
+      return attack(state, attacker.id, target.id);
+    }
 
     if (spawnMatch) {
       const count = countWords[spawnMatch[1]] || Number(spawnMatch[1]);
@@ -219,6 +307,7 @@
   window.CampaignOS = {
     applyDamage,
     applyHealing,
+    attack,
     conditionList,
     createState,
     parseCommand,

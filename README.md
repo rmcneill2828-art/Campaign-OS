@@ -19,9 +19,17 @@ Current features:
 - Flexible damage and healing
 - Expanded condition tracking
 - Remove defeated or accidental tokens
+- Dice-backed attacks
+- Combat log
 - Fog tiles
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`
+
+Week 3 attack command:
+
+```text
+Goblin 1 attacks Darkhawk.
+```
 
 ## Planned Shape
 
