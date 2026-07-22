@@ -32,7 +32,7 @@ Current features:
 - Use sessions and notes as quick DM context
 - Add persistent image portraits to tokens
 - Import persistent map images behind the encounter grid
-- Tune map grid columns and rows per imported map
+- Tune map grids per imported map with draggable handles
 - Calibrate each map with grid visibility, grid opacity, image fit, and token size
 - Keep token placement scoped to the active map
 - Automatic encounter persistence across reloads

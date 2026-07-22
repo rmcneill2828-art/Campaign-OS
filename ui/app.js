@@ -18,18 +18,22 @@
   const commandResult = document.querySelector("#commandResult");
   const mapSelect = document.querySelector("#mapSelect");
   const mapImageInput = document.querySelector("#mapImageInput");
-  const gridColumns = document.querySelector("#gridColumns");
-  const gridRows = document.querySelector("#gridRows");
+  const adjustGrid = document.querySelector("#adjustGrid");
   const showGrid = document.querySelector("#showGrid");
   const gridOpacity = document.querySelector("#gridOpacity");
   const mapFitMode = document.querySelector("#mapFitMode");
   const tokenSize = document.querySelector("#tokenSize");
   const toggleFog = document.querySelector("#toggleFog");
+  const clearMapImage = document.querySelector("#clearMapImage");
+  const legacyPrototypeMaps = new Set(["The Standing Ring", "Bear Cave", "Urskelde Road"]);
 
   let preferences = loadPreferences();
   let state = loadEncounter();
   let campaign = loadCampaign();
   let selectedCampaignItemId = preferences.selectedCampaignItemId || null;
+  let gridAdjusting = false;
+  let gridDrag = null;
+  let suppressGridClick = false;
   campaignSearch.value = preferences.search || "";
   campaignFilter.value = preferences.filter || "all";
   showTemplates.checked = Boolean(preferences.showTemplates);
@@ -43,14 +47,18 @@
   }
 
   function render() {
+    const previousMapName = state.mapName;
+    reconcileActiveMap();
+    if (state.mapName !== previousMapName) saveEncounter();
     document.body.dataset.fog = state.fogEnabled ? "on" : "off";
     toggleFog.textContent = state.fogEnabled ? "Fog On" : "Fog Off";
     toggleFog.classList.toggle("active-toggle", state.fogEnabled);
-    document.querySelector("h1").textContent = state.mapName;
+    adjustGrid.classList.toggle("active-toggle", gridAdjusting);
+    adjustGrid.textContent = gridAdjusting ? "Adjusting Grid" : "Adjust Grid";
+    document.querySelector("h1").textContent = state.mapName || "No map loaded";
     renderMapBackground();
     renderMapControls();
-    ensureMapOption(state.mapName);
-    mapSelect.value = state.mapName;
+    renderMapOptions();
     renderMap();
     renderInitiative();
     renderTokenSheet();
@@ -67,6 +75,7 @@
     map.style.setProperty("--grid-rows", grid.rows);
     map.style.setProperty("--grid-opacity", settings.gridOpacity / 100);
     map.style.setProperty("--token-size", `${settings.tokenSize}%`);
+    map.style.setProperty("--map-aspect-ratio", settings.aspectRatio);
     map.classList.toggle("grid-hidden", !settings.showGrid);
 
     for (let y = 1; y <= grid.rows; y += 1) {
@@ -104,6 +113,8 @@
       });
       map.appendChild(tokenButton);
     });
+
+    renderGridHandles();
   }
 
   function renderMapBackground() {
@@ -122,8 +133,6 @@
 
   function renderMapControls() {
     const settings = currentMapSettings();
-    gridColumns.value = settings.columns;
-    gridRows.value = settings.rows;
     showGrid.checked = settings.showGrid;
     gridOpacity.value = settings.gridOpacity;
     mapFitMode.value = settings.fitMode;
@@ -481,6 +490,10 @@
   }
 
   function addCampaignToken(item) {
+    if (!state.mapName) {
+      commandResult.textContent = "Load or open a map before adding tokens.";
+      return;
+    }
     const draft = window.CampaignOSCampaign.tokenDraftFromItem(item);
     const result = window.CampaignOS.addToken(state, draft);
     state = result.state;
@@ -499,13 +512,27 @@
     commandResult.textContent = `${item.title} is ready as DM context: ${item.summary}`;
   }
 
-  function ensureMapOption(mapName) {
-    const exists = Array.from(mapSelect.options).some((option) => option.value === mapName);
-    if (exists) return;
-    const option = document.createElement("option");
-    option.value = mapName;
-    option.textContent = mapName;
-    mapSelect.appendChild(option);
+  function renderMapOptions() {
+    const names = loadedMapNames();
+    mapSelect.innerHTML = "";
+    if (!names.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No maps loaded";
+      mapSelect.appendChild(option);
+      mapSelect.value = "";
+      mapSelect.disabled = true;
+      return;
+    }
+
+    names.forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      mapSelect.appendChild(option);
+    });
+    mapSelect.disabled = false;
+    mapSelect.value = state.mapName;
   }
 
   function escapeHtml(value) {
@@ -528,6 +555,26 @@
       reader.addEventListener("error", () => reject(reader.error));
       reader.readAsDataURL(file);
     });
+  }
+
+  function readImageDetails(dataUrl) {
+    return new Promise((resolve) => {
+      const image = new Image();
+      image.addEventListener("load", () => resolve({
+        width: image.naturalWidth || 12,
+        height: image.naturalHeight || 8
+      }));
+      image.addEventListener("error", () => resolve({ width: 12, height: 8 }));
+      image.src = dataUrl;
+    });
+  }
+
+  function mapNameFromFile(fileName) {
+    return String(fileName || "Imported Map")
+      .replace(/\.[^.]+$/u, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "Imported Map";
   }
 
   function selectToken(tokenId) {
@@ -647,21 +694,36 @@
   mapImageInput.addEventListener("change", async () => {
     const file = mapImageInput.files[0];
     if (!file) return;
-    const mapName = state.mapName;
+    const mapName = mapNameFromFile(file.name);
     const image = await readFileAsDataUrl(file);
-    updateState(window.CampaignOS.setMapImage(state, mapName, image));
-    commandResult.textContent = `${mapName} map image imported.`;
+    const details = await readImageDetails(image);
+    setActiveMap(mapName);
+    updateState(window.CampaignOS.setMapImage(state, mapName, image, {
+      sourceFileName: file.name,
+      aspectRatio: `${details.width} / ${details.height}`
+    }));
+    commandResult.textContent = `${mapName} map image imported from ${file.name}.`;
   });
 
-  document.querySelector("#clearMapImage").addEventListener("click", () => {
+  clearMapImage.addEventListener("click", () => {
     const mapName = state.mapName;
+    if (!mapName) return;
     updateState(window.CampaignOS.setMapImage(state, mapName, ""));
     mapImageInput.value = "";
     commandResult.textContent = `${mapName} map image cleared.`;
   });
 
-  gridColumns.addEventListener("change", updateGridSize);
-  gridRows.addEventListener("change", updateGridSize);
+  adjustGrid.addEventListener("click", () => {
+    gridAdjusting = !gridAdjusting;
+    if (gridAdjusting && !state.mapName) {
+      gridAdjusting = false;
+      commandResult.textContent = "Open a map before adjusting the grid.";
+    } else {
+      commandResult.textContent = gridAdjusting ? "Drag the right, bottom, or corner handle to fit the grid." : "Grid adjustment off.";
+    }
+    render();
+  });
+
   showGrid.addEventListener("change", updateMapView);
   gridOpacity.addEventListener("input", updateMapView);
   mapFitMode.addEventListener("change", updateMapView);
@@ -684,12 +746,142 @@
     }
   }
 
-  function updateGridSize() {
-    updateState(window.CampaignOS.setMapGrid(state, state.mapName, gridColumns.value, gridRows.value));
-    commandResult.textContent = `${state.mapName} grid updated.`;
+  function reconcileActiveMap() {
+    const names = loadedMapNames();
+    if (names.includes(state.mapName)) return;
+    state.mapName = names[0] || "";
+    state.selectedTokenId = activeTokens()[0]?.id || null;
+  }
+
+  function loadedMapNames() {
+    const names = new Set();
+    campaign.files
+      .filter((item) => item.category === "locations" && !item.isTemplate)
+      .forEach((item) => names.add(item.title));
+
+    Object.entries(state.maps || {}).forEach(([name, settings]) => {
+      const hasMapData = Boolean(settings?.image || settings?.sourcePath);
+      if (name && hasMapData) names.add(name);
+    });
+
+    state.tokens.forEach((token) => {
+      const hasRealMapState = Boolean(state.maps?.[token.mapName]?.image || state.maps?.[token.mapName]?.sourcePath);
+      if (token.mapName && (!legacyPrototypeMaps.has(token.mapName) || hasRealMapState)) names.add(token.mapName);
+    });
+
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }
+
+  function renderGridHandles() {
+    if (!gridAdjusting || !state.mapName) return;
+    [
+      { type: "columns", side: "left", label: "Drag to adjust grid columns" },
+      { type: "columns", side: "right", label: "Drag to adjust grid columns" },
+      { type: "rows", side: "top", label: "Drag to adjust grid rows" },
+      { type: "rows", side: "bottom", label: "Drag to adjust grid rows" },
+      { type: "both", side: "top-left", label: "Drag to adjust grid columns and rows" },
+      { type: "both", side: "top-right", label: "Drag to adjust grid columns and rows" },
+      { type: "both", side: "bottom-left", label: "Drag to adjust grid columns and rows" },
+      { type: "both", side: "bottom-right", label: "Drag to adjust grid columns and rows" }
+    ].forEach((handle) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `grid-handle ${handle.type} ${handle.side}`;
+      button.dataset.handle = handle.type;
+      button.dataset.side = handle.side;
+      button.textContent = handle.type === "columns" ? "Cols" : handle.type === "rows" ? "Rows" : "Both";
+      button.setAttribute("aria-label", handle.label);
+      button.title = handle.label;
+      button.addEventListener("mousedown", startGridDrag);
+      button.addEventListener("touchstart", startGridDrag, { passive: false });
+      button.addEventListener("pointerdown", startGridDrag);
+      button.addEventListener("click", nudgeGrid);
+      map.appendChild(button);
+    });
+  }
+
+  function startGridDrag(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (gridDrag) return;
+    const point = event.touches?.[0] || event;
+    const grid = currentGrid();
+    const rect = map.getBoundingClientRect();
+    gridDrag = {
+      type: event.currentTarget.dataset.handle,
+      startX: point.clientX,
+      startY: point.clientY,
+      startColumns: grid.columns,
+      startRows: grid.rows,
+      cellWidth: rect.width / grid.columns,
+      cellHeight: rect.height / grid.rows,
+      columnDirection: event.currentTarget.dataset.side.includes("left") ? -1 : 1,
+      rowDirection: event.currentTarget.dataset.side.includes("top") ? -1 : 1,
+      moved: false
+    };
+    document.body.classList.add("grid-dragging");
+    window.addEventListener("pointermove", dragGrid);
+    window.addEventListener("pointerup", endGridDrag, { once: true });
+    window.addEventListener("mousemove", dragGrid);
+    window.addEventListener("mouseup", endGridDrag, { once: true });
+    window.addEventListener("touchmove", dragGrid, { passive: false });
+    window.addEventListener("touchend", endGridDrag, { once: true });
+  }
+
+  function dragGrid(event) {
+    if (!gridDrag || !state.mapName) return;
+    event.preventDefault();
+    const point = event.touches?.[0] || event;
+    const columnDelta = Math.round(((point.clientX - gridDrag.startX) * gridDrag.columnDirection) / gridDrag.cellWidth);
+    const rowDelta = Math.round(((point.clientY - gridDrag.startY) * gridDrag.rowDirection) / gridDrag.cellHeight);
+    const columns = gridDrag.type === "rows" ? gridDrag.startColumns : gridDrag.startColumns + columnDelta;
+    const rows = gridDrag.type === "columns" ? gridDrag.startRows : gridDrag.startRows + rowDelta;
+    if (columnDelta !== 0 || rowDelta !== 0) gridDrag.moved = true;
+    applyGridSize(columns, rows);
+  }
+
+  function nudgeGrid(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (suppressGridClick || !state.mapName) {
+      suppressGridClick = false;
+      return;
+    }
+    const type = event.currentTarget.dataset.handle;
+    const grid = currentGrid();
+    const columns = type === "rows" ? grid.columns : grid.columns + 1;
+    const rows = type === "columns" ? grid.rows : grid.rows + 1;
+    applyGridSize(columns, rows);
+    commandResult.textContent = `${state.mapName} grid adjusted to ${currentGrid().columns} x ${currentGrid().rows}.`;
+  }
+
+  function applyGridSize(columns, rows) {
+    const nextState = window.CampaignOS.setMapGrid(state, state.mapName, columns, rows);
+    const nextGrid = {
+      columns: nextState.maps?.[state.mapName]?.columns,
+      rows: nextState.maps?.[state.mapName]?.rows
+    };
+    const current = currentGrid();
+    if (nextGrid.columns === current.columns && nextGrid.rows === current.rows) return;
+    state = nextState;
+    saveEncounter();
+    render();
+  }
+
+  function endGridDrag() {
+    window.removeEventListener("pointermove", dragGrid);
+    window.removeEventListener("mousemove", dragGrid);
+    window.removeEventListener("touchmove", dragGrid);
+    document.body.classList.remove("grid-dragging");
+    if (gridDrag) {
+      suppressGridClick = gridDrag.moved;
+      commandResult.textContent = `${state.mapName} grid adjusted to ${currentGrid().columns} x ${currentGrid().rows}.`;
+    }
+    gridDrag = null;
   }
 
   function updateMapView() {
+    if (!state.mapName) return;
     updateState(window.CampaignOS.setMapView(state, state.mapName, {
       showGrid: showGrid.checked,
       gridOpacity: gridOpacity.value,
@@ -710,6 +902,7 @@
     const mapSettings = state.maps?.[state.mapName] || {};
     return {
       image: mapSettings.image || "",
+      aspectRatio: /^\d+(\.\d+)?\s*\/\s*\d+(\.\d+)?$/.test(mapSettings.aspectRatio || "") ? mapSettings.aspectRatio : "12 / 8",
       columns: clampUiNumber(mapSettings.columns, 12, 4, 80),
       rows: clampUiNumber(mapSettings.rows, 8, 4, 80),
       showGrid: mapSettings.showGrid !== false,

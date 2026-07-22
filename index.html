@@ -11,7 +11,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Campaign OS</p>
-          <h1>The Standing Ring</h1>
+          <h1>No map loaded</h1>
         </div>
         <div class="topbar-actions">
           <button id="saveEncounter" type="button">Save</button>
@@ -25,21 +25,10 @@
           <div class="map-toolbar">
             <label>
               Map
-              <select id="mapSelect">
-                <option>The Standing Ring</option>
-                <option>Bear Cave</option>
-                <option>Urskelde Road</option>
-              </select>
+              <select id="mapSelect"></select>
             </label>
             <div class="map-actions">
-              <label class="grid-size-input">
-                Cols
-                <input id="gridColumns" type="number" min="4" max="80" value="12">
-              </label>
-              <label class="grid-size-input">
-                Rows
-                <input id="gridRows" type="number" min="4" max="80" value="8">
-              </label>
+              <button id="adjustGrid" type="button">Adjust Grid</button>
               <label class="map-toggle">
                 <input id="showGrid" type="checkbox" checked>
                 Grid

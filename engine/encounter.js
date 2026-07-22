@@ -12,7 +12,7 @@
   ];
 
   const initialState = {
-    mapName: "The Standing Ring",
+    mapName: "",
     maps: {},
     fogEnabled: false,
     selectedTokenId: null,
@@ -222,12 +222,13 @@
     return nextState;
   }
 
-  function setMapImage(state, mapName, image) {
+  function setMapImage(state, mapName, image, details = {}) {
     const nextState = clone(state);
     nextState.maps = nextState.maps || {};
     nextState.maps[mapName] = {
       ...(nextState.maps[mapName] || {}),
-      image
+      image,
+      ...details
     };
     return nextState;
   }
