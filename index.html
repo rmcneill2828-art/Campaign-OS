@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Campaign OS</title>
+    <link rel="stylesheet" href="ui/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Campaign OS</p>
+          <h1>The Standing Ring</h1>
+        </div>
+        <div class="topbar-actions">
+          <button id="saveEncounter" type="button">Save</button>
+          <button id="loadEncounter" type="button">Load</button>
+          <button id="resetEncounter" type="button">Reset</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="map-panel" aria-label="Encounter map">
+          <div class="map-toolbar">
+            <label>
+              Map
+              <select id="mapSelect">
+                <option>The Standing Ring</option>
+                <option>Bear Cave</option>
+                <option>Urskelde Road</option>
+              </select>
+            </label>
+            <button id="toggleFog" type="button">Toggle Fog</button>
+          </div>
+          <div id="battleMap" class="battle-map" aria-live="polite"></div>
+        </section>
+
+        <aside class="side-panel">
+          <section class="panel-section">
+            <h2>Initiative</h2>
+            <ol id="initiativeList" class="initiative-list"></ol>
+          </section>
+
+          <section class="panel-section">
+            <h2>Token</h2>
+            <div id="tokenSheet" class="token-sheet empty">Select a token</div>
+          </section>
+
+          <section class="panel-section">
+            <h2>Claude DM</h2>
+            <form id="commandForm" class="command-form">
+              <input id="commandInput" type="text" value="Three goblins emerge from the trees." aria-label="DM command">
+              <button type="submit">Run</button>
+            </form>
+            <p id="commandResult" class="command-result">Ready.</p>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script src="engine/encounter.js"></script>
+    <script src="ui/app.js"></script>
+  </body>
+</html>
