@@ -23,6 +23,9 @@ Current features:
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes
+- Campaign search and category filtering
+- Template files hidden by default
+- Selected campaign item detail panel
 - Fog tiles
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`

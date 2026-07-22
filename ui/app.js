@@ -6,7 +6,11 @@
   const tokenSheet = document.querySelector("#tokenSheet");
   const combatLog = document.querySelector("#combatLog");
   const campaignImport = document.querySelector("#campaignImport");
+  const campaignSearch = document.querySelector("#campaignSearch");
+  const campaignFilter = document.querySelector("#campaignFilter");
+  const showTemplates = document.querySelector("#showTemplates");
   const campaignSummary = document.querySelector("#campaignSummary");
+  const campaignDetail = document.querySelector("#campaignDetail");
   const campaignBrowser = document.querySelector("#campaignBrowser");
   const commandForm = document.querySelector("#commandForm");
   const commandInput = document.querySelector("#commandInput");
@@ -15,6 +19,7 @@
 
   let state = window.CampaignOS.createState();
   let campaign = loadCampaign();
+  let selectedCampaignItemId = null;
 
   function selectedToken() {
     return state.tokens.find((token) => token.id === state.selectedTokenId);
@@ -231,12 +236,19 @@
 
   function renderCampaign() {
     const imported = campaign.files.length > 0;
+    const visibleFiles = filteredCampaignFiles();
+    const hiddenTemplates = showTemplates.checked ? 0 : campaign.files.filter((item) => item.isTemplate).length;
+    if (!visibleFiles.some((item) => item.id === selectedCampaignItemId)) {
+      selectedCampaignItemId = visibleFiles[0]?.id || null;
+    }
     campaignSummary.textContent = imported
-      ? `${campaign.name}: ${campaign.files.length} Markdown files imported.`
+      ? `${campaign.name}: ${visibleFiles.length} shown, ${campaign.files.length} imported${hiddenTemplates ? `, ${hiddenTemplates} templates hidden` : ""}.`
       : "No campaign imported.";
     campaignBrowser.innerHTML = "";
+    renderCampaignDetail();
 
-    Object.entries(campaign.categories).forEach(([category, items]) => {
+    categoryOrder().forEach((category) => {
+      const items = visibleFiles.filter((item) => item.category === category);
       const group = document.createElement("section");
       group.className = "campaign-group";
       const title = document.createElement("h3");
@@ -250,10 +262,10 @@
         group.appendChild(empty);
       }
 
-      items.slice(0, 8).forEach((item) => {
+      items.slice(0, 10).forEach((item) => {
         const button = document.createElement("button");
         button.type = "button";
-        button.className = "campaign-item";
+        button.className = item.id === selectedCampaignItemId ? "campaign-item active" : "campaign-item";
         button.innerHTML = `<strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.path)}</span><small>${escapeHtml(item.summary)}</small>`;
         button.addEventListener("click", () => openCampaignItem(item));
         group.appendChild(button);
@@ -261,6 +273,46 @@
 
       campaignBrowser.appendChild(group);
     });
+  }
+
+  function renderCampaignDetail() {
+    const item = campaign.files.find((candidate) => candidate.id === selectedCampaignItemId);
+    if (!item) {
+      campaignDetail.className = "campaign-detail empty";
+      campaignDetail.textContent = campaign.files.length ? "No item matches the current filters." : "Select a campaign item.";
+      return;
+    }
+
+    campaignDetail.className = "campaign-detail";
+    campaignDetail.innerHTML = `
+      <div class="detail-heading">
+        <div>
+          <p>${escapeHtml(categoryLabel(item.category))}${item.isTemplate ? " Template" : ""}</p>
+          <h3>${escapeHtml(item.title)}</h3>
+        </div>
+        <strong>${item.wordCount}</strong>
+      </div>
+      <span>${escapeHtml(item.path)}</span>
+      <p>${escapeHtml(item.summary)}</p>
+    `;
+  }
+
+  function filteredCampaignFiles() {
+    const query = campaignSearch.value.trim().toLowerCase();
+    const category = campaignFilter.value;
+    return campaign.files.filter((item) => {
+      if (!showTemplates.checked && item.isTemplate) return false;
+      if (category !== "all" && item.category !== category) return false;
+      if (!query) return true;
+      const haystack = `${item.title} ${item.path} ${item.summary} ${item.text}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }
+
+  function categoryOrder() {
+    const selected = campaignFilter.value;
+    if (selected !== "all") return [selected];
+    return ["characters", "locations", "sessions", "notes"];
   }
 
   function categoryLabel(category) {
@@ -273,6 +325,7 @@
   }
 
   function openCampaignItem(item) {
+    selectedCampaignItemId = item.id;
     commandResult.textContent = `${item.title}: ${item.summary}`;
     if (item.category === "locations") {
       state.mapName = item.title;
@@ -352,6 +405,7 @@
   campaignImport.addEventListener("change", async () => {
     campaignSummary.textContent = "Importing campaign...";
     campaign = await window.CampaignOSCampaign.importMarkdownFiles(campaignImport.files);
+    selectedCampaignItemId = filteredCampaignFiles()[0]?.id || campaign.files[0]?.id || null;
     saveCampaign();
     commandResult.textContent = `${campaign.name} imported.`;
     render();
@@ -359,9 +413,25 @@
 
   document.querySelector("#clearCampaign").addEventListener("click", () => {
     campaign = window.CampaignOSCampaign.createCampaign();
+    selectedCampaignItemId = null;
     localStorage.removeItem(campaignStorageKey);
     campaignImport.value = "";
     commandResult.textContent = "Campaign import cleared.";
+    render();
+  });
+
+  campaignSearch.addEventListener("input", () => {
+    selectedCampaignItemId = filteredCampaignFiles()[0]?.id || null;
+    render();
+  });
+
+  campaignFilter.addEventListener("change", () => {
+    selectedCampaignItemId = filteredCampaignFiles()[0]?.id || null;
+    render();
+  });
+
+  showTemplates.addEventListener("change", () => {
+    selectedCampaignItemId = filteredCampaignFiles()[0]?.id || null;
     render();
   });
 
@@ -383,10 +453,27 @@
     const saved = localStorage.getItem(campaignStorageKey);
     if (!saved) return window.CampaignOSCampaign.createCampaign();
     try {
-      return JSON.parse(saved);
+      return normalizeCampaign(JSON.parse(saved));
     } catch {
       return window.CampaignOSCampaign.createCampaign();
     }
+  }
+
+  function normalizeCampaign(savedCampaign) {
+    if (!savedCampaign?.files || !savedCampaign?.categories) {
+      return window.CampaignOSCampaign.createCampaign();
+    }
+
+    savedCampaign.files = savedCampaign.files.map((item) => ({
+      ...item,
+      isTemplate: Boolean(item.isTemplate || /(^|[\\/])template([\\/]|$)/i.test(item.path || ""))
+    }));
+
+    Object.keys(savedCampaign.categories).forEach((category) => {
+      savedCampaign.categories[category] = savedCampaign.files.filter((item) => item.category === category);
+    });
+
+    return savedCampaign;
   }
 
   render();

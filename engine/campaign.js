@@ -52,6 +52,7 @@
       title,
       path,
       category,
+      isTemplate: /(^|[\\/])template([\\/]|$)/i.test(path),
       summary: summarize(text),
       wordCount: text.trim() ? text.trim().split(/\s+/).length : 0,
       text
