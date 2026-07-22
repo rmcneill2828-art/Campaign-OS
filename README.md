@@ -21,6 +21,8 @@ Current features:
 - Remove defeated or accidental tokens
 - Dice-backed attacks
 - Combat log
+- Campaign Markdown import
+- Campaign browser for characters, locations, sessions, and notes
 - Fog tiles
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`
@@ -50,3 +52,10 @@ Campaign OS
 - Week 2: richer token sheet with damage, healing, and condition controls
 - Week 3: dice-backed attacks and automatic damage
 - Week 4: campaign import from the existing D&D repository
+
+Week 4 import flow:
+
+1. Open `index.html`.
+2. Use the Campaign file picker to choose a campaign folder.
+3. Campaign OS imports Markdown files into a local browser-side index.
+4. Click a location to make it the active map context.

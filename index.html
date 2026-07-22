@@ -38,6 +38,16 @@
 
         <aside class="side-panel">
           <section class="panel-section">
+            <h2>Campaign</h2>
+            <div class="import-row">
+              <input id="campaignImport" type="file" accept=".md,text/markdown" webkitdirectory multiple aria-label="Import campaign folder">
+              <button id="clearCampaign" type="button">Clear</button>
+            </div>
+            <div id="campaignSummary" class="campaign-summary">No campaign imported.</div>
+            <div id="campaignBrowser" class="campaign-browser"></div>
+          </section>
+
+          <section class="panel-section">
             <h2>Initiative</h2>
             <ol id="initiativeList" class="initiative-list"></ol>
           </section>
@@ -65,6 +75,7 @@
     </div>
 
     <script src="engine/encounter.js"></script>
+    <script src="engine/campaign.js"></script>
     <script src="ui/app.js"></script>
   </body>
 </html>

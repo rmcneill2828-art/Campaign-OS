@@ -1,15 +1,20 @@
 (function () {
   const storageKey = "campaign-os-week-three";
+  const campaignStorageKey = "campaign-os-campaign-import";
   const map = document.querySelector("#battleMap");
   const initiativeList = document.querySelector("#initiativeList");
   const tokenSheet = document.querySelector("#tokenSheet");
   const combatLog = document.querySelector("#combatLog");
+  const campaignImport = document.querySelector("#campaignImport");
+  const campaignSummary = document.querySelector("#campaignSummary");
+  const campaignBrowser = document.querySelector("#campaignBrowser");
   const commandForm = document.querySelector("#commandForm");
   const commandInput = document.querySelector("#commandInput");
   const commandResult = document.querySelector("#commandResult");
   const mapSelect = document.querySelector("#mapSelect");
 
   let state = window.CampaignOS.createState();
+  let campaign = loadCampaign();
 
   function selectedToken() {
     return state.tokens.find((token) => token.id === state.selectedTokenId);
@@ -18,11 +23,13 @@
   function render() {
     document.body.dataset.fog = state.fogEnabled ? "on" : "off";
     document.querySelector("h1").textContent = state.mapName;
+    ensureMapOption(state.mapName);
     mapSelect.value = state.mapName;
     renderMap();
     renderInitiative();
     renderTokenSheet();
     renderCombatLog();
+    renderCampaign();
   }
 
   function renderMap() {
@@ -222,6 +229,66 @@
     });
   }
 
+  function renderCampaign() {
+    const imported = campaign.files.length > 0;
+    campaignSummary.textContent = imported
+      ? `${campaign.name}: ${campaign.files.length} Markdown files imported.`
+      : "No campaign imported.";
+    campaignBrowser.innerHTML = "";
+
+    Object.entries(campaign.categories).forEach(([category, items]) => {
+      const group = document.createElement("section");
+      group.className = "campaign-group";
+      const title = document.createElement("h3");
+      title.textContent = `${categoryLabel(category)} (${items.length})`;
+      group.appendChild(title);
+
+      if (!items.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty-campaign";
+        empty.textContent = "Nothing found.";
+        group.appendChild(empty);
+      }
+
+      items.slice(0, 8).forEach((item) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "campaign-item";
+        button.innerHTML = `<strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.path)}</span><small>${escapeHtml(item.summary)}</small>`;
+        button.addEventListener("click", () => openCampaignItem(item));
+        group.appendChild(button);
+      });
+
+      campaignBrowser.appendChild(group);
+    });
+  }
+
+  function categoryLabel(category) {
+    return {
+      characters: "Characters",
+      locations: "Locations",
+      sessions: "Sessions",
+      notes: "Notes"
+    }[category] || category;
+  }
+
+  function openCampaignItem(item) {
+    commandResult.textContent = `${item.title}: ${item.summary}`;
+    if (item.category === "locations") {
+      state.mapName = item.title;
+      render();
+    }
+  }
+
+  function ensureMapOption(mapName) {
+    const exists = Array.from(mapSelect.options).some((option) => option.value === mapName);
+    if (exists) return;
+    const option = document.createElement("option");
+    option.value = mapName;
+    option.textContent = mapName;
+    mapSelect.appendChild(option);
+  }
+
   function escapeHtml(value) {
     return String(value)
       .replaceAll("&", "&amp;")
@@ -282,6 +349,22 @@
     render();
   });
 
+  campaignImport.addEventListener("change", async () => {
+    campaignSummary.textContent = "Importing campaign...";
+    campaign = await window.CampaignOSCampaign.importMarkdownFiles(campaignImport.files);
+    saveCampaign();
+    commandResult.textContent = `${campaign.name} imported.`;
+    render();
+  });
+
+  document.querySelector("#clearCampaign").addEventListener("click", () => {
+    campaign = window.CampaignOSCampaign.createCampaign();
+    localStorage.removeItem(campaignStorageKey);
+    campaignImport.value = "";
+    commandResult.textContent = "Campaign import cleared.";
+    render();
+  });
+
   document.querySelector("#toggleFog").addEventListener("click", () => {
     state.fogEnabled = !state.fogEnabled;
     render();
@@ -291,6 +374,20 @@
     state.mapName = mapSelect.value;
     document.querySelector("h1").textContent = state.mapName;
   });
+
+  function saveCampaign() {
+    localStorage.setItem(campaignStorageKey, JSON.stringify(campaign));
+  }
+
+  function loadCampaign() {
+    const saved = localStorage.getItem(campaignStorageKey);
+    if (!saved) return window.CampaignOSCampaign.createCampaign();
+    try {
+      return JSON.parse(saved);
+    } catch {
+      return window.CampaignOSCampaign.createCampaign();
+    }
+  }
 
   render();
 })();
