@@ -53,8 +53,7 @@
         tile.dataset.x = x;
         tile.dataset.y = y;
         tile.ariaLabel = `Tile ${x}, ${y}`;
-        tile.addEventListener("dragover", (event) => event.preventDefault());
-        tile.addEventListener("drop", handleDrop);
+        tile.addEventListener("click", () => moveSelectedToken(x, y));
         map.appendChild(tile);
       }
     }
@@ -63,7 +62,7 @@
       const tokenButton = document.createElement("button");
       tokenButton.className = `token ${token.type}`;
       tokenButton.type = "button";
-      tokenButton.draggable = true;
+      tokenButton.draggable = false;
       tokenButton.dataset.id = token.id;
       tokenButton.style.gridColumn = token.x;
       tokenButton.style.gridRow = token.y;
@@ -76,8 +75,10 @@
       tokenButton.title = token.name;
       tokenButton.setAttribute("aria-label", token.name);
       if (token.id === state.selectedTokenId) tokenButton.classList.add("selected");
-      tokenButton.addEventListener("click", () => selectToken(token.id));
-      tokenButton.addEventListener("dragstart", (event) => event.dataTransfer.setData("text/plain", token.id));
+      tokenButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectToken(token.id);
+      });
       map.appendChild(tokenButton);
     });
   }
@@ -494,11 +495,20 @@
     render();
   }
 
-  function handleDrop(event) {
-    const tokenId = event.dataTransfer.getData("text/plain");
-    const x = Number(event.currentTarget.dataset.x);
-    const y = Number(event.currentTarget.dataset.y);
-    updateState(window.CampaignOS.setTokenPosition(state, tokenId, x, y));
+  function moveSelectedToken(x, y) {
+    const token = selectedToken();
+    if (!token) {
+      commandResult.textContent = "Select a token first, then click a destination square.";
+      return;
+    }
+
+    const nextState = window.CampaignOS.setTokenPosition(state, token.id, x, y);
+    if (nextState === state) {
+      commandResult.textContent = "That square is occupied.";
+      return;
+    }
+
+    updateState(nextState);
   }
 
   commandForm.addEventListener("submit", (event) => {
