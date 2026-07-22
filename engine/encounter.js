@@ -13,6 +13,7 @@
 
   const initialState = {
     mapName: "The Standing Ring",
+    maps: {},
     fogEnabled: false,
     selectedTokenId: null,
     log: [],
@@ -31,8 +32,12 @@
     return [...tokens].sort((a, b) => b.initiative - a.initiative || a.name.localeCompare(b.name));
   }
 
+  function tokensOnCurrentMap(state) {
+    return state.tokens.filter((token) => token.mapName === state.mapName);
+  }
+
   function occupied(state, x, y) {
-    return state.tokens.some((token) => token.x === x && token.y === y);
+    return tokensOnCurrentMap(state).some((token) => token.x === x && token.y === y);
   }
 
   function findOpenTile(state, startX, startY) {
@@ -45,7 +50,8 @@
       if (seen.has(key)) continue;
       seen.add(key);
 
-      if (current.x >= 1 && current.x <= 12 && current.y >= 1 && current.y <= 8 && !occupied(state, current.x, current.y)) {
+      const grid = currentGrid(state);
+      if (current.x >= 1 && current.x <= grid.columns && current.y >= 1 && current.y <= grid.rows && !occupied(state, current.x, current.y)) {
         return current;
       }
 
@@ -81,6 +87,7 @@
         name: `${baseName} ${number}`,
         icon: baseName.slice(0, 2).toUpperCase(),
         type: "monster",
+        mapName: nextState.mapName,
         x: tile.x,
         y: tile.y,
         hp: monsterName.toLowerCase() === "goblin" ? 7 : 10,
@@ -107,6 +114,7 @@
       name: draft.name || "Campaign Token",
       icon: draft.icon || String(draft.name || "CT").slice(0, 2).toUpperCase(),
       type: draft.type || "hero",
+      mapName: nextState.mapName,
       x: tile.x,
       y: tile.y,
       hp: clampNumber(draft.hp ?? draft.maxHp ?? 10, 0, 999),
@@ -214,6 +222,56 @@
     return nextState;
   }
 
+  function setMapImage(state, mapName, image) {
+    const nextState = clone(state);
+    nextState.maps = nextState.maps || {};
+    nextState.maps[mapName] = {
+      ...(nextState.maps[mapName] || {}),
+      image
+    };
+    return nextState;
+  }
+
+  function setMapGrid(state, mapName, columns, rows) {
+    const nextState = clone(state);
+    nextState.maps = nextState.maps || {};
+    nextState.maps[mapName] = {
+      ...(nextState.maps[mapName] || {}),
+      columns: clampNumber(columns, 4, 80),
+      rows: clampNumber(rows, 4, 80)
+    };
+    nextState.tokens = nextState.tokens.map((token) => token.mapName === mapName
+      ? {
+          ...token,
+          x: clampNumber(token.x, 1, nextState.maps[mapName].columns),
+          y: clampNumber(token.y, 1, nextState.maps[mapName].rows)
+        }
+      : token);
+    return nextState;
+  }
+
+  function setMapView(state, mapName, settings) {
+    const nextState = clone(state);
+    const current = nextState.maps?.[mapName] || {};
+    nextState.maps = nextState.maps || {};
+    nextState.maps[mapName] = {
+      ...current,
+      showGrid: settings.showGrid !== false,
+      gridOpacity: clampNumber(settings.gridOpacity ?? current.gridOpacity ?? 35, 0, 100),
+      fitMode: settings.fitMode === "contain" ? "contain" : "cover",
+      tokenSize: clampNumber(settings.tokenSize ?? current.tokenSize ?? 78, 40, 100)
+    };
+    return nextState;
+  }
+
+  function currentGrid(state) {
+    const mapSettings = state.maps?.[state.mapName] || {};
+    return {
+      columns: clampNumber(mapSettings.columns || 12, 4, 80),
+      rows: clampNumber(mapSettings.rows || 8, 4, 80)
+    };
+  }
+
   function addLogEntry(state, text) {
     const nextState = clone(state);
     nextState.log = [text, ...(nextState.log || [])].slice(0, 12);
@@ -222,8 +280,9 @@
 
   function attack(state, attackerId, targetId) {
     let nextState = clone(state);
-    const attacker = nextState.tokens.find((token) => token.id === attackerId);
-    const target = nextState.tokens.find((token) => token.id === targetId);
+    const activeTokens = tokensOnCurrentMap(nextState);
+    const attacker = activeTokens.find((token) => token.id === attackerId);
+    const target = activeTokens.find((token) => token.id === targetId);
     if (!attacker || !target) {
       return { state, message: "Attack failed: attacker or target was not found." };
     }
@@ -250,26 +309,27 @@
 
   function findTokenByName(state, name) {
     const normalized = name.trim().toLowerCase();
-    return state.tokens.find((token) => token.name.toLowerCase() === normalized);
+    return tokensOnCurrentMap(state).find((token) => token.name.toLowerCase() === normalized);
   }
 
   function removeToken(state, tokenId) {
     const nextState = clone(state);
     nextState.tokens = nextState.tokens.filter((token) => token.id !== tokenId);
     if (nextState.selectedTokenId === tokenId) {
-      nextState.selectedTokenId = sortByInitiative(nextState.tokens)[0]?.id || null;
+      nextState.selectedTokenId = sortByInitiative(tokensOnCurrentMap(nextState))[0]?.id || null;
     }
     return nextState;
   }
 
   function setTokenPosition(state, tokenId, x, y) {
-    if (occupied(state, x, y) && !state.tokens.some((token) => token.id === tokenId && token.x === x && token.y === y)) {
+    if (occupied(state, x, y) && !tokensOnCurrentMap(state).some((token) => token.id === tokenId && token.x === x && token.y === y)) {
       return state;
     }
 
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
     if (token) {
+      token.mapName = nextState.mapName;
       token.x = x;
       token.y = y;
     }
@@ -330,8 +390,12 @@
     createState,
     parseCommand,
     removeToken,
+    setMapGrid,
+    setMapImage,
+    setMapView,
     setTokenPosition,
     sortByInitiative,
+    tokensOnCurrentMap,
     toggleCondition,
     updateToken
   };

@@ -31,6 +31,10 @@ Current features:
 - Open imported locations as the active map context
 - Use sessions and notes as quick DM context
 - Add persistent image portraits to tokens
+- Import persistent map images behind the encounter grid
+- Tune map grid columns and rows per imported map
+- Calibrate each map with grid visibility, grid opacity, image fit, and token size
+- Keep token placement scoped to the active map
 - Automatic encounter persistence across reloads
 - Remembered campaign search, filters, and selection
 - Fog tiles

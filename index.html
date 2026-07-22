@@ -31,7 +31,41 @@
                 <option>Urskelde Road</option>
               </select>
             </label>
-            <button id="toggleFog" type="button">Toggle Fog</button>
+            <div class="map-actions">
+              <label class="grid-size-input">
+                Cols
+                <input id="gridColumns" type="number" min="4" max="80" value="12">
+              </label>
+              <label class="grid-size-input">
+                Rows
+                <input id="gridRows" type="number" min="4" max="80" value="8">
+              </label>
+              <label class="map-toggle">
+                <input id="showGrid" type="checkbox" checked>
+                Grid
+              </label>
+              <label class="range-input">
+                Opacity
+                <input id="gridOpacity" type="range" min="0" max="100" value="35">
+              </label>
+              <label class="fit-input">
+                Fit
+                <select id="mapFitMode">
+                  <option value="cover">Cover</option>
+                  <option value="contain">Contain</option>
+                </select>
+              </label>
+              <label class="range-input">
+                Token
+                <input id="tokenSize" type="range" min="40" max="100" value="78">
+              </label>
+              <label class="map-image-picker">
+                Map Image
+                <input id="mapImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+              </label>
+              <button id="clearMapImage" type="button">Clear Map</button>
+              <button id="toggleFog" type="button">Toggle Fog</button>
+            </div>
           </div>
           <div id="battleMap" class="battle-map" aria-live="polite"></div>
         </section>

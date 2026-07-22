@@ -17,6 +17,14 @@
   const commandInput = document.querySelector("#commandInput");
   const commandResult = document.querySelector("#commandResult");
   const mapSelect = document.querySelector("#mapSelect");
+  const mapImageInput = document.querySelector("#mapImageInput");
+  const gridColumns = document.querySelector("#gridColumns");
+  const gridRows = document.querySelector("#gridRows");
+  const showGrid = document.querySelector("#showGrid");
+  const gridOpacity = document.querySelector("#gridOpacity");
+  const mapFitMode = document.querySelector("#mapFitMode");
+  const tokenSize = document.querySelector("#tokenSize");
+  const toggleFog = document.querySelector("#toggleFog");
 
   let preferences = loadPreferences();
   let state = loadEncounter();
@@ -27,12 +35,20 @@
   showTemplates.checked = Boolean(preferences.showTemplates);
 
   function selectedToken() {
-    return state.tokens.find((token) => token.id === state.selectedTokenId);
+    return activeTokens().find((token) => token.id === state.selectedTokenId);
+  }
+
+  function activeTokens() {
+    return window.CampaignOS.tokensOnCurrentMap(state);
   }
 
   function render() {
     document.body.dataset.fog = state.fogEnabled ? "on" : "off";
+    toggleFog.textContent = state.fogEnabled ? "Fog On" : "Fog Off";
+    toggleFog.classList.toggle("active-toggle", state.fogEnabled);
     document.querySelector("h1").textContent = state.mapName;
+    renderMapBackground();
+    renderMapControls();
     ensureMapOption(state.mapName);
     mapSelect.value = state.mapName;
     renderMap();
@@ -45,9 +61,16 @@
   function renderMap() {
     map.innerHTML = "";
     map.onclick = handleMapClick;
+    const settings = currentMapSettings();
+    const grid = { columns: settings.columns, rows: settings.rows };
+    map.style.setProperty("--grid-columns", grid.columns);
+    map.style.setProperty("--grid-rows", grid.rows);
+    map.style.setProperty("--grid-opacity", settings.gridOpacity / 100);
+    map.style.setProperty("--token-size", `${settings.tokenSize}%`);
+    map.classList.toggle("grid-hidden", !settings.showGrid);
 
-    for (let y = 1; y <= 8; y += 1) {
-      for (let x = 1; x <= 12; x += 1) {
+    for (let y = 1; y <= grid.rows; y += 1) {
+      for (let x = 1; x <= grid.columns; x += 1) {
         const tile = document.createElement("button");
         tile.className = "map-tile";
         tile.type = "button";
@@ -58,7 +81,7 @@
       }
     }
 
-    state.tokens.forEach((token) => {
+    activeTokens().forEach((token) => {
       const tokenButton = document.createElement("button");
       tokenButton.className = `token ${token.type}`;
       tokenButton.type = "button";
@@ -83,9 +106,33 @@
     });
   }
 
+  function renderMapBackground() {
+    const settings = currentMapSettings();
+    const image = settings.image || "";
+    map.style.backgroundSize = settings.fitMode;
+    map.style.backgroundRepeat = "no-repeat";
+    if (image) {
+      map.style.backgroundImage = `url("${image}")`;
+      map.classList.add("has-map-image");
+    } else {
+      map.style.backgroundImage = "";
+      map.classList.remove("has-map-image");
+    }
+  }
+
+  function renderMapControls() {
+    const settings = currentMapSettings();
+    gridColumns.value = settings.columns;
+    gridRows.value = settings.rows;
+    showGrid.checked = settings.showGrid;
+    gridOpacity.value = settings.gridOpacity;
+    mapFitMode.value = settings.fitMode;
+    tokenSize.value = settings.tokenSize;
+  }
+
   function renderInitiative() {
     initiativeList.innerHTML = "";
-    window.CampaignOS.sortByInitiative(state.tokens).forEach((token) => {
+    window.CampaignOS.sortByInitiative(activeTokens()).forEach((token) => {
       const item = document.createElement("li");
       item.className = token.id === state.selectedTokenId ? "active" : "";
       item.innerHTML = `<button type="button" data-id="${token.id}"><span>${token.name}</span><strong>${token.initiative}</strong></button>`;
@@ -213,7 +260,7 @@
 
     const attackControl = tokenSheet.querySelector(".attack-control");
     const targetSelect = attackControl.querySelector("select");
-    state.tokens
+    activeTokens()
       .filter((candidate) => candidate.id !== token.id)
       .forEach((candidate) => {
         const option = document.createElement("option");
@@ -378,7 +425,7 @@
       mapButton.type = "button";
       mapButton.textContent = "Open Map";
       mapButton.addEventListener("click", () => {
-        state.mapName = item.title;
+        setActiveMap(item.title);
         saveEncounter();
         commandResult.textContent = `${item.title} is now the active map context.`;
         render();
@@ -427,7 +474,7 @@
     savePreferences();
     commandResult.textContent = `${item.title}: ${item.summary}`;
     if (item.category === "locations") {
-      state.mapName = item.title;
+      setActiveMap(item.title);
       saveEncounter();
       render();
     }
@@ -514,8 +561,9 @@
   function handleMapClick(event) {
     if (event.target.closest(".token")) return;
     const rect = map.getBoundingClientRect();
-    const x = Math.min(12, Math.max(1, Math.floor(((event.clientX - rect.left) / rect.width) * 12) + 1));
-    const y = Math.min(8, Math.max(1, Math.floor(((event.clientY - rect.top) / rect.height) * 8) + 1));
+    const grid = currentGrid();
+    const x = Math.min(grid.columns, Math.max(1, Math.floor(((event.clientX - rect.left) / rect.width) * grid.columns) + 1));
+    const y = Math.min(grid.rows, Math.max(1, Math.floor(((event.clientY - rect.top) / rect.height) * grid.rows) + 1));
     moveSelectedToken(x, y);
   }
 
@@ -590,20 +638,91 @@
     render();
   });
 
-  document.querySelector("#toggleFog").addEventListener("click", () => {
+  toggleFog.addEventListener("click", () => {
     state.fogEnabled = !state.fogEnabled;
     saveEncounter();
     render();
   });
 
+  mapImageInput.addEventListener("change", async () => {
+    const file = mapImageInput.files[0];
+    if (!file) return;
+    const mapName = state.mapName;
+    const image = await readFileAsDataUrl(file);
+    updateState(window.CampaignOS.setMapImage(state, mapName, image));
+    commandResult.textContent = `${mapName} map image imported.`;
+  });
+
+  document.querySelector("#clearMapImage").addEventListener("click", () => {
+    const mapName = state.mapName;
+    updateState(window.CampaignOS.setMapImage(state, mapName, ""));
+    mapImageInput.value = "";
+    commandResult.textContent = `${mapName} map image cleared.`;
+  });
+
+  gridColumns.addEventListener("change", updateGridSize);
+  gridRows.addEventListener("change", updateGridSize);
+  showGrid.addEventListener("change", updateMapView);
+  gridOpacity.addEventListener("input", updateMapView);
+  mapFitMode.addEventListener("change", updateMapView);
+  tokenSize.addEventListener("input", updateMapView);
+
   mapSelect.addEventListener("change", () => {
-    state.mapName = mapSelect.value;
+    setActiveMap(mapSelect.value);
     saveEncounter();
-    document.querySelector("h1").textContent = state.mapName;
+    render();
   });
 
   function saveEncounter() {
     localStorage.setItem(storageKey, JSON.stringify(state));
+  }
+
+  function setActiveMap(mapName) {
+    state.mapName = mapName;
+    if (!activeTokens().some((token) => token.id === state.selectedTokenId)) {
+      state.selectedTokenId = activeTokens()[0]?.id || null;
+    }
+  }
+
+  function updateGridSize() {
+    updateState(window.CampaignOS.setMapGrid(state, state.mapName, gridColumns.value, gridRows.value));
+    commandResult.textContent = `${state.mapName} grid updated.`;
+  }
+
+  function updateMapView() {
+    updateState(window.CampaignOS.setMapView(state, state.mapName, {
+      showGrid: showGrid.checked,
+      gridOpacity: gridOpacity.value,
+      fitMode: mapFitMode.value,
+      tokenSize: tokenSize.value
+    }));
+  }
+
+  function currentGrid() {
+    const mapSettings = currentMapSettings();
+    return {
+      columns: mapSettings.columns,
+      rows: mapSettings.rows
+    };
+  }
+
+  function currentMapSettings() {
+    const mapSettings = state.maps?.[state.mapName] || {};
+    return {
+      image: mapSettings.image || "",
+      columns: clampUiNumber(mapSettings.columns, 12, 4, 80),
+      rows: clampUiNumber(mapSettings.rows, 8, 4, 80),
+      showGrid: mapSettings.showGrid !== false,
+      gridOpacity: clampUiNumber(mapSettings.gridOpacity, 35, 0, 100),
+      fitMode: mapSettings.fitMode === "contain" ? "contain" : "cover",
+      tokenSize: clampUiNumber(mapSettings.tokenSize, 78, 40, 100)
+    };
+  }
+
+  function clampUiNumber(value, fallback, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.min(max, Math.max(min, Math.round(number)));
   }
 
   function loadEncounter() {
@@ -618,15 +737,23 @@
 
   function normalizeEncounter(savedState) {
     const fallback = window.CampaignOS.createState();
-    const tokens = Array.isArray(savedState?.tokens) ? removeLegacyDefaultTokens(savedState.tokens) : fallback.tokens;
-    const selectedTokenId = tokens.some((token) => token.id === savedState?.selectedTokenId)
+    const mapName = savedState?.mapName || fallback.mapName;
+    const tokens = Array.isArray(savedState?.tokens)
+      ? removeLegacyDefaultTokens(savedState.tokens).map((token) => ({
+          ...token,
+          mapName: token.mapName || mapName
+        }))
+      : fallback.tokens;
+    const selectedTokenId = tokens.some((token) => token.id === savedState?.selectedTokenId && token.mapName === mapName)
       ? savedState.selectedTokenId
-      : tokens[0]?.id || null;
+      : tokens.find((token) => token.mapName === mapName)?.id || null;
     return {
       ...fallback,
       ...savedState,
+      mapName,
       selectedTokenId,
       tokens,
+      maps: savedState?.maps || {},
       log: Array.isArray(savedState?.log) ? savedState.log : []
     };
   }
