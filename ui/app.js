@@ -44,6 +44,7 @@
 
   function renderMap() {
     map.innerHTML = "";
+    map.onclick = handleMapClick;
 
     for (let y = 1; y <= 8; y += 1) {
       for (let x = 1; x <= 12; x += 1) {
@@ -53,7 +54,6 @@
         tile.dataset.x = x;
         tile.dataset.y = y;
         tile.ariaLabel = `Tile ${x}, ${y}`;
-        tile.addEventListener("click", () => moveSelectedToken(x, y));
         map.appendChild(tile);
       }
     }
@@ -64,8 +64,8 @@
       tokenButton.type = "button";
       tokenButton.draggable = false;
       tokenButton.dataset.id = token.id;
-      tokenButton.style.gridColumn = token.x;
-      tokenButton.style.gridRow = token.y;
+      tokenButton.style.gridColumn = `${token.x} / span 1`;
+      tokenButton.style.gridRow = `${token.y} / span 1`;
       if (token.image) {
         tokenButton.style.backgroundImage = `url("${token.image}")`;
         tokenButton.classList.add("has-image");
@@ -509,6 +509,14 @@
     }
 
     updateState(nextState);
+  }
+
+  function handleMapClick(event) {
+    if (event.target.closest(".token")) return;
+    const rect = map.getBoundingClientRect();
+    const x = Math.min(12, Math.max(1, Math.floor(((event.clientX - rect.left) / rect.width) * 12) + 1));
+    const y = Math.min(8, Math.max(1, Math.floor(((event.clientY - rect.top) / rect.height) * 8) + 1));
+    moveSelectedToken(x, y);
   }
 
   commandForm.addEventListener("submit", (event) => {
