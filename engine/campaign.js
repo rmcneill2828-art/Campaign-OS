@@ -46,12 +46,14 @@
     const path = file.webkitRelativePath || file.name;
     const title = extractTitle(text) || titleFromFileName(file.name);
     const category = classify(path, text);
+    const isCharacterToken = canSpawnCharacterToken(path, category);
 
     return {
       id: `${path}-${file.lastModified}`,
       title,
       path,
       category,
+      canSpawnToken: isCharacterToken,
       isTemplate: /(^|[\\/])template([\\/]|$)/i.test(path),
       summary: summarize(text),
       wordCount: text.trim() ? text.trim().split(/\s+/).length : 0,
@@ -73,9 +75,27 @@
   }
 
   function classify(path, text) {
+    if (isWorldState(path)) return "locations";
+    if (isCampaignIndex(path)) return "notes";
+    if (/(^|[\\/])characters?[\\/]/i.test(path) || /(^|[\\/])npcs?[\\/]/i.test(path)) return "characters";
+    if (/(^|[\\/])locations?[\\/]/i.test(path) || /(^|[\\/])maps?[\\/]/i.test(path)) return "locations";
+    if (/(^|[\\/])sessions?[\\/]/i.test(path)) return "sessions";
+
     const haystack = `${path}\n${text.slice(0, 800)}`;
     const match = categoryRules.find((rule) => rule.patterns.some((pattern) => pattern.test(haystack)));
     return match?.id || "notes";
+  }
+
+  function isCampaignIndex(path) {
+    return /(^|[\\/])(active|overview|campaign)\.md$/i.test(path);
+  }
+
+  function isWorldState(path) {
+    return /(^|[\\/])world-state\.md$/i.test(path);
+  }
+
+  function canSpawnCharacterToken(path, category) {
+    return category === "characters" && !isCampaignIndex(path) && /(^|[\\/])(characters?|npcs?)[\\/]/i.test(path);
   }
 
   function summarize(text) {
@@ -124,6 +144,8 @@
     categoryRules,
     createCampaign,
     importMarkdownFiles,
+    classify,
+    canSpawnCharacterToken,
     tokenDraftFromItem
   };
 })();

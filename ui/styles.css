@@ -420,13 +420,40 @@ body[data-fog="on"] .map-tile:nth-child(3n) {
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: 8px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: #171b15;
   text-align: left;
 }
 
 .campaign-item.active {
   border-color: var(--accent);
   background: var(--panel-strong);
+}
+
+.campaign-item-main {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.campaign-item-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 8px;
+  flex-wrap: wrap;
+}
+
+.campaign-item-actions button {
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 0.78rem;
 }
 
 .campaign-item span,

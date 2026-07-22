@@ -264,12 +264,34 @@
       }
 
       items.slice(0, 10).forEach((item) => {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = item.id === selectedCampaignItemId ? "campaign-item active" : "campaign-item";
-        button.innerHTML = `<strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.path)}</span><small>${escapeHtml(item.summary)}</small>`;
-        button.addEventListener("click", () => openCampaignItem(item));
-        group.appendChild(button);
+        const card = document.createElement("div");
+        card.className = item.id === selectedCampaignItemId ? "campaign-item active" : "campaign-item";
+
+        const selectButton = document.createElement("button");
+        selectButton.type = "button";
+        selectButton.className = "campaign-item-main";
+        selectButton.innerHTML = `<strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.path)}</span><small>${escapeHtml(item.summary)}</small>`;
+        selectButton.addEventListener("click", () => openCampaignItem(item));
+        card.appendChild(selectButton);
+
+        const actions = document.createElement("div");
+        actions.className = "campaign-item-actions";
+        if (item.canSpawnToken) {
+          const addButton = document.createElement("button");
+          addButton.type = "button";
+          addButton.textContent = "Add Token";
+          addButton.addEventListener("click", () => addCampaignToken(item));
+          actions.appendChild(addButton);
+        }
+        if (item.category === "locations") {
+          const mapButton = document.createElement("button");
+          mapButton.type = "button";
+          mapButton.textContent = "Open Map";
+          mapButton.addEventListener("click", () => openCampaignItem(item));
+          actions.appendChild(mapButton);
+        }
+        if (actions.children.length) card.appendChild(actions);
+        group.appendChild(card);
       });
 
       campaignBrowser.appendChild(group);
@@ -299,7 +321,7 @@
     `;
 
     const actions = campaignDetail.querySelector(".detail-actions");
-    if (item.category === "characters") {
+    if (item.canSpawnToken) {
       const spawnButton = document.createElement("button");
       spawnButton.type = "button";
       spawnButton.textContent = "Add Token";
@@ -510,7 +532,13 @@
 
     savedCampaign.files = savedCampaign.files.map((item) => ({
       ...item,
+      category: window.CampaignOSCampaign.classify(item.path || "", item.text || ""),
       isTemplate: Boolean(item.isTemplate || /(^|[\\/])template([\\/]|$)/i.test(item.path || ""))
+    }));
+
+    savedCampaign.files = savedCampaign.files.map((item) => ({
+      ...item,
+      canSpawnToken: window.CampaignOSCampaign.canSpawnCharacterToken(item.path || "", item.category)
     }));
 
     Object.keys(savedCampaign.categories).forEach((category) => {
