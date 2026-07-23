@@ -688,10 +688,11 @@
     imageInput.addEventListener("change", async () => {
       const file = imageInput.files[0];
       if (!file) return;
-      const dataUrl = await readFileAsDataUrl(file);
+      const raw = await readFileAsDataUrl(file);
+      const resized = await resizeImageDataUrl(raw, 512, "image/png");
       const previousKey = token.image;
       const key = window.CampaignOSImageStore.generateKey("token");
-      await window.CampaignOSImageStore.saveImage(key, dataUrl);
+      await window.CampaignOSImageStore.saveImage(key, resized.dataUrl);
       if (previousKey && !previousKey.startsWith("data:")) {
         window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
       }
@@ -1124,16 +1125,41 @@
     });
   }
 
-  function readImageDetails(dataUrl) {
+  // Downscales an image data URL if it exceeds maxDimension on its longest side, and always
+  // returns the resulting natural width/height. An already-small image is returned
+  // untouched (no lossy re-encode for no reason). Converting a big batch of full-resolution
+  // source images (a commercial battle map pack, a bulk token import) to base64 and decoding
+  // each one with no size cap is what crashes the tab with "Out of Memory" -- capping
+  // dimensions here bounds both the import itself and long-term IndexedDB storage.
+  function resizeImageDataUrl(dataUrl, maxDimension, mimeType, quality) {
     return new Promise((resolve) => {
       const image = new Image();
-      image.addEventListener("load", () => resolve({
-        width: image.naturalWidth || 12,
-        height: image.naturalHeight || 8
-      }));
-      image.addEventListener("error", () => resolve({ width: 12, height: 8 }));
+      image.addEventListener("load", () => {
+        const width = image.naturalWidth || 1;
+        const height = image.naturalHeight || 1;
+        const scale = maxDimension / Math.max(width, height);
+        if (scale >= 1) {
+          resolve({ dataUrl, width, height });
+          return;
+        }
+        const targetWidth = Math.max(1, Math.round(width * scale));
+        const targetHeight = Math.max(1, Math.round(height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        canvas.getContext("2d").drawImage(image, 0, 0, targetWidth, targetHeight);
+        resolve({ dataUrl: canvas.toDataURL(mimeType, quality), width: targetWidth, height: targetHeight });
+      });
+      image.addEventListener("error", () => resolve({ dataUrl, width: 12, height: 8 }));
       image.src = dataUrl;
     });
+  }
+
+  // Blocks the browser's native file-selection UI, so it's fine to call before doing any
+  // work -- if the DM cancels, nothing has been read into memory yet.
+  function confirmLargeBatch(count, label) {
+    if (count <= 50) return true;
+    return window.confirm(`You selected ${count} ${label}. Adding that many at once can take a while and use significant storage -- continue?`);
   }
 
   function mapNameFromFile(fileName) {
@@ -1204,16 +1230,25 @@
     event.preventDefault();
     const files = Array.from(libraryImageInput.files);
     if (!files.length) return;
+    if (!confirmLargeBatch(files.length, "token images")) return;
 
     const typedName = libraryName.value.trim();
     // A typed name only makes sense for a single file -- with several files selected
     // at once, each one gets its own name derived from its filename instead.
     const useTypedName = files.length === 1 && typedName;
 
-    for (const file of files) {
-      const name = useTypedName ? typedName : nameFromFileName(file.name);
-      const image = await readFileAsDataUrl(file);
-      await window.CampaignOSTokenLibrary.saveEntry(name, image);
+    try {
+      for (const file of files) {
+        const name = useTypedName ? typedName : nameFromFileName(file.name);
+        const raw = await readFileAsDataUrl(file);
+        // Tokens display small (a circular portrait), so 512px is plenty; PNG keeps
+        // transparency for portraits that use it.
+        const resized = await resizeImageDataUrl(raw, 512, "image/png");
+        await window.CampaignOSTokenLibrary.saveEntry(name, resized.dataUrl);
+      }
+    } catch (error) {
+      commandResult.textContent = `Couldn't add to the token library: ${error?.message || error}`;
+      return;
     }
 
     commandResult.textContent = files.length === 1
@@ -1227,6 +1262,7 @@
     event.preventDefault();
     const files = Array.from(mapLibraryImageInput.files);
     if (!files.length) return;
+    if (!confirmLargeBatch(files.length, "map images")) return;
 
     const typedName = mapLibraryName.value.trim();
     const useTypedName = files.length === 1 && typedName;
@@ -1234,9 +1270,12 @@
     try {
       for (const file of files) {
         const name = useTypedName ? typedName : nameFromFileName(file.name);
-        const image = await readFileAsDataUrl(file);
-        const details = await readImageDetails(image);
-        await window.CampaignOSMapLibrary.saveEntry(name, image, `${details.width} / ${details.height}`);
+        const raw = await readFileAsDataUrl(file);
+        // 1600px is far more than a battle map needs to look sharp on a VTT grid, and
+        // JPEG at 0.85 quality keeps a full commercial map pack from ballooning storage
+        // (and the import itself from spiking memory) the way full-resolution PNGs do.
+        const resized = await resizeImageDataUrl(raw, 1600, "image/jpeg", 0.85);
+        await window.CampaignOSMapLibrary.saveEntry(name, resized.dataUrl, `${resized.width} / ${resized.height}`);
       }
     } catch (error) {
       commandResult.textContent = `Couldn't add to the map library: ${error?.message || error}`;
@@ -1502,18 +1541,18 @@
     const file = mapImageInput.files[0];
     if (!file) return;
     const mapName = mapNameFromFile(file.name);
-    const dataUrl = await readFileAsDataUrl(file);
-    const details = await readImageDetails(dataUrl);
+    const raw = await readFileAsDataUrl(file);
+    const resized = await resizeImageDataUrl(raw, 1600, "image/jpeg", 0.85);
     const previousKey = state.maps?.[mapName]?.image;
     const key = window.CampaignOSImageStore.generateKey("map");
-    await window.CampaignOSImageStore.saveImage(key, dataUrl);
+    await window.CampaignOSImageStore.saveImage(key, resized.dataUrl);
     if (previousKey && !previousKey.startsWith("data:")) {
       window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
     }
     setActiveMap(mapName);
     updateState(window.CampaignOS.setMapImage(state, mapName, key, {
       sourceFileName: file.name,
-      aspectRatio: `${details.width} / ${details.height}`
+      aspectRatio: `${resized.width} / ${resized.height}`
     }));
     commandResult.textContent = `${mapName} map image imported from ${file.name}.`;
   });
