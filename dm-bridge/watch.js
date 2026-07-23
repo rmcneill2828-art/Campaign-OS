@@ -53,7 +53,11 @@ const SYSTEM_PROMPT = [
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
-  'an empty "actions" array. Never invent a monster type outside the listed set -- narrate it instead.'
+  'an empty "actions" array. Never invent a monster type outside the listed set -- narrate it instead.',
+  "",
+  "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
+  "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
+  "but it never overrides the actual token state above, which is always the current truth."
 ].join("\n");
 
 fs.writeFileSync(systemPromptPath, SYSTEM_PROMPT, "utf8");
@@ -92,10 +96,20 @@ function extractJson(text) {
 function buildPrompt(request) {
   const state = request.state || {};
   const tokens = Array.isArray(state.tokens) ? state.tokens : [];
-  const lines = [
+  const lines = [];
+
+  if (request.context && request.context.text) {
+    lines.push(
+      `Relevant campaign context ("${request.context.title}"):`,
+      request.context.text,
+      ""
+    );
+  }
+
+  lines.push(
     `Current map: ${state.mapName || "(none)"}`,
     "Tokens on the map:"
-  ];
+  );
   if (tokens.length === 0) {
     lines.push("(none)");
   } else {

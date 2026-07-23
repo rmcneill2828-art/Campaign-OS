@@ -6,11 +6,13 @@ Campaign OS is an AI-native tabletop campaign workspace. The current goal is sim
 
 This repository is the software layer. Campaign notes, lore, session logs, and adventure Markdown should stay in the campaign repository and be imported later.
 
-## Week 1 Prototype
+## Getting Started
 
-Open `index.html` in a browser to try the first battle-map prototype.
+Open `index.html` directly in a browser (Chrome or Edge recommended -- some features use the
+File System Access API, which Firefox and Safari don't support yet). No build step, no
+dependencies to install for the app itself. See Tests, below, for running the test suite.
 
-Current features:
+## Current Features
 
 - Live encounter board
 - Draggable tokens
@@ -48,9 +50,10 @@ Current features:
   matching token from then on -- manual spawns, imported characters, and Claude DM
   bridge actions alike
 
-Week 3 attack command:
+Local command examples (works with or without the Claude DM bridge connected):
 
 ```text
+Three goblins emerge from the trees.
 Goblin 1 attacks Darkhawk.
 ```
 
@@ -88,6 +91,17 @@ subscription) -- there's no separate key stored in the browser. The first call i
 most expensive (Claude Code's own tool/system scaffolding has to populate the prompt cache);
 repeated calls within the cache window are much cheaper.
 
+### Attaching campaign context
+
+By default, Claude only sees the live encounter state (map name, tokens, HP/AC/conditions) --
+it has no idea about the Warden's bargain or who Sael is unless you attach something. Select a
+session or note in the campaign browser and click **Use Context**; it stays attached (shown in a
+row above the command box, with a **Clear** button) across as many commands as you like, so
+narration stays grounded in the real story rather than just token stats. Cheaper models (Haiku,
+the default) occasionally under-use attached context on oddly-phrased or self-referential
+commands -- if narration seems to ignore it, try rephrasing, or set `DM_BRIDGE_MODEL=sonnet` for
+more consistent context use.
+
 ## Token library
 
 The "Token Library" panel lets you save a portrait once and have it show up automatically from
@@ -102,29 +116,43 @@ then on, without re-uploading it per token:
 - Entries are stored in IndexedDB (not localStorage), since portrait images are exactly the kind
   of content that would otherwise blow past localStorage's origin quota.
 
-## Planned Shape
+## Project Structure
 
 ```text
 Campaign OS
-|-- app/          Application shell
-|-- engine/       Encounter, dice, rules, and state logic
-|-- ui/           Browser UI components
-|-- ai/           Dungeon Master tool contracts
-|-- data/         Local app database and import outputs
-|-- assets/       Maps, portraits, tokens, ambience
-|-- importers/    Campaign repository and PDF importers
-`-- docs/         Lightweight notes and decisions
+|-- index.html      Main app shell (battle map, campaign browser, token sheet, Claude DM)
+|-- character.html  Standalone character sheet viewer, opened from an imported character
+|-- engine/         Pure, unit-tested logic: encounter state, campaign import/parsing, the
+|                   dm-bridge action dispatcher -- no DOM, runnable under Node
+|-- ui/             Browser UI glue: rendering, event wiring, and the IndexedDB-backed token
+|                   library / image store / dm-bridge folder-handle store
+|-- dm-bridge/      watch.js -- the Node script that bridges the browser to the local
+|                   `claude` CLI (see Claude DM bridge, above)
+`-- tests/          node:test suite for engine/ and the IndexedDB name-matching logic in
+                    ui/tokenLibrary.js
 ```
 
-## Next Milestones
+To import a campaign: open `index.html`, use the Campaign file picker to choose a campaign
+folder (matching the structure documented in the DnD repo this app pairs with -- `active.md`,
+`campaigns/<slug>/{overview,world-state,session-log}.md`, `characters/*.md`), and Campaign OS
+parses it into a searchable local index. Click a location to make it the active map context.
 
-- Week 2: richer token sheet with damage, healing, and condition controls
-- Week 3: dice-backed attacks and automatic damage
-- Week 4: campaign import from the existing D&D repository
+## Possible Next Steps
 
-Week 4 import flow:
+Nothing here is committed to -- just the open threads worth knowing about:
 
-1. Open `index.html`.
-2. Use the Campaign file picker to choose a campaign folder.
-3. Campaign OS imports Markdown files into a local browser-side index.
-4. Click a location to make it the active map context.
+- Character/token art currently gets copied into the shared image store per-token; several
+  monsters spawned from the same library entry each get their own copy of the same bytes rather
+  than sharing one. Fine at IndexedDB's storage scale, but worth revisiting if it matters.
+- Fog-of-war tiles exist but haven't been exercised as heavily as the rest of the map tooling.
+
+## Tests
+
+```text
+npm test
+```
+
+Zero dependencies -- Node's built-in `node:test` runner against `tests/*.test.js`, covering
+`engine/encounter.js`, `engine/campaign.js`, `engine/dmBridge.js`, and the name-matching logic in
+`ui/tokenLibrary.js`. Runs automatically on push/PR to `main` via
+`.github/workflows/test.yml`.

@@ -706,6 +706,23 @@ body[data-fog="on"] .map-tile:hover {
   color: var(--accent);
 }
 
+.dm-bridge-context-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.dm-bridge-context-row strong {
+  color: var(--accent);
+}
+
 .library-hint {
   margin: 0 0 10px;
   color: var(--muted);

@@ -18,6 +18,9 @@
   const commandResult = document.querySelector("#commandResult");
   const dmBridgeConnect = document.querySelector("#dmBridgeConnect");
   const dmBridgeStatus = document.querySelector("#dmBridgeStatus");
+  const dmBridgeContextRow = document.querySelector("#dmBridgeContextRow");
+  const dmBridgeContextLabel = document.querySelector("#dmBridgeContextLabel");
+  const dmBridgeContextClear = document.querySelector("#dmBridgeContextClear");
   const libraryAddForm = document.querySelector("#libraryAddForm");
   const libraryName = document.querySelector("#libraryName");
   const libraryImageInput = document.querySelector("#libraryImageInput");
@@ -45,6 +48,7 @@
   let dmBridgePollTimer = null;
   let dmBridgeTimeoutHandle = null;
   const dmBridgeResponseTimeoutMs = 20000;
+  let dmBridgeContext = null;
   campaignSearch.value = preferences.search || "";
   campaignFilter.value = preferences.filter || "all";
   showTemplates.checked = Boolean(preferences.showTemplates);
@@ -107,19 +111,47 @@
   // Attaches library art (matched by name) to any token that doesn't already have an
   // image -- called after every action that can add tokens to the map (manual spawn,
   // adding an imported character, and Claude DM bridge actions), so art shows up the
-  // same way no matter which path created the token.
+  // same way no matter which path created the token. The library keeps its own copy of
+  // the art in its own IndexedDB store; this saves a fresh copy under a per-token key
+  // in the shared image store rather than writing the raw data URL onto the token, for
+  // the same reason map images moved off inline base64 (keeps the localStorage-
+  // persisted encounter state small).
   async function applyLibraryImages(sourceState) {
     let nextState = sourceState;
     let changed = false;
     for (const token of sourceState.tokens) {
       if (token.image) continue;
-      const image = await window.CampaignOSTokenLibrary.findImage(token.name);
-      if (image) {
-        nextState = window.CampaignOS.updateToken(nextState, token.id, { image });
+      const libraryImage = await window.CampaignOSTokenLibrary.findImage(token.name);
+      if (libraryImage) {
+        const key = window.CampaignOSImageStore.generateKey("token");
+        await window.CampaignOSImageStore.saveImage(key, libraryImage);
+        nextState = window.CampaignOS.updateToken(nextState, token.id, { image: key });
         changed = true;
       }
     }
     return { state: nextState, changed };
+  }
+
+  const resolvedImageCache = new Map();
+
+  // Shared resolver for any stored `image` field (map or token) -- these are now
+  // ui/imageStore.js keys rather than raw data URLs. Also transparently handles a
+  // pre-migration value that's still raw inline base64 (starts with "data:").
+  function resolveStoredImage(imageValue) {
+    if (!imageValue) return Promise.resolve("");
+    if (imageValue.startsWith("data:")) return Promise.resolve(imageValue);
+    if (resolvedImageCache.has(imageValue)) return Promise.resolve(resolvedImageCache.get(imageValue));
+    return window.CampaignOSImageStore.loadImage(imageValue).then((dataUrl) => {
+      resolvedImageCache.set(imageValue, dataUrl || "");
+      return dataUrl || "";
+    });
+  }
+
+  async function migrateLegacyTokenImage(tokenId, dataUrl) {
+    const key = window.CampaignOSImageStore.generateKey("token");
+    await window.CampaignOSImageStore.saveImage(key, dataUrl);
+    state = window.CampaignOS.updateToken(state, tokenId, { image: key });
+    saveEncounter();
   }
 
   function renderMap() {
@@ -155,8 +187,16 @@
       tokenButton.style.gridColumn = `${token.x} / span 1`;
       tokenButton.style.gridRow = `${token.y} / span 1`;
       if (token.image) {
-        tokenButton.style.backgroundImage = `url("${token.image}")`;
         tokenButton.classList.add("has-image");
+        if (token.image.startsWith("data:")) {
+          tokenButton.style.backgroundImage = `url("${token.image}")`;
+          migrateLegacyTokenImage(token.id, token.image);
+        } else {
+          resolveStoredImage(token.image).then((dataUrl) => {
+            if (dataUrl) tokenButton.style.backgroundImage = `url("${dataUrl}")`;
+            else tokenButton.classList.remove("has-image");
+          });
+        }
       } else {
         tokenButton.textContent = token.icon;
       }
@@ -259,7 +299,7 @@
         <strong>${token.hp} / ${token.maxHp}</strong>
       </div>
       <div class="token-portrait">
-        <div class="portrait-preview">${token.image ? `<img src="${token.image}" alt="">` : `<span>${escapeHtml(token.icon)}</span>`}</div>
+        <div class="portrait-preview">${token.image ? `<img data-portrait-image alt="">` : `<span>${escapeHtml(token.icon)}</span>`}</div>
         <label>
           Token Image
           <input name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
@@ -330,17 +370,36 @@
       <button class="danger-button" type="button" data-action="remove">Remove Token</button>
     `;
 
+    const portraitImg = tokenSheet.querySelector("img[data-portrait-image]");
+    if (portraitImg) {
+      resolveStoredImage(token.image).then((dataUrl) => {
+        if (dataUrl) portraitImg.src = dataUrl;
+      });
+    }
+
     const editor = tokenSheet.querySelector(".token-editor");
     const imageInput = tokenSheet.querySelector('input[name="image"]');
     imageInput.addEventListener("change", async () => {
       const file = imageInput.files[0];
       if (!file) return;
-      const image = await readFileAsDataUrl(file);
-      updateState(window.CampaignOS.updateToken(state, token.id, { image }));
+      const dataUrl = await readFileAsDataUrl(file);
+      const previousKey = token.image;
+      const key = window.CampaignOSImageStore.generateKey("token");
+      await window.CampaignOSImageStore.saveImage(key, dataUrl);
+      if (previousKey && !previousKey.startsWith("data:")) {
+        window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
+      }
+      updateState(window.CampaignOS.updateToken(state, token.id, { image: key }));
     });
     const clearImageButton = tokenSheet.querySelector('[data-action="clear-image"]');
     if (clearImageButton) {
-      clearImageButton.addEventListener("click", () => updateState(window.CampaignOS.updateToken(state, token.id, { image: "" })));
+      clearImageButton.addEventListener("click", () => {
+        const previousKey = token.image;
+        if (previousKey && !previousKey.startsWith("data:")) {
+          window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
+        }
+        updateState(window.CampaignOS.updateToken(state, token.id, { image: "" }));
+      });
     }
 
     editor.addEventListener("submit", (event) => {
@@ -598,10 +657,32 @@
     window.open(url, "_blank", "noopener");
   }
 
+  // Session/notes context so Claude DM knows the actual story (an NPC, a prior
+  // session, a plot thread) rather than only ever seeing live token stats and
+  // whatever the DM happens to type in the command box. Stays attached across
+  // multiple commands until cleared -- most DM turns reference the same scene.
+  const dmBridgeContextMaxChars = 6000;
+
   function useCampaignContext(item) {
-    commandInput.value = `Use ${item.title} as context.`;
-    commandResult.textContent = `${item.title} is ready as DM context: ${item.summary}`;
+    dmBridgeContext = { title: item.title, text: item.text || item.summary || "" };
+    commandResult.textContent = `"${item.title}" attached as DM context -- type a command and hit Run.`;
+    renderDMBridgeContext();
   }
+
+  function renderDMBridgeContext() {
+    if (!dmBridgeContext) {
+      dmBridgeContextRow.hidden = true;
+      return;
+    }
+    dmBridgeContextRow.hidden = false;
+    dmBridgeContextLabel.textContent = dmBridgeContext.title;
+  }
+
+  dmBridgeContextClear.addEventListener("click", () => {
+    dmBridgeContext = null;
+    renderDMBridgeContext();
+    commandResult.textContent = "DM context cleared.";
+  });
 
   function renderMapOptions() {
     const names = loadedMapNames();
@@ -809,6 +890,9 @@
     const payload = {
       id,
       command,
+      context: dmBridgeContext
+        ? { title: dmBridgeContext.title, text: dmBridgeContext.text.slice(0, dmBridgeContextMaxChars) }
+        : null,
       state: {
         mapName: state.mapName,
         tokens: activeTokens().map((token) => ({

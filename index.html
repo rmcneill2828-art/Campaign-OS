@@ -112,6 +112,10 @@
               <button id="dmBridgeConnect" type="button">Connect to Claude Code</button>
               <span id="dmBridgeStatus" class="dm-bridge-status">Not connected -- using local command parser</span>
             </div>
+            <div id="dmBridgeContextRow" class="dm-bridge-context-row" hidden>
+              <span>Context: <strong id="dmBridgeContextLabel"></strong></span>
+              <button id="dmBridgeContextClear" type="button">Clear</button>
+            </div>
             <form id="commandForm" class="command-form">
               <input id="commandInput" type="text" value="Three goblins emerge from the trees." aria-label="DM command">
               <button type="submit">Run</button>
