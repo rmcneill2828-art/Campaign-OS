@@ -1231,11 +1231,16 @@
     const typedName = mapLibraryName.value.trim();
     const useTypedName = files.length === 1 && typedName;
 
-    for (const file of files) {
-      const name = useTypedName ? typedName : nameFromFileName(file.name);
-      const image = await readFileAsDataUrl(file);
-      const details = await readImageDetails(image);
-      await window.CampaignOSMapLibrary.saveEntry(name, image, `${details.width} / ${details.height}`);
+    try {
+      for (const file of files) {
+        const name = useTypedName ? typedName : nameFromFileName(file.name);
+        const image = await readFileAsDataUrl(file);
+        const details = await readImageDetails(image);
+        await window.CampaignOSMapLibrary.saveEntry(name, image, `${details.width} / ${details.height}`);
+      }
+    } catch (error) {
+      commandResult.textContent = `Couldn't add to the map library: ${error?.message || error}`;
+      return;
     }
 
     commandResult.textContent = files.length === 1
