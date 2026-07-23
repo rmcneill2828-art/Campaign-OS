@@ -389,6 +389,7 @@
     addToken,
     conditionList,
     createState,
+    currentGrid,
     parseCommand,
     removeToken,
     setMapGrid,

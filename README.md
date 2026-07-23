@@ -64,8 +64,9 @@ The "Claude DM" panel works two ways:
 - **Not connected (default):** a small local regex parser handles `spawn N <monster>` and
   `X attacks Y` phrasing. No network calls, no setup.
 - **Connected:** commands are handled by a real Claude Code call, which can narrate freely
-  and decide on structured actions (spawn, attack, damage, heal, toggle a condition),
-  referencing tokens by name and reasoning about the current encounter state.
+  and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
+  token on the grid), referencing tokens by name and reasoning about the current encounter
+  state -- including where everything currently stands on the grid.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than

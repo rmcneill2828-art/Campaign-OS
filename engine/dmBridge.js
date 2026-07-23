@@ -70,6 +70,23 @@
           alreadyLogged: false
         };
       }
+      case "move_token": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to move.`, alreadyLogged: false };
+        const grid = window.CampaignOS.currentGrid(state);
+        const x = Math.min(Math.max(Math.round(Number(action.x)), 1), grid.columns);
+        const y = Math.min(Math.max(Math.round(Number(action.y)), 1), grid.rows);
+        const nextState = window.CampaignOS.setTokenPosition(state, target.id, x, y);
+        const moved = window.CampaignOS.tokensOnCurrentMap(nextState).find((token) => token.id === target.id);
+        const didMove = Boolean(moved && moved.x === x && moved.y === y);
+        return {
+          state: nextState,
+          message: didMove
+            ? `${target.name} moves to (${x}, ${y}).`
+            : `${target.name} could not move to (${x}, ${y}) -- tile occupied.`,
+          alreadyLogged: false
+        };
+      }
       default:
         return { state, message: null, alreadyLogged: false };
     }

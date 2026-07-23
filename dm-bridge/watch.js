@@ -52,10 +52,15 @@ const SYSTEM_PROMPT = [
   '{"type": "apply_damage", "target": "<exact token name>", "amount": <integer>}',
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',
   `{"type": "toggle_condition", "target": "<exact token name>", "condition": "${CONDITION_LIST.join("|")}"}`,
+  '{"type": "move_token", "target": "<exact token name>", "x": <integer>, "y": <integer>}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
   'an empty "actions" array. Never invent a monster type outside the listed set -- narrate it instead.',
+  "",
+  "Use move_token when narration implies a token repositions on the grid -- closing to melee range,",
+  "retreating, circling around -- using the grid size and each token's current (x, y) given below to",
+  "pick a destination that's actually plausible, and stay within the grid bounds.",
   "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
@@ -79,6 +84,8 @@ function isValidAction(action) {
       return typeof action.target === "string" && Number.isFinite(action.amount);
     case "toggle_condition":
       return typeof action.target === "string" && CONDITION_LIST.includes(action.condition);
+    case "move_token":
+      return typeof action.target === "string" && Number.isFinite(action.x) && Number.isFinite(action.y);
     default:
       return false;
   }
@@ -108,8 +115,10 @@ function buildPrompt(request) {
     );
   }
 
+  const grid = state.grid || {};
   lines.push(
     `Current map: ${state.mapName || "(none)"}`,
+    `Grid size: ${grid.columns || 12} columns x ${grid.rows || 8} rows (1-based, top-left is 1,1).`,
     "Tokens on the map:"
   );
   if (tokens.length === 0) {
@@ -119,7 +128,7 @@ function buildPrompt(request) {
       const conditions = Array.isArray(t.conditions) && t.conditions.length
         ? `, conditions: ${t.conditions.join(", ")}`
         : "";
-      lines.push(`- ${t.name} (${t.type}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}${conditions}`);
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}${conditions}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

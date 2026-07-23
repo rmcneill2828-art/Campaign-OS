@@ -88,6 +88,56 @@ test("applyActions ignores an unknown action type without throwing", () => {
   assert.deepEqual(messages, []);
 });
 
+test("applyActions moves a token to the requested grid position", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1" }).state; // lands at (4, 4)
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "move_token", target: "Goblin 1", x: 7, y: 3 }
+  ]);
+
+  const goblin = next.tokens.find((t) => t.name === "Goblin 1");
+  assert.equal(goblin.x, 7);
+  assert.equal(goblin.y, 3);
+  assert.match(messages[0], /Goblin 1 moves to \(7, 3\)/);
+});
+
+test("applyActions clamps move_token coordinates to the current map's grid bounds", () => {
+  let state = stateOnMap("Urskelde"); // default grid is 12 columns x 8 rows
+  state = CampaignOS.addToken(state, { name: "Goblin 1" }).state;
+
+  const { state: next } = CampaignOSDMBridge.applyActions(state, [
+    { type: "move_token", target: "Goblin 1", x: 999, y: -5 }
+  ]);
+
+  const goblin = next.tokens.find((t) => t.name === "Goblin 1");
+  assert.equal(goblin.x, 12);
+  assert.equal(goblin.y, 1);
+});
+
+test("applyActions reports a blocked move instead of moving onto an occupied tile", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1" }).state; // (4, 4)
+  state = CampaignOS.addToken(state, { name: "Goblin 2" }).state; // (5, 4)
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "move_token", target: "Goblin 1", x: 5, y: 4 }
+  ]);
+
+  const goblin1 = next.tokens.find((t) => t.name === "Goblin 1");
+  assert.equal(goblin1.x, 4);
+  assert.equal(goblin1.y, 4);
+  assert.match(messages[0], /could not move to \(5, 4\) -- tile occupied/);
+});
+
+test("applyActions logs an unresolved-name message for move_token targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "move_token", target: "Nonexistent Goblin", x: 5, y: 5 }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" to move/);
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

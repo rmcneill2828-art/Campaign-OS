@@ -1017,9 +1017,12 @@
         : null,
       state: {
         mapName: state.mapName,
+        grid: window.CampaignOS.currentGrid(state),
         tokens: activeTokens().map((token) => ({
           name: token.name,
           type: token.type,
+          x: token.x,
+          y: token.y,
           hp: token.hp,
           maxHp: token.maxHp,
           ac: token.ac,
