@@ -1727,7 +1727,14 @@
     let response;
     try {
       response = await readBridgeJson("response.json");
-    } catch {
+    } catch (err) {
+      // This used to swallow every read error identically to "file doesn't exist yet",
+      // which made a genuinely written-but-transiently-unreadable response (a sync/lock
+      // hiccup on the underlying folder, an intermittent File System Access API read
+      // failure) indistinguishable from normal "still waiting" polling -- it would just
+      // silently retry until the 20s timeout fired with no clue why. Logging it at least
+      // makes that failure mode visible instead of looking identical to "no response yet".
+      console.warn("[Campaign OS] Couldn't read dm-bridge/response.json this poll:", err.message || err);
       return;
     }
     if (!response || response.id !== dmBridgePendingId) return;
