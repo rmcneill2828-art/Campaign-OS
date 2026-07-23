@@ -337,16 +337,21 @@
       entries.forEach((entry, index) => {
         const row = document.createElement("div");
         row.className = "library-item";
-        // Rendering an <img> means the browser decodes it into a full bitmap -- fine for a
-        // handful of entries, but doing that for hundreds at once (a bulk-imported asset
-        // pack) is exactly what can crash the tab. Past the limit, list by name only; the
-        // entry (and Remove) still works, it just skips the thumbnail decode.
-        const thumbnail = index < LIBRARY_THUMBNAIL_LIMIT ? `<img src="${entry.image}" alt="">` : "<span></span>";
         row.innerHTML = `
-          ${thumbnail}
+          <span></span>
           <span>${escapeHtml(entry.displayName)}</span>
           <button type="button" data-key="${escapeAttribute(entry.key)}">Remove</button>
         `;
+        // Rendering an <img> means the browser decodes it into a full bitmap -- fine for a
+        // handful of entries, but doing that for hundreds at once (a bulk-imported asset
+        // pack) is exactly what can crash the tab. Past the limit, list by name only (the
+        // Remove button still works); metadata alone (listEntries) never touches image
+        // bytes at all, so this cap is purely about DOM/decode cost, not IndexedDB cost.
+        if (index < LIBRARY_THUMBNAIL_LIMIT) {
+          window.CampaignOSTokenLibrary.getImage(entry.key).then((image) => {
+            if (image) row.querySelector("span").outerHTML = `<img src="${image}" alt="">`;
+          });
+        }
         row.querySelector("button").addEventListener("click", () => {
           window.CampaignOSTokenLibrary.deleteEntry(entry.key).then(renderTokenLibrary);
         });
@@ -374,13 +379,17 @@
       entries.forEach((entry, index) => {
         const row = document.createElement("div");
         row.className = "library-item map-library-item";
-        const thumbnail = index < LIBRARY_THUMBNAIL_LIMIT ? `<img src="${entry.image}" alt="">` : "<span></span>";
         row.innerHTML = `
-          ${thumbnail}
+          <span></span>
           <span>${escapeHtml(entry.displayName)}</span>
           <button type="button" data-action="use">Use</button>
           <button type="button" data-action="remove">Remove</button>
         `;
+        if (index < LIBRARY_THUMBNAIL_LIMIT) {
+          window.CampaignOSMapLibrary.getImage(entry.key).then((image) => {
+            if (image) row.querySelector("span").outerHTML = `<img src="${image}" alt="">`;
+          });
+        }
         row.querySelector('[data-action="use"]').addEventListener("click", () => useMapLibraryEntry(entry));
         row.querySelector('[data-action="remove"]').addEventListener("click", () => {
           window.CampaignOSMapLibrary.deleteEntry(entry.key).then(renderMapLibrary);
@@ -398,14 +407,20 @@
 
   // Loads a saved Map Library entry as the active map: creates a map with that name if it
   // doesn't exist yet (same as picking a file directly always has), or replaces the art on
-  // an existing map of that name. Copies the library's own copy of the image into the
-  // shared image store under a fresh key first, exactly like a direct file upload does --
-  // the encounter state only ever holds that short key, never the raw image data.
+  // an existing map of that name. Fetches this one entry's actual image bytes now (the
+  // rendered list only ever carried metadata) and copies them into the shared image store
+  // under a fresh key, exactly like a direct file upload does -- the encounter state only
+  // ever holds that short key, never the raw image data.
   async function useMapLibraryEntry(entry) {
     const mapName = entry.displayName;
+    const image = await window.CampaignOSMapLibrary.getImage(entry.key);
+    if (!image) {
+      commandResult.textContent = `Couldn't find stored art for "${mapName}".`;
+      return;
+    }
     const previousKey = state.maps?.[mapName]?.image;
     const key = window.CampaignOSImageStore.generateKey("map");
-    await window.CampaignOSImageStore.saveImage(key, entry.image);
+    await window.CampaignOSImageStore.saveImage(key, image);
     if (previousKey && !previousKey.startsWith("data:")) {
       window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
     }
