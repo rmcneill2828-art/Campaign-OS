@@ -161,6 +161,38 @@ test("tokenDraftFromItem reads HP/AC from flat fields and attack/damage from the
   assert.equal(draft.ac, 17);
   assert.equal(draft.attackBonus, 10, "should read the leftmost damage column's matching To Hit value, not the generic default of 3");
   assert.equal(draft.damageDice, "1d8+5", "should pick the leftmost (non-raging) Damage column, not the raging one");
+  assert.equal(draft.attacks, undefined, "a characters/ sheet's multi-row table lists weapon options, not a Multiattack -- only the first row should apply");
+});
+
+test("tokenDraftFromItem folds every row of an npcs/ sheet's Attacks table into a Multiattack array", () => {
+  const sheet = [
+    "# Malphestor",
+    "",
+    "## Combat",
+    "- **AC:** 19",
+    "- **HP:** 142 / 142",
+    "",
+    "### Attacks",
+    "| Attack | To Hit | Damage |",
+    "|---|---|---|",
+    "| Claw | +8 | 1d8+4 slashing |",
+    "| Claw | +8 | 1d8+4 slashing |",
+    "| Sting | +8 | 2d8+4 piercing plus 5d6 poison |"
+  ].join("\n");
+
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Malphestor", path: "npcs/Malphestor.md", text: sheet });
+
+  assert.equal(draft.attackBonus, 8, "the primary attackBonus/damageDice fields should still reflect the first row");
+  assert.equal(draft.damageDice, "1d8+4");
+  assert.equal(draft.attacks.length, 3);
+  assert.deepEqual(draft.attacks.map((a) => a.name), ["Claw", "Claw", "Sting"]);
+  assert.equal(draft.attacks[2].damageDice, "2d8+4", "the poison clause should be stripped the same way a conditional bonus is");
+});
+
+test("tokenDraftFromItem does not add a Multiattack array for an npcs/ sheet with only one attack row", () => {
+  const sheet = ["### Attacks", "| Attack | To Hit | Damage |", "|---|---|---|", "| Rapier | +3 | 1d8+1 piercing |"].join("\n");
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Edmund Vale", path: "npcs/Edmund Vale.md", text: sheet });
+  assert.equal(draft.attacks, undefined);
 });
 
 test("tokenDraftFromItem strips a conditional bonus clause out of a damage cell", () => {

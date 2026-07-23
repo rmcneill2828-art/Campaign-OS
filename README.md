@@ -35,7 +35,12 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Campaign search and category filtering
 - Template files hidden by default
 - Selected campaign item detail panel
-- Add imported characters to the encounter board
+- Add imported characters to the encounter board -- an `npcs/` sheet (as opposed to
+  `characters/`) imports as a "monster"-styled token, and if its `### Attacks` table lists
+  more than one attack row, every row folds into a real Multiattack the token fires as one
+  action (e.g. a devil's two Claws + one Sting), the same way a built-in `spawn`ed troll
+  does. `characters/` sheets keep the original "first row only" behavior, since PCs use
+  that table shape to list weapon options, not a Multiattack.
 - Open imported character sheets in a separate page
 - Open imported locations as the active map context
 - Named locations are parsed individually out of `world-state.md`'s table, and each

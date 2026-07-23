@@ -87,6 +87,23 @@ test("addToken clamps HP/AC/attackBonus into their valid ranges and defaults mis
   assert.deepEqual(token.conditions, []);
 });
 
+test("addToken carries a draft's Multiattack array (attacks[]) onto the token when there's more than one entry", () => {
+  const state = stateOnMap("Urskelde");
+  const attacks = [
+    { name: "Claw", attackBonus: 8, damageDice: "1d8+4" },
+    { name: "Claw", attackBonus: 8, damageDice: "1d8+4" },
+    { name: "Sting", attackBonus: 8, damageDice: "2d8+4" }
+  ];
+  const { token } = CampaignOS.addToken(state, { name: "Malphestor", hp: 142, maxHp: 142, attacks });
+  assert.deepEqual(token.attacks, attacks);
+});
+
+test("addToken ignores a single-entry attacks array (not a real Multiattack)", () => {
+  const state = stateOnMap("Urskelde");
+  const { token } = CampaignOS.addToken(state, { name: "Vale", attacks: [{ name: "Rapier", attackBonus: 3, damageDice: "1d8+1" }] });
+  assert.equal(token.attacks, undefined);
+});
+
 test("applyDamage and applyHealing clamp HP within [0, maxHp]", () => {
   const state = stateOnMap("Urskelde");
   const { state: withToken, token } = CampaignOS.addToken(state, { name: "Target", hp: 10, maxHp: 10 });

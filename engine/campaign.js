@@ -238,6 +238,10 @@
     return category === "characters" && !isCampaignIndex(path) && /(^|[\\/])(characters?|npcs?)[\\/]/i.test(path);
   }
 
+  function isNpcPath(path) {
+    return /(^|[\\/])npcs?[\\/]/i.test(path || "");
+  }
+
   function summarize(text) {
     const paragraphs = text
       .replace(/^#.*$/gm, "")
@@ -249,11 +253,12 @@
 
   function tokenDraftFromItem(item) {
     const fields = extractFields(item.text || "");
-    const attack = extractPrimaryAttack(item.text || "");
+    const attackRows = extractAttackRows(item.text || "");
+    const attack = attackRows ? attackRows[0] : null;
     const name = item.title || fields.name || "Campaign Character";
     const maxHp = readNumber(fields.hp || fields.hitpoints || fields["hit points"], 12);
     const initiativeBonus = readNumber(fields["initiative bonus"] || fields.initiative || fields.init, 0);
-    return {
+    const draft = {
       name,
       icon: name.slice(0, 2).toUpperCase(),
       type: /npc/i.test(item.path) ? "monster" : "hero",
@@ -266,6 +271,21 @@
       conditions: [],
       sourcePath: item.path
     };
+
+    // Multiattack: an NPC sheet's Attacks table can list every attack in a Multiattack
+    // action (e.g. a devil's two Claws + one Sting) as separate rows. Fold all of them into
+    // `attacks` so the encounter engine resolves the whole action, not just the first row.
+    // Scoped to npcs/ -- PC sheets under characters/ use that same table shape to list
+    // weapon *options* (main-hand/off-hand/javelin), not a Multiattack fired every turn.
+    if (isNpcPath(item.path) && attackRows && attackRows.length > 1) {
+      draft.attacks = attackRows.map((row) => ({
+        name: row.name,
+        attackBonus: row.attackBonus ?? draft.attackBonus,
+        damageDice: row.damageDice || draft.damageDice
+      }));
+    }
+
+    return draft;
   }
 
   function extractFields(text) {
@@ -280,7 +300,9 @@
   // Character sheets in this campaign format put real combat numbers in an "### Attacks"
   // markdown table (columns like "To Hit" / "Damage"), not a flat "Attack Bonus:" line --
   // extractFields alone can't see them, so imported PCs were defaulting to a generic +3/1d6+1.
-  function extractPrimaryAttack(text) {
+  // Returns every consecutive data row as {name, attackBonus, damageDice} (name from the
+  // row's first cell, e.g. "Claw" or "Main-hand longsword"), or null if there's no table.
+  function extractAttackRows(text) {
     const lines = text.split(/\r?\n/);
     const headingIndex = lines.findIndex((line) => /^#{1,4}\s+attacks\b/i.test(line.trim()));
     if (headingIndex === -1) return null;
@@ -299,15 +321,21 @@
     const damageIndex = headerCells.findIndex((cell) => cell.includes("damage"));
     if (toHitIndex === -1 || damageIndex === -1) return null;
 
-    const firstDataRow = splitTableRow(lines[index + 2] || "");
-    if (!firstDataRow.length) return null;
+    const rows = [];
+    let rowIndex = index + 2;
+    while (rowIndex < lines.length && isTableRow(lines[rowIndex])) {
+      const cells = splitTableRow(lines[rowIndex]);
+      const attackBonus = readNumber(cells[toHitIndex], null);
+      const damageMatch = (cells[damageIndex] || "").match(/\d*d\d+(?:\s*[+-]\s*\d+)?/i);
+      const damageDice = damageMatch ? damageMatch[0].replace(/\s+/g, "") : null;
+      if (attackBonus !== null || damageDice) {
+        const name = (cells[0] || "").replace(/\*+/g, "").trim() || null;
+        rows.push({ name, attackBonus, damageDice });
+      }
+      rowIndex += 1;
+    }
 
-    const attackBonus = readNumber(firstDataRow[toHitIndex], null);
-    const damageMatch = (firstDataRow[damageIndex] || "").match(/\d*d\d+(?:\s*[+-]\s*\d+)?/i);
-    const damageDice = damageMatch ? damageMatch[0].replace(/\s+/g, "") : null;
-    if (attackBonus === null && !damageDice) return null;
-
-    return { attackBonus, damageDice };
+    return rows.length ? rows : null;
   }
 
   function readNumber(value, fallback) {

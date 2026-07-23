@@ -160,6 +160,7 @@
       conditions: draft.conditions || [],
       sourcePath: draft.sourcePath || ""
     };
+    if (Array.isArray(draft.attacks) && draft.attacks.length > 1) token.attacks = draft.attacks;
     token.hp = clampNumber(token.hp, 0, token.maxHp);
     nextState.tokens.push(token);
     nextState.selectedTokenId = token.id;
