@@ -331,6 +331,25 @@
     return clampNumber(state.maps?.[state.mapName]?.feetPerSquare ?? 5, 1, 30);
   }
 
+  // True once a map has real art or an imported campaign location behind it -- distinguishes
+  // a genuinely prepared map from a bare name a token happens to reference.
+  function hasRealMapData(state, mapName) {
+    const mapData = state.maps?.[mapName];
+    return Boolean(mapData && (mapData.image || mapData.sourcePath));
+  }
+
+  // Switches to an already-prepared map (real art or a campaign sourcePath) -- returns the
+  // same state reference, unchanged, if that map doesn't exist or has no real data yet, the
+  // same "rejected" convention as setTokenPosition/moveToken. Can't create a map from
+  // nothing here: doing that needs image data this pure, DOM-free engine has no access to
+  // (see ui/app.js's Map Library "Use" flow, which is how a map actually gets prepared).
+  function setActiveMap(state, mapName) {
+    if (!hasRealMapData(state, mapName)) return state;
+    const nextState = clone(state);
+    nextState.mapName = mapName;
+    return nextState;
+  }
+
   // PHB movement/diagonals: every *other* diagonal square moved this turn costs double a
   // normal square (5/10/5/10 ft...), not a flat cost per square. `diagonalStepsAlreadyUsed`
   // carries the parity across a token's whole turn, even across separate moveToken() calls,
@@ -620,10 +639,12 @@
     currentGrid,
     feetPerSquare,
     gridMoveCost,
+    hasRealMapData,
     moveToken,
     nextTurn,
     parseCommand,
     removeToken,
+    setActiveMap,
     setMapGrid,
     setMapImage,
     setMapView,

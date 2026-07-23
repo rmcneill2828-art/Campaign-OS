@@ -100,6 +100,29 @@ test("applyActions ignores an unknown action type without throwing", () => {
   assert.deepEqual(messages, []);
 });
 
+test("applyActions handles next_turn, naming the newly active token and round", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 5 }).state;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [{ type: "next_turn" }]);
+  assert.match(messages[0], /Round 1 -- Darkhawk's turn\./);
+  assert.equal(next.turn.tokenId, next.tokens.find((t) => t.name === "Darkhawk").id);
+});
+
+test("applyActions handles switch_map for an already-prepared map and rejects an unprepared one", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.setMapImage(state, "The Standing Ring", "image-key-789");
+
+  const ok = CampaignOSDMBridge.applyActions(state, [{ type: "switch_map", map: "The Standing Ring" }]);
+  assert.equal(ok.state.mapName, "The Standing Ring");
+  assert.match(ok.messages[0], /scene shifts to The Standing Ring/);
+
+  const rejected = CampaignOSDMBridge.applyActions(state, [{ type: "switch_map", map: "Nowhere Prepared" }]);
+  assert.equal(rejected.state.mapName, "Urskelde", "an unprepared map should not change the active map");
+  assert.match(rejected.messages[0], /could not find a prepared map/);
+});
+
 test("applyActions moves a token to the requested grid position", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Goblin 1" }).state; // lands at (4, 4)

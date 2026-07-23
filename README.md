@@ -98,8 +98,15 @@ The "Claude DM" panel works two ways:
   `X attacks Y` phrasing. No network calls, no setup.
 - **Connected:** commands are handled by a real Claude Code call, which can narrate freely
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
-  token on the grid), referencing tokens by name and reasoning about the current encounter
-  state -- including where everything currently stands on the grid.
+  token on the grid, advance to the next turn, switch to a different prepared map),
+  referencing tokens by name and reasoning about the current encounter state -- including
+  where everything stands on the grid, whose turn it is, and how much movement each token
+  has left this turn. `next_turn` and `move_token` are what actually let Claude run the
+  turn tracker and RAW speed-limited movement described above -- without calling
+  `next_turn`, turn order never starts and movement stays unconstrained (which is also the
+  correct default for narration outside formal combat). `switch_map` only works for maps
+  that already have real art or a campaign location behind them; Claude is told exactly
+  which map names are valid rather than allowed to invent one.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than

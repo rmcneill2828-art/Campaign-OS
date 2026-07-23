@@ -85,6 +85,23 @@
         const result = window.CampaignOS.moveToken(state, target.id, x, y);
         return { state: result.state, message: result.message, alreadyLogged: false };
       }
+      case "next_turn": {
+        const nextState = window.CampaignOS.nextTurn(state);
+        const activeToken = window.CampaignOS.tokensOnCurrentMap(nextState).find((token) => token.id === nextState.turn.tokenId);
+        return {
+          state: nextState,
+          message: activeToken ? `Round ${nextState.turn.round} -- ${activeToken.name}'s turn.` : "No tokens on this map to run initiative for.",
+          alreadyLogged: false
+        };
+      }
+      case "switch_map": {
+        const mapName = String(action.map || "").trim();
+        const nextState = window.CampaignOS.setActiveMap(state, mapName);
+        if (nextState === state) {
+          return { state, message: `(DM assistant) could not find a prepared map named "${action.map}".`, alreadyLogged: false };
+        }
+        return { state: nextState, message: `The scene shifts to ${mapName}.`, alreadyLogged: false };
+      }
       default:
         return { state, message: null, alreadyLogged: false };
     }

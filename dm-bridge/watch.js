@@ -53,6 +53,8 @@ const SYSTEM_PROMPT = [
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',
   `{"type": "toggle_condition", "target": "<exact token name>", "condition": "${CONDITION_LIST.join("|")}"}`,
   '{"type": "move_token", "target": "<exact token name>", "x": <integer>, "y": <integer>}',
+  '{"type": "next_turn"}',
+  '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -68,6 +70,19 @@ const SYSTEM_PROMPT = [
   "so just omit both flags instead. A single attack action already resolves a monster's full",
   "Multiattack (e.g. a troll's Bite + two Claws) automatically -- issue one attack action per turn,",
   "not one per individual attack in its stat block.",
+  "",
+  "Call next_turn whenever narration signals moving on to the next creature's turn or a new round",
+  "in formal combat (the DM says \"next turn\"/\"moving on\", or you've fully resolved one token's",
+  "actions for its turn). move_token only enforces a token's speed once turn order is running AND",
+  "it's that specific token's active turn -- before turn order starts, or for any other token,",
+  "movement is unrestricted, so don't worry about distance for narration outside formal combat.",
+  "Each token's line below shows its speed and how much movement it has left this turn.",
+  "",
+  "Use switch_map when narration moves the scene to a different prepared map -- e.g. \"the party",
+  "leaves the cellar and heads outside.\" The map name must exactly match one of the names listed",
+  "in \"Maps available to switch to\" below. If the destination isn't listed, it hasn't been",
+  "prepared yet -- narrate the transition in prose instead and let the DM load that map first,",
+  "rather than inventing a switch_map action for a map that doesn't exist.",
   "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
@@ -95,6 +110,10 @@ function isValidAction(action) {
       return typeof action.target === "string" && CONDITION_LIST.includes(action.condition);
     case "move_token":
       return typeof action.target === "string" && Number.isFinite(action.x) && Number.isFinite(action.y);
+    case "next_turn":
+      return true;
+    case "switch_map":
+      return typeof action.map === "string" && action.map.trim().length > 0;
     default:
       return false;
   }
@@ -125,9 +144,16 @@ function buildPrompt(request) {
   }
 
   const grid = state.grid || {};
+  const availableMaps = Array.isArray(state.availableMaps) ? state.availableMaps : [];
   lines.push(
     `Current map: ${state.mapName || "(none)"}`,
     `Grid size: ${grid.columns || 12} columns x ${grid.rows || 8} rows (1-based, top-left is 1,1).`,
+    state.activeToken
+      ? `Turn order: running -- round ${state.round || 1}, ${state.activeToken}'s turn.`
+      : "Turn order: not running -- use next_turn to start it once formal combat begins.",
+    availableMaps.length
+      ? `Maps available to switch to: ${availableMaps.join(", ")}.`
+      : "No other prepared maps to switch to right now.",
     "Tokens on the map:"
   );
   if (tokens.length === 0) {
@@ -137,7 +163,9 @@ function buildPrompt(request) {
       const conditions = Array.isArray(t.conditions) && t.conditions.length
         ? `, conditions: ${t.conditions.join(", ")}`
         : "";
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}${conditions}`);
+      const speed = Number.isFinite(t.speed) ? t.speed : 30;
+      const movementLeft = Number.isFinite(t.movementLeft) ? t.movementLeft : speed;
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

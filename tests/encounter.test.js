@@ -343,6 +343,26 @@ test("setMapView stores feetPerSquare (defaulting to 5) and moveToken's cost sca
   assert.equal(moved.movementUsed, 20);
 });
 
+test("hasRealMapData is true only once a map has real art or a campaign sourcePath", () => {
+  let state = stateOnMap("Urskelde");
+  assert.equal(CampaignOS.hasRealMapData(state, "Urskelde"), false, "a bare map name with no art/sourcePath isn't real map data yet");
+
+  state = CampaignOS.setMapImage(state, "Urskelde", "image-key-123");
+  assert.equal(CampaignOS.hasRealMapData(state, "Urskelde"), true);
+  assert.equal(CampaignOS.hasRealMapData(state, "Nonexistent Map"), false);
+});
+
+test("setActiveMap switches to an already-prepared map and rejects one with no real data", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.setMapImage(state, "The Standing Ring", "image-key-456");
+
+  const switched = CampaignOS.setActiveMap(state, "The Standing Ring");
+  assert.equal(switched.mapName, "The Standing Ring");
+
+  const rejected = CampaignOS.setActiveMap(state, "Nowhere Prepared");
+  assert.equal(rejected, state, "switching to an unprepared map should be rejected (same state reference)");
+});
+
 test("attack returns a failure message when attacker or target cannot be found", () => {
   const state = stateOnMap("Urskelde");
   const result = CampaignOS.attack(state, "missing-attacker", "missing-target");

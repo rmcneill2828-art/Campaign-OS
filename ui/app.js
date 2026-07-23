@@ -1362,6 +1362,9 @@
       state: {
         mapName: state.mapName,
         grid: window.CampaignOS.currentGrid(state),
+        round: state.turn?.round || 0,
+        activeToken: activeTokens().find((token) => token.id === state.turn?.tokenId)?.name || null,
+        availableMaps: loadedMapNames().filter((name) => name !== state.mapName),
         tokens: activeTokens().map((token) => ({
           name: token.name,
           type: token.type,
@@ -1370,6 +1373,8 @@
           hp: token.hp,
           maxHp: token.maxHp,
           ac: token.ac,
+          speed: token.speed ?? 30,
+          movementLeft: Math.max(0, (token.speed ?? 30) - (token.movementUsed || 0)),
           conditions: token.conditions
         }))
       },
