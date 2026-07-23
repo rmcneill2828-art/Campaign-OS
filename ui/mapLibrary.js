@@ -63,9 +63,16 @@
     return runTransaction("readwrite", (store) => store.delete(key));
   }
 
+  // Escape hatch for a library that's gotten into a bad state (e.g. a bulk import from
+  // before image downscaling existed, large enough that just loading the list is heavy) --
+  // wipes every entry so the DM can start over with the current, size-capped upload path.
+  function clearAll() {
+    return runTransaction("readwrite", (store) => store.clear());
+  }
+
   function getEntry(key) {
     return runTransaction("readonly", (store) => store.get(key));
   }
 
-  window.CampaignOSMapLibrary = { listEntries, saveEntry, deleteEntry, getEntry, normalizeName };
+  window.CampaignOSMapLibrary = { listEntries, saveEntry, deleteEntry, clearAll, getEntry, normalizeName };
 })();

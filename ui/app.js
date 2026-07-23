@@ -30,10 +30,12 @@
   const libraryName = document.querySelector("#libraryName");
   const libraryImageInput = document.querySelector("#libraryImageInput");
   const libraryList = document.querySelector("#libraryList");
+  const libraryClearAll = document.querySelector("#libraryClearAll");
   const mapLibraryAddForm = document.querySelector("#mapLibraryAddForm");
   const mapLibraryName = document.querySelector("#mapLibraryName");
   const mapLibraryImageInput = document.querySelector("#mapLibraryImageInput");
   const mapLibraryList = document.querySelector("#mapLibraryList");
+  const mapLibraryClearAll = document.querySelector("#mapLibraryClearAll");
   const mapSelect = document.querySelector("#mapSelect");
   const mapImageInput = document.querySelector("#mapImageInput");
   const adjustGrid = document.querySelector("#adjustGrid");
@@ -302,9 +304,15 @@
     renderTokenSheet();
     renderCombatLog();
     renderCampaign();
-    renderTokenLibrary();
-    renderMapLibrary();
   }
+
+  // Both libraries are pure IndexedDB state with no dependency on the encounter (`state`)
+  // at all, so unlike everything else in render(), they deliberately do NOT get refreshed
+  // on every render() call -- render() runs after nearly every interaction (a token move, a
+  // damage button), and re-fetching + re-decoding every saved image on every one of those
+  // was real, compounding overhead. These are called once at boot and again after whatever
+  // specifically changes the library (add/delete) -- see their call sites below.
+  const LIBRARY_THUMBNAIL_LIMIT = 40;
 
   function renderTokenLibrary() {
     window.CampaignOSTokenLibrary.listEntries().then((entries) => {
@@ -316,11 +324,16 @@
         libraryList.appendChild(empty);
         return;
       }
-      entries.forEach((entry) => {
+      entries.forEach((entry, index) => {
         const row = document.createElement("div");
         row.className = "library-item";
+        // Rendering an <img> means the browser decodes it into a full bitmap -- fine for a
+        // handful of entries, but doing that for hundreds at once (a bulk-imported asset
+        // pack) is exactly what can crash the tab. Past the limit, list by name only; the
+        // entry (and Remove) still works, it just skips the thumbnail decode.
+        const thumbnail = index < LIBRARY_THUMBNAIL_LIMIT ? `<img src="${entry.image}" alt="">` : "<span></span>";
         row.innerHTML = `
-          <img src="${entry.image}" alt="">
+          ${thumbnail}
           <span>${escapeHtml(entry.displayName)}</span>
           <button type="button" data-key="${escapeAttribute(entry.key)}">Remove</button>
         `;
@@ -329,6 +342,12 @@
         });
         libraryList.appendChild(row);
       });
+      if (entries.length > LIBRARY_THUMBNAIL_LIMIT) {
+        const note = document.createElement("p");
+        note.className = "library-empty";
+        note.textContent = `+${entries.length - LIBRARY_THUMBNAIL_LIMIT} more (thumbnails hidden past ${LIBRARY_THUMBNAIL_LIMIT} to save memory).`;
+        libraryList.appendChild(note);
+      }
     });
   }
 
@@ -342,11 +361,12 @@
         mapLibraryList.appendChild(empty);
         return;
       }
-      entries.forEach((entry) => {
+      entries.forEach((entry, index) => {
         const row = document.createElement("div");
         row.className = "library-item map-library-item";
+        const thumbnail = index < LIBRARY_THUMBNAIL_LIMIT ? `<img src="${entry.image}" alt="">` : "<span></span>";
         row.innerHTML = `
-          <img src="${entry.image}" alt="">
+          ${thumbnail}
           <span>${escapeHtml(entry.displayName)}</span>
           <button type="button" data-action="use">Use</button>
           <button type="button" data-action="remove">Remove</button>
@@ -357,6 +377,12 @@
         });
         mapLibraryList.appendChild(row);
       });
+      if (entries.length > LIBRARY_THUMBNAIL_LIMIT) {
+        const note = document.createElement("p");
+        note.className = "library-empty";
+        note.textContent = `+${entries.length - LIBRARY_THUMBNAIL_LIMIT} more (thumbnails hidden past ${LIBRARY_THUMBNAIL_LIMIT} to save memory).`;
+        mapLibraryList.appendChild(note);
+      }
     });
   }
 
@@ -1289,6 +1315,22 @@
     renderMapLibrary();
   });
 
+  libraryClearAll.addEventListener("click", () => {
+    if (!window.confirm("Remove every saved token art entry? This can't be undone.")) return;
+    window.CampaignOSTokenLibrary.clearAll().then(() => {
+      commandResult.textContent = "Token library cleared.";
+      renderTokenLibrary();
+    });
+  });
+
+  mapLibraryClearAll.addEventListener("click", () => {
+    if (!window.confirm("Remove every saved map library entry? This can't be undone.")) return;
+    window.CampaignOSMapLibrary.clearAll().then(() => {
+      commandResult.textContent = "Map library cleared.";
+      renderMapLibrary();
+    });
+  });
+
   function nameFromFileName(fileName) {
     return String(fileName || "")
       .replace(/\.[^.]+$/, "")
@@ -1914,5 +1956,7 @@
   }
 
   render();
+  renderTokenLibrary();
+  renderMapLibrary();
   tryRestoreDMBridge();
 })();
