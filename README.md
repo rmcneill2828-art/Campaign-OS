@@ -79,6 +79,19 @@ dependencies to install for the app itself. See Tests, below, for running the te
   matching (maps are explicitly picked, not auto-attached to something being spawned), and
   names aren't stripped of trailing numbers the way "Goblin 3" collapses to "goblin" --
   a map called "Level 2" stays "Level 2".
+- Tokens Folder / Maps Folder (Setup tab): for a whole art pack -- hundreds or thousands
+  of files -- connect the folder directly (File System Access API, same picker the Claude
+  DM bridge uses) instead of uploading everything into the app. Nothing is bulk-copied:
+  connecting only reads file *names* to build a searchable index; actual bytes are read
+  one file at a time, only for something that's actually being used (a token about to
+  spawn, a map you pick), and even then downscaled the same as any other upload before
+  being cached. Subfolders are searched too, so an asset pack's own category folders
+  (`Adventurers/`, `Creatures/`, etc.) don't need flattening first. This is what a large
+  asset pack should use -- copying thousands of full-resolution images into IndexedDB via
+  the libraries above is exactly what crashed the tab with "Aw, Snap" (Out of Memory)
+  during development; see git history around the image-downscaling and library-render
+  fixes if curious. Permission is per-browser-session (re-click Connect to re-grant after
+  reopening the app, same as the DM bridge folder).
 - Character creator: build a new 5e character sheet (computed ability modifiers,
   proficiency bonus, HP, AC, saves, skills, one attack) and write it straight into
   the campaign repo's `characters/` folder (see below)
@@ -217,14 +230,16 @@ Campaign OS
 |-- engine/         Pure, unit-tested logic: encounter state, campaign import/parsing, the
 |                   dm-bridge action dispatcher, and the character creator's 5e math/markdown
 |                   generation -- no DOM, runnable under Node
-|-- ui/             Browser UI glue: rendering, event wiring, and the IndexedDB-backed token
-|                   library / map library / image store / dm-bridge folder-handle store
+|-- ui/             Browser UI glue: rendering, event wiring, the IndexedDB-backed token
+|                   library / map library / image store / dm-bridge folder-handle store,
+|                   and the File System Access API folder-reference layer (assetFolders.js
+|                   persists picked directory handles, folderAssets.js indexes/reads them)
 |-- dm-bridge/      watch.js -- the Node script that bridges the browser to the local
 |                   `claude` CLI for live combat narration and the End Session write-back,
 |                   plus a plain (Claude-free) file write for Create Character -- both
 |                   write into the DnD campaign repo (see above)
-`-- tests/          node:test suite for engine/ and the IndexedDB name-matching logic in
-                    ui/tokenLibrary.js
+`-- tests/          node:test suite for engine/ and the pure (non-IndexedDB, non-File-System-
+                    Access) logic in ui/tokenLibrary.js, ui/mapLibrary.js, ui/folderAssets.js
 ```
 
 To import a campaign: open `index.html`, use the Campaign file picker to choose a campaign

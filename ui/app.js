@@ -36,6 +36,12 @@
   const mapLibraryImageInput = document.querySelector("#mapLibraryImageInput");
   const mapLibraryList = document.querySelector("#mapLibraryList");
   const mapLibraryClearAll = document.querySelector("#mapLibraryClearAll");
+  const tokenFolderConnect = document.querySelector("#tokenFolderConnect");
+  const tokenFolderStatus = document.querySelector("#tokenFolderStatus");
+  const mapFolderConnect = document.querySelector("#mapFolderConnect");
+  const mapFolderStatus = document.querySelector("#mapFolderStatus");
+  const mapFolderSearch = document.querySelector("#mapFolderSearch");
+  const mapFolderResults = document.querySelector("#mapFolderResults");
   const mapSelect = document.querySelector("#mapSelect");
   const mapImageInput = document.querySelector("#mapImageInput");
   const adjustGrid = document.querySelector("#adjustGrid");
@@ -99,6 +105,10 @@
   let gridDrag = null;
   let suppressGridClick = false;
   let dmBridgeDirHandle = null;
+  let tokensFolderHandle = null;
+  let tokensFolderIndex = []; // [{ name, key, handle }] -- metadata only, no bytes read yet
+  let mapsFolderHandle = null;
+  let mapsFolderIndex = [];
   let dmBridgePendingId = null;
   let dmBridgePollTimer = null;
   let dmBridgeTimeoutHandle = null;
@@ -419,10 +429,24 @@
     let changed = false;
     for (const token of sourceState.tokens) {
       if (token.image) continue;
-      const libraryImage = await window.CampaignOSTokenLibrary.findImage(token.name);
+      let libraryImage = await window.CampaignOSTokenLibrary.findImage(token.name);
+      let fromFolder = false;
+      // Fall back to the connected Tokens folder (if any) only when the manually-saved
+      // Token Library has no match -- reads exactly one file, never the whole folder.
+      if (!libraryImage && tokensFolderIndex.length) {
+        const entry = window.CampaignOSFolderAssets.findInIndex(tokensFolderIndex, token.name, window.CampaignOSTokenLibrary.normalizeName);
+        if (entry) {
+          libraryImage = await window.CampaignOSFolderAssets.readEntryAsDataUrl(entry);
+          fromFolder = true;
+        }
+      }
       if (libraryImage) {
+        // Folder-sourced art hasn't been through the Token Library's own add-form (which
+        // downscales before saving) -- do it here so a full-resolution source file doesn't
+        // get copied into the image store as-is.
+        const finalImage = fromFolder ? (await resizeImageDataUrl(libraryImage, 512, "image/png")).dataUrl : libraryImage;
         const key = window.CampaignOSImageStore.generateKey("token");
-        await window.CampaignOSImageStore.saveImage(key, libraryImage);
+        await window.CampaignOSImageStore.saveImage(key, finalImage);
         nextState = window.CampaignOS.updateToken(nextState, token.id, { image: key });
         changed = true;
       }
@@ -1393,6 +1417,144 @@
     }
   }
 
+  // Shared connect flow for the Maps/Tokens folders -- same re-grant-then-repick pattern as
+  // the DM bridge connect handler above, but read-only (these folders are never written to).
+  async function connectAssetFolder(kind, statusEl) {
+    if (!window.showDirectoryPicker) {
+      statusEl.textContent = "Not supported in this browser -- use Chrome or Edge.";
+      return null;
+    }
+    let handle = await window.CampaignOSAssetFolders.loadHandle(kind).catch(() => null);
+    if (handle) {
+      const permission = await handle.requestPermission({ mode: "read" }).catch(() => "denied");
+      if (permission !== "granted") handle = null;
+    }
+    if (!handle) {
+      handle = await window.showDirectoryPicker({ id: `campaign-os-${kind}-folder`, mode: "read" });
+      await window.CampaignOSAssetFolders.saveHandle(kind, handle);
+    }
+    return handle;
+  }
+
+  tokenFolderConnect.addEventListener("click", async () => {
+    try {
+      const handle = await connectAssetFolder("tokens", tokenFolderStatus);
+      if (handle) await indexTokensFolder(handle);
+    } catch (err) {
+      if (err.name !== "AbortError") tokenFolderStatus.textContent = `Connection failed: ${err.message}`;
+    }
+  });
+
+  async function indexTokensFolder(handle) {
+    tokensFolderHandle = handle;
+    tokenFolderStatus.textContent = `Indexing "${handle.name}"...`;
+    tokenFolderStatus.classList.remove("connected");
+    tokensFolderIndex = await window.CampaignOSFolderAssets.indexFolder(handle, window.CampaignOSTokenLibrary.normalizeName);
+    tokenFolderStatus.textContent = `Connected to "${handle.name}" -- ${tokensFolderIndex.length} images indexed.`;
+    tokenFolderStatus.classList.add("connected");
+  }
+
+  mapFolderConnect.addEventListener("click", async () => {
+    try {
+      const handle = await connectAssetFolder("maps", mapFolderStatus);
+      if (handle) await indexMapsFolder(handle);
+    } catch (err) {
+      if (err.name !== "AbortError") mapFolderStatus.textContent = `Connection failed: ${err.message}`;
+    }
+  });
+
+  async function indexMapsFolder(handle) {
+    mapsFolderHandle = handle;
+    mapFolderStatus.textContent = `Indexing "${handle.name}"...`;
+    mapFolderStatus.classList.remove("connected");
+    mapFolderSearch.disabled = true;
+    mapsFolderIndex = await window.CampaignOSFolderAssets.indexFolder(handle, window.CampaignOSMapLibrary.normalizeName);
+    mapFolderStatus.textContent = `Connected to "${handle.name}" -- ${mapsFolderIndex.length} maps indexed.`;
+    mapFolderStatus.classList.add("connected");
+    mapFolderSearch.disabled = false;
+    renderMapFolderResults();
+  }
+
+  // Runs once at startup, same silent-reconnect-if-still-granted pattern as
+  // tryRestoreDMBridge -- no permission prompt without a user gesture behind it.
+  async function tryRestoreAssetFolders() {
+    if (!window.showDirectoryPicker) return;
+
+    const tokenHandle = await window.CampaignOSAssetFolders.loadHandle("tokens").catch(() => null);
+    if (tokenHandle) {
+      const permission = await tokenHandle.queryPermission({ mode: "read" }).catch(() => "denied");
+      if (permission === "granted") await indexTokensFolder(tokenHandle);
+      else tokenFolderStatus.textContent = `Previously connected to "${tokenHandle.name}" -- click Connect to re-grant access.`;
+    }
+
+    const mapHandle = await window.CampaignOSAssetFolders.loadHandle("maps").catch(() => null);
+    if (mapHandle) {
+      const permission = await mapHandle.queryPermission({ mode: "read" }).catch(() => "denied");
+      if (permission === "granted") await indexMapsFolder(mapHandle);
+      else mapFolderStatus.textContent = `Previously connected to "${mapHandle.name}" -- click Connect to re-grant access.`;
+    }
+  }
+
+  const MAP_FOLDER_RESULTS_LIMIT = 50;
+
+  function renderMapFolderResults() {
+    mapFolderResults.innerHTML = "";
+    if (!mapsFolderIndex.length) return;
+
+    const query = mapFolderSearch.value.trim().toLowerCase();
+    const matches = query
+      ? mapsFolderIndex.filter((entry) => entry.name.toLowerCase().includes(query))
+      : mapsFolderIndex.slice().sort((a, b) => a.name.localeCompare(b.name)).slice(0, MAP_FOLDER_RESULTS_LIMIT);
+
+    if (!query) {
+      const hint = document.createElement("p");
+      hint.className = "library-empty";
+      hint.textContent = `Showing the first ${Math.min(MAP_FOLDER_RESULTS_LIMIT, mapsFolderIndex.length)} of ${mapsFolderIndex.length} -- type to search.`;
+      mapFolderResults.appendChild(hint);
+    } else if (!matches.length) {
+      const empty = document.createElement("p");
+      empty.className = "library-empty";
+      empty.textContent = "No matches.";
+      mapFolderResults.appendChild(empty);
+      return;
+    }
+
+    matches.slice(0, MAP_FOLDER_RESULTS_LIMIT).forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "library-item map-library-item";
+      row.innerHTML = `
+        <span></span>
+        <span>${escapeHtml(entry.name)}</span>
+        <button type="button" data-action="use">Use</button>
+      `;
+      row.querySelector('[data-action="use"]').addEventListener("click", () => useMapFolderEntry(entry));
+      mapFolderResults.appendChild(row);
+    });
+  }
+
+  mapFolderSearch.addEventListener("input", renderMapFolderResults);
+
+  // Reads exactly one file from the connected Maps folder (nothing else in it) and loads it
+  // as the active map -- same downscale-then-store flow as a direct upload or the manual Map
+  // Library's "Use", just sourced from the live folder handle instead of a saved copy.
+  async function useMapFolderEntry(entry) {
+    const mapName = entry.name;
+    const raw = await window.CampaignOSFolderAssets.readEntryAsDataUrl(entry);
+    const resized = await resizeImageDataUrl(raw, 1600, "image/jpeg", 0.85);
+    const previousKey = state.maps?.[mapName]?.image;
+    const key = window.CampaignOSImageStore.generateKey("map");
+    await window.CampaignOSImageStore.saveImage(key, resized.dataUrl);
+    if (previousKey && !previousKey.startsWith("data:")) {
+      window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
+    }
+    setActiveMap(mapName);
+    updateState(window.CampaignOS.setMapImage(state, mapName, key, {
+      aspectRatio: `${resized.width} / ${resized.height}`,
+      sourcePath: `Maps folder/${entry.name}`
+    }));
+    commandResult.textContent = `${mapName} loaded from the Maps folder.`;
+  }
+
   async function sendDMBridgeCommand(command) {
     const id = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const payload = {
@@ -1959,4 +2121,5 @@
   renderTokenLibrary();
   renderMapLibrary();
   tryRestoreDMBridge();
+  tryRestoreAssetFolders();
 })();

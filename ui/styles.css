@@ -901,6 +901,27 @@ body[data-fog="on"] .map-tile:hover {
   border-radius: 3px;
 }
 
+.folder-connect {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.folder-status {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.folder-status.connected {
+  color: var(--accent);
+}
+
+#mapFolderSearch {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
 .character-creator-form {
   display: flex;
   flex-direction: column;

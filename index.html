@@ -155,6 +155,15 @@
             </section>
 
             <section class="panel-section">
+              <h2>Tokens Folder</h2>
+              <p class="library-hint">For a whole art pack (hundreds/thousands of portraits): connect the folder directly instead of uploading everything into the app. Nothing is copied in bulk -- art is read straight from disk and only cached (downscaled, one at a time) for tokens that actually get spawned. Subfolders are searched too. Matching works the same as the Token Library above (case-insensitive, "Goblin 3" matches a "goblin" file).</p>
+              <div class="folder-connect">
+                <button id="tokenFolderConnect" type="button">Connect Tokens Folder</button>
+                <span id="tokenFolderStatus" class="folder-status">Not connected.</span>
+              </div>
+            </section>
+
+            <section class="panel-section">
               <h2>Map Library</h2>
               <p class="library-hint">Upload battle maps once and reuse them later instead of picking a file every time -- click "Use" on an entry to load it as the active map (creating one with that name if it doesn't exist yet, or replacing the current map's art if you type over an existing map name first). Pick one file plus a name for a custom label, or pick several files at once to add them all using their filenames.</p>
               <form id="mapLibraryAddForm" class="library-add-form">
@@ -164,6 +173,17 @@
               </form>
               <div id="mapLibraryList" class="library-list map-library-list"></div>
               <button id="mapLibraryClearAll" type="button" class="danger-button library-clear-all">Clear All</button>
+            </section>
+
+            <section class="panel-section">
+              <h2>Maps Folder</h2>
+              <p class="library-hint">For a whole battlemap pack (hundreds of maps): connect the folder directly instead of uploading everything into the app. Search by name below and click "Use" to load a match as the active map -- only that one file is actually read; nothing else in the folder is touched until you pick it. Subfolders are searched too.</p>
+              <div class="folder-connect">
+                <button id="mapFolderConnect" type="button">Connect Maps Folder</button>
+                <span id="mapFolderStatus" class="folder-status">Not connected.</span>
+              </div>
+              <input id="mapFolderSearch" type="search" placeholder="Search maps by name..." aria-label="Search the connected maps folder" disabled>
+              <div id="mapFolderResults" class="library-list map-library-list"></div>
             </section>
 
             <section class="panel-section">
@@ -295,6 +315,8 @@
     <script src="engine/characterCreator.js"></script>
     <script src="ui/tokenLibrary.js"></script>
     <script src="ui/mapLibrary.js"></script>
+    <script src="ui/assetFolders.js"></script>
+    <script src="ui/folderAssets.js"></script>
     <script src="ui/dmBridgeStore.js"></script>
     <script src="ui/imageStore.js"></script>
     <script src="ui/app.js"></script>
