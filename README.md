@@ -40,12 +40,47 @@ Current features:
 - Fog tiles
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`
+- Optional Claude DM bridge for real narration and tool-calling (see below)
 
 Week 3 attack command:
 
 ```text
 Goblin 1 attacks Darkhawk.
 ```
+
+## Claude DM bridge
+
+The "Claude DM" panel works two ways:
+
+- **Not connected (default):** a small local regex parser handles `spawn N <monster>` and
+  `X attacks Y` phrasing. No network calls, no setup.
+- **Connected:** commands are handled by a real Claude Code call, which can narrate freely
+  and decide on structured actions (spawn, attack, damage, heal, toggle a condition),
+  referencing tokens by name and reasoning about the current encounter state.
+
+There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
+CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than
+assumed. Instead, the connected mode uses a local file-based bridge to the `claude` CLI you
+already have installed and authenticated on this machine:
+
+1. In a terminal, from the project root, run:
+   ```text
+   node dm-bridge/watch.js
+   ```
+   Leave it running. It watches `dm-bridge/request.json` and calls `claude -p` (defaulting to
+   Haiku; override with `DM_BRIDGE_MODEL=sonnet` etc.) whenever a new command comes in.
+2. In the app, click **Connect to Claude Code** in the Claude DM panel and pick the project's
+   `dm-bridge/` folder. This uses the browser's File System Access API (Chrome or Edge only --
+   there's no Firefox/Safari support for it yet), so the browser can write/read files directly
+   with no server of its own.
+3. Type a command and hit Run as usual. The app writes `dm-bridge/request.json`; the watcher
+   script asks Claude what should happen and writes `dm-bridge/response.json`; the app polls for
+   it and applies the result.
+
+Costs are billed to whatever the `claude` CLI on your machine is authenticated with (API key or
+subscription) -- there's no separate key stored in the browser. The first call in a while is the
+most expensive (Claude Code's own tool/system scaffolding has to populate the prompt cache);
+repeated calls within the cache window are much cheaper.
 
 ## Planned Shape
 

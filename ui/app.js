@@ -16,6 +16,8 @@
   const commandForm = document.querySelector("#commandForm");
   const commandInput = document.querySelector("#commandInput");
   const commandResult = document.querySelector("#commandResult");
+  const dmBridgeConnect = document.querySelector("#dmBridgeConnect");
+  const dmBridgeStatus = document.querySelector("#dmBridgeStatus");
   const mapSelect = document.querySelector("#mapSelect");
   const mapImageInput = document.querySelector("#mapImageInput");
   const adjustGrid = document.querySelector("#adjustGrid");
@@ -34,6 +36,9 @@
   let gridAdjusting = false;
   let gridDrag = null;
   let suppressGridClick = false;
+  let dmBridgeDirHandle = null;
+  let dmBridgePendingId = null;
+  let dmBridgePollTimer = null;
   campaignSearch.value = preferences.search || "";
   campaignFilter.value = preferences.filter || "all";
   showTemplates.checked = Boolean(preferences.showTemplates);
@@ -351,7 +356,7 @@
         group.appendChild(empty);
       }
 
-      items.slice(0, 10).forEach((item) => {
+      items.slice(0, 30).forEach((item) => {
         const card = document.createElement("div");
         card.className = item.id === selectedCampaignItemId ? "campaign-item active" : "campaign-item";
 
@@ -616,12 +621,113 @@
 
   commandForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (dmBridgeDirHandle) {
+      sendDMBridgeCommand(commandInput.value);
+      return;
+    }
     const result = window.CampaignOS.parseCommand(state, commandInput.value);
     state = result.state;
     saveEncounter();
     commandResult.textContent = result.message;
     render();
   });
+
+  dmBridgeConnect.addEventListener("click", async () => {
+    if (!window.showDirectoryPicker) {
+      dmBridgeStatus.textContent = "Not supported in this browser -- use Chrome or Edge.";
+      return;
+    }
+    try {
+      // Pick (or re-pick) the project's dm-bridge/ folder -- the same folder
+      // dm-bridge/watch.js reads and writes on the Node side.
+      const handle = await window.showDirectoryPicker({ id: "campaign-os-dm-bridge" });
+      dmBridgeDirHandle = handle;
+      dmBridgeStatus.textContent = `Connected to "${handle.name}" -- run dm-bridge/watch.js to process commands`;
+      dmBridgeStatus.classList.add("connected");
+      startDMBridgePolling();
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        dmBridgeStatus.textContent = `Connection failed: ${err.message}`;
+      }
+    }
+  });
+
+  async function sendDMBridgeCommand(command) {
+    const id = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const payload = {
+      id,
+      command,
+      state: {
+        mapName: state.mapName,
+        tokens: activeTokens().map((token) => ({
+          name: token.name,
+          type: token.type,
+          hp: token.hp,
+          maxHp: token.maxHp,
+          ac: token.ac,
+          conditions: token.conditions
+        }))
+      },
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await writeBridgeJson("request.json", payload);
+    } catch (err) {
+      commandResult.textContent = `Could not write to the DM bridge folder: ${err.message}`;
+      return;
+    }
+
+    dmBridgePendingId = id;
+    commandResult.textContent = "Waiting for Claude Code (run dm-bridge/watch.js if it isn't already running)...";
+  }
+
+  function startDMBridgePolling() {
+    if (dmBridgePollTimer) return;
+    dmBridgePollTimer = setInterval(checkDMBridgeResponse, 1500);
+  }
+
+  async function checkDMBridgeResponse() {
+    if (!dmBridgeDirHandle || !dmBridgePendingId) return;
+    let response;
+    try {
+      response = await readBridgeJson("response.json");
+    } catch {
+      return;
+    }
+    if (!response || response.id !== dmBridgePendingId) return;
+
+    dmBridgePendingId = null;
+    state = window.CampaignOSDMBridge.applyActions(state, response.actions || []);
+    saveEncounter();
+    commandResult.textContent = response.message || "(The DM assistant didn't include a narration.)";
+    render();
+  }
+
+  async function writeBridgeJson(name, obj) {
+    const fileHandle = await dmBridgeDirHandle.getFileHandle(name, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(obj, null, 2));
+    await writable.close();
+  }
+
+  async function readBridgeJson(name) {
+    let fileHandle;
+    try {
+      fileHandle = await dmBridgeDirHandle.getFileHandle(name);
+    } catch (err) {
+      if (err.name === "NotFoundError") return null;
+      throw err;
+    }
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    if (!text.trim()) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
 
   document.querySelector("#saveEncounter").addEventListener("click", () => {
     saveEncounter();
@@ -976,16 +1082,23 @@
       return window.CampaignOSCampaign.createCampaign();
     }
 
-    savedCampaign.files = savedCampaign.files.map((item) => ({
-      ...item,
-      category: window.CampaignOSCampaign.classify(item.path || "", item.text || ""),
-      isTemplate: Boolean(item.isTemplate || /(^|[\\/])template([\\/]|$)/i.test(item.path || ""))
-    }));
+    // Location entries are synthesized from rows inside a source file's table (see
+    // extractLocationEntries in campaign.js) -- their `path` is that source file's path,
+    // which would reclassify back to "notes" if run through classify() again. Leave them as-is.
+    savedCampaign.files = savedCampaign.files.map((item) => (item.sourceKind === "location-entry"
+      ? item
+      : {
+          ...item,
+          category: window.CampaignOSCampaign.classify(item.path || "", item.text || ""),
+          isTemplate: Boolean(item.isTemplate || window.CampaignOSCampaign.isTemplatePath(item.path || ""))
+        }));
 
-    savedCampaign.files = savedCampaign.files.map((item) => ({
-      ...item,
-      canSpawnToken: window.CampaignOSCampaign.canSpawnCharacterToken(item.path || "", item.category)
-    }));
+    savedCampaign.files = savedCampaign.files.map((item) => (item.sourceKind === "location-entry"
+      ? item
+      : {
+          ...item,
+          canSpawnToken: window.CampaignOSCampaign.canSpawnCharacterToken(item.path || "", item.category)
+        }));
 
     Object.keys(savedCampaign.categories).forEach((category) => {
       savedCampaign.categories[category] = savedCampaign.files.filter((item) => item.category === category);

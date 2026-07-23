@@ -689,6 +689,23 @@ body[data-fog="on"] .map-tile:hover {
   color: var(--muted);
 }
 
+.dm-bridge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.dm-bridge-status {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.dm-bridge-status.connected {
+  color: var(--accent);
+}
+
 .combat-log {
   display: grid;
   gap: 8px;
@@ -760,6 +777,31 @@ body[data-fog="on"] .map-tile:hover {
 
 .sheet-content strong {
   color: var(--text);
+}
+
+.sheet-content table {
+  width: 100%;
+  margin: 0 0 16px;
+  border-collapse: collapse;
+  overflow-x: auto;
+  display: block;
+}
+
+.sheet-content th,
+.sheet-content td {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.sheet-content thead th {
+  background: var(--panel-strong);
+  color: var(--accent);
+}
+
+.sheet-content tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 @media (max-width: 900px) {

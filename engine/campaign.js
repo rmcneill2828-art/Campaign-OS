@@ -31,6 +31,11 @@
       const item = buildItem(file, text);
       campaign.files.push(item);
       campaign.categories[item.category].push(item);
+
+      extractLocationEntries(item).forEach((locationItem) => {
+        campaign.files.push(locationItem);
+        campaign.categories.locations.push(locationItem);
+      });
     }
 
     return campaign;
@@ -54,7 +59,7 @@
       path,
       category,
       canSpawnToken: isCharacterToken,
-      isTemplate: /(^|[\\/])template([\\/]|$)/i.test(path),
+      isTemplate: isTemplatePath(path),
       summary: summarize(text),
       wordCount: text.trim() ? text.trim().split(/\s+/).length : 0,
       text
@@ -75,7 +80,7 @@
   }
 
   function classify(path, text) {
-    if (isWorldState(path)) return "locations";
+    if (isWorldState(path)) return "notes";
     if (isCampaignIndex(path)) return "notes";
     if (/(^|[\\/])characters?[\\/]/i.test(path) || /(^|[\\/])npcs?[\\/]/i.test(path)) return "characters";
     if (/(^|[\\/])locations?[\\/]/i.test(path) || /(^|[\\/])maps?[\\/]/i.test(path)) return "locations";
@@ -94,6 +99,94 @@
     return /(^|[\\/])world-state\.md$/i.test(path);
   }
 
+  // Matches a path segment that is "template" once an optional leading underscore
+  // (this campaign's convention: characters/_template.md, campaigns/_template/) and a
+  // trailing file extension are stripped -- not just any file/folder with "template" in it.
+  function isTemplatePath(path) {
+    return /(^|[\\/])_?template(\.[a-z0-9]+)?([\\/]|$)/i.test(path || "");
+  }
+
+  // world-state.md never gets its own per-place files in this campaign format --
+  // named locations only exist as rows in a "Known Locations" style table inside it.
+  // Pull those rows out as individually browsable/openable location items instead of
+  // treating the whole tracker file as one oddly-titled "location".
+  function extractLocationEntries(item) {
+    if (!isWorldState(item.path)) return [];
+    const lines = (item.text || "").split(/\r?\n/);
+    const entries = [];
+    let index = 0;
+
+    while (index < lines.length) {
+      if (/^#{1,4}\s*.*location/i.test(lines[index])) {
+        index = consumeLocationTable(lines, index + 1, entries, item);
+      } else {
+        index += 1;
+      }
+    }
+
+    return entries;
+  }
+
+  function consumeLocationTable(lines, start, entries, item) {
+    let index = start;
+    while (index < lines.length && !lines[index].trim()) index += 1;
+    if (!isTableRow(lines[index]) || !isSeparatorRow(lines[index + 1])) return index;
+    index += 2;
+
+    while (index < lines.length && isTableRow(lines[index])) {
+      const cells = splitTableRow(lines[index]);
+      const name = cleanLocationName(cells[0] || "");
+      if (name) entries.push(buildLocationItem(item, name, cells.slice(1).join(" -- ")));
+      index += 1;
+    }
+
+    return index;
+  }
+
+  function buildLocationItem(sourceItem, name, status) {
+    const plainStatus = (status || "").replace(/\*+/g, "").trim();
+    return {
+      id: `${sourceItem.path}#location-${slugify(name)}`,
+      title: name,
+      path: sourceItem.path,
+      category: "locations",
+      canSpawnToken: false,
+      isTemplate: sourceItem.isTemplate,
+      summary: plainStatus.slice(0, 220) || "No status recorded.",
+      wordCount: plainStatus ? plainStatus.split(/\s+/).length : 0,
+      text: `# ${name}\n\n${status || ""}`,
+      sourceKind: "location-entry"
+    };
+  }
+
+  function cleanLocationName(rawCell) {
+    return rawCell
+      .replace(/\*+/g, "")
+      .replace(/\s*\([^)]*\)\s*$/, "")
+      .trim();
+  }
+
+  function slugify(value) {
+    return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "location";
+  }
+
+  function isTableRow(line) {
+    return typeof line === "string" && line.includes("|") && line.trim().length > 0;
+  }
+
+  function isSeparatorRow(line) {
+    if (!isTableRow(line)) return false;
+    const cells = splitTableRow(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+  }
+
+  function splitTableRow(line) {
+    let trimmed = line.trim();
+    if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+    if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
+    return trimmed.split("|").map((cell) => cell.trim());
+  }
+
   function canSpawnCharacterToken(path, category) {
     return category === "characters" && !isCampaignIndex(path) && /(^|[\\/])(characters?|npcs?)[\\/]/i.test(path);
   }
@@ -109,8 +202,10 @@
 
   function tokenDraftFromItem(item) {
     const fields = extractFields(item.text || "");
+    const attack = extractPrimaryAttack(item.text || "");
     const name = item.title || fields.name || "Campaign Character";
     const maxHp = readNumber(fields.hp || fields.hitpoints || fields["hit points"], 12);
+    const initiativeBonus = readNumber(fields["initiative bonus"] || fields.initiative || fields.init, 0);
     return {
       name,
       icon: name.slice(0, 2).toUpperCase(),
@@ -118,9 +213,9 @@
       hp: maxHp,
       maxHp,
       ac: readNumber(fields.ac || fields["armor class"], 12),
-      attackBonus: readNumber(fields.attack || fields["attack bonus"], 3),
-      damageDice: fields.damage || fields["damage dice"] || "1d6+1",
-      initiative: readNumber(fields.initiative || fields.init, 10),
+      attackBonus: attack?.attackBonus ?? readNumber(fields.attack || fields["attack bonus"], 3),
+      damageDice: attack?.damageDice || fields.damage || fields["damage dice"] || "1d6+1",
+      initiative: rollDie(20) + initiativeBonus,
       conditions: [],
       sourcePath: item.path
     };
@@ -135,9 +230,46 @@
     return fields;
   }
 
+  // Character sheets in this campaign format put real combat numbers in an "### Attacks"
+  // markdown table (columns like "To Hit" / "Damage"), not a flat "Attack Bonus:" line --
+  // extractFields alone can't see them, so imported PCs were defaulting to a generic +3/1d6+1.
+  function extractPrimaryAttack(text) {
+    const lines = text.split(/\r?\n/);
+    const headingIndex = lines.findIndex((line) => /^#{1,4}\s+attacks\b/i.test(line.trim()));
+    if (headingIndex === -1) return null;
+
+    const searchLimit = Math.min(lines.length, headingIndex + 8);
+    let index = headingIndex + 1;
+    while (index < searchLimit) {
+      if (/^#{1,4}\s+/.test(lines[index])) return null;
+      if (isTableRow(lines[index]) && isSeparatorRow(lines[index + 1])) break;
+      index += 1;
+    }
+    if (index >= searchLimit || !isTableRow(lines[index]) || !isSeparatorRow(lines[index + 1])) return null;
+
+    const headerCells = splitTableRow(lines[index]).map((cell) => cell.toLowerCase());
+    const toHitIndex = headerCells.findIndex((cell) => cell.includes("to hit"));
+    const damageIndex = headerCells.findIndex((cell) => cell.includes("damage"));
+    if (toHitIndex === -1 || damageIndex === -1) return null;
+
+    const firstDataRow = splitTableRow(lines[index + 2] || "");
+    if (!firstDataRow.length) return null;
+
+    const attackBonus = readNumber(firstDataRow[toHitIndex], null);
+    const damageMatch = (firstDataRow[damageIndex] || "").match(/\d*d\d+(?:\s*[+-]\s*\d+)?/i);
+    const damageDice = damageMatch ? damageMatch[0].replace(/\s+/g, "") : null;
+    if (attackBonus === null && !damageDice) return null;
+
+    return { attackBonus, damageDice };
+  }
+
   function readNumber(value, fallback) {
     const match = String(value || "").match(/-?\d+/);
     return match ? Number(match[0]) : fallback;
+  }
+
+  function rollDie(sides) {
+    return Math.floor(Math.random() * sides) + 1;
   }
 
   window.CampaignOSCampaign = {
@@ -146,6 +278,7 @@
     importMarkdownFiles,
     classify,
     canSpawnCharacterToken,
+    isTemplatePath,
     tokenDraftFromItem
   };
 })();

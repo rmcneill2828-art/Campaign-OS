@@ -97,6 +97,10 @@
 
           <section class="panel-section">
             <h2>Claude DM</h2>
+            <div class="dm-bridge-row">
+              <button id="dmBridgeConnect" type="button">Connect to Claude Code</button>
+              <span id="dmBridgeStatus" class="dm-bridge-status">Not connected -- using local command parser</span>
+            </div>
             <form id="commandForm" class="command-form">
               <input id="commandInput" type="text" value="Three goblins emerge from the trees." aria-label="DM command">
               <button type="submit">Run</button>
@@ -114,6 +118,7 @@
 
     <script src="engine/encounter.js"></script>
     <script src="engine/campaign.js"></script>
+    <script src="engine/dmBridge.js"></script>
     <script src="ui/app.js"></script>
   </body>
 </html>

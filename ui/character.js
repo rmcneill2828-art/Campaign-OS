@@ -34,30 +34,86 @@
     const lines = markdown.split(/\r?\n/);
     const html = [];
     let listOpen = false;
+    let index = 0;
 
-    lines.forEach((line) => {
+    function closeList() {
+      if (listOpen) {
+        html.push("</ul>");
+        listOpen = false;
+      }
+    }
+
+    while (index < lines.length) {
+      const line = lines[index];
+
+      if (isTableRow(line) && isSeparatorRow(lines[index + 1] || "")) {
+        closeList();
+        html.push(renderTable(lines, index));
+        index = tableEnd(lines, index);
+        continue;
+      }
+
       if (/^\s*[-*]\s+/.test(line)) {
         if (!listOpen) {
           html.push("<ul>");
           listOpen = true;
         }
         html.push(`<li>${inline(line.replace(/^\s*[-*]\s+/, ""))}</li>`);
-        return;
+        index += 1;
+        continue;
       }
 
-      if (listOpen) {
-        html.push("</ul>");
-        listOpen = false;
-      }
+      closeList();
 
       if (/^###\s+/.test(line)) html.push(`<h3>${inline(line.replace(/^###\s+/, ""))}</h3>`);
       else if (/^##\s+/.test(line)) html.push(`<h2>${inline(line.replace(/^##\s+/, ""))}</h2>`);
       else if (/^#\s+/.test(line)) html.push(`<h1>${inline(line.replace(/^#\s+/, ""))}</h1>`);
       else if (line.trim()) html.push(`<p>${inline(line)}</p>`);
-    });
 
-    if (listOpen) html.push("</ul>");
+      index += 1;
+    }
+
+    closeList();
     return html.join("");
+  }
+
+  function isTableRow(line) {
+    return typeof line === "string" && line.includes("|") && line.trim().length > 0;
+  }
+
+  function isSeparatorRow(line) {
+    if (!isTableRow(line)) return false;
+    const cells = splitTableRow(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+  }
+
+  function splitTableRow(line) {
+    let trimmed = line.trim();
+    if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+    if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
+    return trimmed.split("|").map((cell) => cell.trim());
+  }
+
+  function tableEnd(lines, start) {
+    let index = start + 2;
+    while (index < lines.length && isTableRow(lines[index]) && !isSeparatorRow(lines[index])) {
+      index += 1;
+    }
+    return index;
+  }
+
+  function renderTable(lines, start) {
+    const headerCells = splitTableRow(lines[start]);
+    const bodyRows = [];
+    for (let index = start + 2; index < tableEnd(lines, start); index += 1) {
+      bodyRows.push(splitTableRow(lines[index]));
+    }
+
+    const head = `<thead><tr>${headerCells.map((cell) => `<th>${inline(cell)}</th>`).join("")}</tr></thead>`;
+    const body = bodyRows.length
+      ? `<tbody>${bodyRows.map((cells) => `<tr>${cells.map((cell) => `<td>${inline(cell)}</td>`).join("")}</tr>`).join("")}</tbody>`
+      : "";
+    return `<table>${head}${body}</table>`;
   }
 
   function inline(value) {

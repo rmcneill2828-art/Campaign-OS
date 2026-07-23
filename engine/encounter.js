@@ -293,7 +293,7 @@
     const total = d20 + attackBonus;
     const targetAc = Number(target.ac || 10);
     const isCritical = d20 === 20;
-    const isMiss = d20 === 1 || total < targetAc;
+    const isMiss = d20 === 1 || (!isCritical && total < targetAc);
 
     if (isMiss) {
       const message = `${attacker.name} attacks ${target.name}: ${d20} + ${attackBonus} = ${total} vs AC ${targetAc}. Miss.`;

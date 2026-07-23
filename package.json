@@ -1,0 +1,8 @@
+{
+  "name": "campaign-os",
+  "private": true,
+  "description": "AI-native tabletop campaign workspace. No build step for the app itself -- open index.html directly. This file exists only to run the engine test suite.",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}
