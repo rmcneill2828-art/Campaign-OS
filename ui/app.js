@@ -18,6 +18,10 @@
   const commandResult = document.querySelector("#commandResult");
   const dmBridgeConnect = document.querySelector("#dmBridgeConnect");
   const dmBridgeStatus = document.querySelector("#dmBridgeStatus");
+  const libraryAddForm = document.querySelector("#libraryAddForm");
+  const libraryName = document.querySelector("#libraryName");
+  const libraryImageInput = document.querySelector("#libraryImageInput");
+  const libraryList = document.querySelector("#libraryList");
   const mapSelect = document.querySelector("#mapSelect");
   const mapImageInput = document.querySelector("#mapImageInput");
   const adjustGrid = document.querySelector("#adjustGrid");
@@ -39,6 +43,8 @@
   let dmBridgeDirHandle = null;
   let dmBridgePendingId = null;
   let dmBridgePollTimer = null;
+  let dmBridgeTimeoutHandle = null;
+  const dmBridgeResponseTimeoutMs = 20000;
   campaignSearch.value = preferences.search || "";
   campaignFilter.value = preferences.filter || "all";
   showTemplates.checked = Boolean(preferences.showTemplates);
@@ -69,6 +75,51 @@
     renderTokenSheet();
     renderCombatLog();
     renderCampaign();
+    renderTokenLibrary();
+  }
+
+  function renderTokenLibrary() {
+    window.CampaignOSTokenLibrary.listEntries().then((entries) => {
+      libraryList.innerHTML = "";
+      if (!entries.length) {
+        const empty = document.createElement("p");
+        empty.className = "library-empty";
+        empty.textContent = "No art saved yet.";
+        libraryList.appendChild(empty);
+        return;
+      }
+      entries.forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "library-item";
+        row.innerHTML = `
+          <img src="${entry.image}" alt="">
+          <span>${escapeHtml(entry.displayName)}</span>
+          <button type="button" data-key="${escapeAttribute(entry.key)}">Remove</button>
+        `;
+        row.querySelector("button").addEventListener("click", () => {
+          window.CampaignOSTokenLibrary.deleteEntry(entry.key).then(renderTokenLibrary);
+        });
+        libraryList.appendChild(row);
+      });
+    });
+  }
+
+  // Attaches library art (matched by name) to any token that doesn't already have an
+  // image -- called after every action that can add tokens to the map (manual spawn,
+  // adding an imported character, and Claude DM bridge actions), so art shows up the
+  // same way no matter which path created the token.
+  async function applyLibraryImages(sourceState) {
+    let nextState = sourceState;
+    let changed = false;
+    for (const token of sourceState.tokens) {
+      if (token.image) continue;
+      const image = await window.CampaignOSTokenLibrary.findImage(token.name);
+      if (image) {
+        nextState = window.CampaignOS.updateToken(nextState, token.id, { image });
+        changed = true;
+      }
+    }
+    return { state: nextState, changed };
   }
 
   function renderMap() {
@@ -122,18 +173,52 @@
     renderGridHandles();
   }
 
+  let lastRenderedMapImageValue = undefined;
+
   function renderMapBackground() {
     const settings = currentMapSettings();
-    const image = settings.image || "";
     map.style.backgroundSize = settings.fitMode;
     map.style.backgroundRepeat = "no-repeat";
-    if (image) {
-      map.style.backgroundImage = `url("${image}")`;
-      map.classList.add("has-map-image");
-    } else {
+
+    const imageValue = settings.image || "";
+    // The map's `image` field is now an ui/imageStore.js key, not the actual image data
+    // -- avoid re-fetching from IndexedDB every render() call (token moves, damage,
+    // etc. all trigger one) when the active map's image hasn't actually changed.
+    if (imageValue === lastRenderedMapImageValue) return;
+    lastRenderedMapImageValue = imageValue;
+
+    if (!imageValue) {
       map.style.backgroundImage = "";
       map.classList.remove("has-map-image");
+      return;
     }
+
+    if (imageValue.startsWith("data:")) {
+      // Pre-migration save: the map's `image` field still holds raw inline base64
+      // from before images moved into IndexedDB. Show it immediately, then move it
+      // into the image store so this map stops bloating localStorage on every save.
+      map.style.backgroundImage = `url("${imageValue}")`;
+      map.classList.add("has-map-image");
+      migrateLegacyMapImage(state.mapName, imageValue);
+      return;
+    }
+
+    window.CampaignOSImageStore.loadImage(imageValue).then((dataUrl) => {
+      if (!dataUrl) {
+        map.style.backgroundImage = "";
+        map.classList.remove("has-map-image");
+        return;
+      }
+      map.style.backgroundImage = `url("${dataUrl}")`;
+      map.classList.add("has-map-image");
+    });
+  }
+
+  async function migrateLegacyMapImage(mapName, dataUrl) {
+    const key = window.CampaignOSImageStore.generateKey("map");
+    await window.CampaignOSImageStore.saveImage(key, dataUrl);
+    state = window.CampaignOS.setMapImage(state, mapName, key);
+    saveEncounter();
   }
 
   function renderMapControls() {
@@ -494,14 +579,15 @@
     }
   }
 
-  function addCampaignToken(item) {
+  async function addCampaignToken(item) {
     if (!state.mapName) {
       commandResult.textContent = "Load or open a map before adding tokens.";
       return;
     }
     const draft = window.CampaignOSCampaign.tokenDraftFromItem(item);
     const result = window.CampaignOS.addToken(state, draft);
-    state = result.state;
+    const enriched = await applyLibraryImages(result.state);
+    state = enriched.state;
     saveEncounter();
     commandResult.textContent = `${result.token.name} joined the encounter from ${item.title}.`;
     render();
@@ -619,18 +705,50 @@
     moveSelectedToken(x, y);
   }
 
-  commandForm.addEventListener("submit", (event) => {
+  commandForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (dmBridgeDirHandle) {
       sendDMBridgeCommand(commandInput.value);
       return;
     }
     const result = window.CampaignOS.parseCommand(state, commandInput.value);
-    state = result.state;
+    const enriched = await applyLibraryImages(result.state);
+    state = enriched.state;
     saveEncounter();
     commandResult.textContent = result.message;
     render();
   });
+
+  libraryAddForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const files = Array.from(libraryImageInput.files);
+    if (!files.length) return;
+
+    const typedName = libraryName.value.trim();
+    // A typed name only makes sense for a single file -- with several files selected
+    // at once, each one gets its own name derived from its filename instead.
+    const useTypedName = files.length === 1 && typedName;
+
+    for (const file of files) {
+      const name = useTypedName ? typedName : nameFromFileName(file.name);
+      const image = await readFileAsDataUrl(file);
+      await window.CampaignOSTokenLibrary.saveEntry(name, image);
+    }
+
+    commandResult.textContent = files.length === 1
+      ? `Added "${useTypedName ? typedName : nameFromFileName(files[0].name)}" to the token library.`
+      : `Added ${files.length} tokens to the library from their filenames.`;
+    libraryAddForm.reset();
+    renderTokenLibrary();
+  });
+
+  function nameFromFileName(fileName) {
+    return String(fileName || "")
+      .replace(/\.[^.]+$/, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
   dmBridgeConnect.addEventListener("click", async () => {
     if (!window.showDirectoryPicker) {
@@ -638,19 +756,53 @@
       return;
     }
     try {
-      // Pick (or re-pick) the project's dm-bridge/ folder -- the same folder
-      // dm-bridge/watch.js reads and writes on the Node side.
-      const handle = await window.showDirectoryPicker({ id: "campaign-os-dm-bridge" });
-      dmBridgeDirHandle = handle;
-      dmBridgeStatus.textContent = `Connected to "${handle.name}" -- run dm-bridge/watch.js to process commands`;
-      dmBridgeStatus.classList.add("connected");
-      startDMBridgePolling();
+      // If we've connected before, try re-granting permission on the stored handle
+      // first -- this is a single browser permission prompt, not a full re-pick of
+      // the folder. Only fall back to the picker if there's nothing stored yet, or
+      // the user denies the re-grant.
+      let handle = await window.CampaignOSDMBridgeStore.loadHandle().catch(() => null);
+      if (handle) {
+        const permission = await handle.requestPermission({ mode: "readwrite" }).catch(() => "denied");
+        if (permission !== "granted") handle = null;
+      }
+
+      if (!handle) {
+        // Pick (or re-pick) the project's dm-bridge/ folder -- the same folder
+        // dm-bridge/watch.js reads and writes on the Node side.
+        handle = await window.showDirectoryPicker({ id: "campaign-os-dm-bridge" });
+        await window.CampaignOSDMBridgeStore.saveHandle(handle);
+      }
+
+      connectDMBridge(handle);
     } catch (err) {
       if (err.name !== "AbortError") {
         dmBridgeStatus.textContent = `Connection failed: ${err.message}`;
       }
     }
   });
+
+  function connectDMBridge(handle) {
+    dmBridgeDirHandle = handle;
+    dmBridgeStatus.textContent = `Connected to "${handle.name}" -- run dm-bridge/watch.js to process commands`;
+    dmBridgeStatus.classList.add("connected");
+    startDMBridgePolling();
+  }
+
+  // Runs once at startup: if a folder was connected in a previous session and the
+  // browser still remembers granting it read/write access, reconnect silently with
+  // no click needed. If permission needs re-confirming, leave a hint rather than
+  // popping a permission prompt with no user gesture behind it (browsers require one).
+  async function tryRestoreDMBridge() {
+    if (!window.showDirectoryPicker) return;
+    const handle = await window.CampaignOSDMBridgeStore.loadHandle().catch(() => null);
+    if (!handle) return;
+    const permission = await handle.queryPermission({ mode: "readwrite" }).catch(() => "denied");
+    if (permission === "granted") {
+      connectDMBridge(handle);
+    } else {
+      dmBridgeStatus.textContent = `Previously connected to "${handle.name}" -- click Connect to re-grant access`;
+    }
+  }
 
   async function sendDMBridgeCommand(command) {
     const id = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -679,7 +831,21 @@
     }
 
     dmBridgePendingId = id;
+    setDMBridgeBusy(true);
     commandResult.textContent = "Waiting for Claude Code (run dm-bridge/watch.js if it isn't already running)...";
+
+    clearTimeout(dmBridgeTimeoutHandle);
+    dmBridgeTimeoutHandle = setTimeout(() => {
+      if (dmBridgePendingId !== id) return; // a later response already resolved this
+      dmBridgePendingId = null;
+      setDMBridgeBusy(false);
+      commandResult.textContent = "No response after 20s -- make sure `node dm-bridge/watch.js` is running, then try again.";
+    }, dmBridgeResponseTimeoutMs);
+  }
+
+  function setDMBridgeBusy(isBusy) {
+    commandInput.disabled = isBusy;
+    commandForm.querySelector("button[type=submit]").disabled = isBusy;
   }
 
   function startDMBridgePolling() {
@@ -697,8 +863,12 @@
     }
     if (!response || response.id !== dmBridgePendingId) return;
 
+    clearTimeout(dmBridgeTimeoutHandle);
     dmBridgePendingId = null;
-    state = window.CampaignOSDMBridge.applyActions(state, response.actions || []);
+    setDMBridgeBusy(false);
+    const withActions = window.CampaignOSDMBridge.applyActions(state, response.actions || []);
+    const enriched = await applyLibraryImages(withActions);
+    state = enriched.state;
     saveEncounter();
     commandResult.textContent = response.message || "(The DM assistant didn't include a narration.)";
     render();
@@ -801,10 +971,16 @@
     const file = mapImageInput.files[0];
     if (!file) return;
     const mapName = mapNameFromFile(file.name);
-    const image = await readFileAsDataUrl(file);
-    const details = await readImageDetails(image);
+    const dataUrl = await readFileAsDataUrl(file);
+    const details = await readImageDetails(dataUrl);
+    const previousKey = state.maps?.[mapName]?.image;
+    const key = window.CampaignOSImageStore.generateKey("map");
+    await window.CampaignOSImageStore.saveImage(key, dataUrl);
+    if (previousKey && !previousKey.startsWith("data:")) {
+      window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
+    }
     setActiveMap(mapName);
-    updateState(window.CampaignOS.setMapImage(state, mapName, image, {
+    updateState(window.CampaignOS.setMapImage(state, mapName, key, {
       sourceFileName: file.name,
       aspectRatio: `${details.width} / ${details.height}`
     }));
@@ -814,6 +990,10 @@
   clearMapImage.addEventListener("click", () => {
     const mapName = state.mapName;
     if (!mapName) return;
+    const previousKey = state.maps?.[mapName]?.image;
+    if (previousKey && !previousKey.startsWith("data:")) {
+      window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
+    }
     updateState(window.CampaignOS.setMapImage(state, mapName, ""));
     mapImageInput.value = "";
     commandResult.textContent = `${mapName} map image cleared.`;
@@ -1082,10 +1262,13 @@
       return window.CampaignOSCampaign.createCampaign();
     }
 
-    // Location entries are synthesized from rows inside a source file's table (see
-    // extractLocationEntries in campaign.js) -- their `path` is that source file's path,
-    // which would reclassify back to "notes" if run through classify() again. Leave them as-is.
-    savedCampaign.files = savedCampaign.files.map((item) => (item.sourceKind === "location-entry"
+    // Location and session entries are synthesized from part of a source file's
+    // content (see extractLocationEntries / extractSessionEntries in campaign.js) --
+    // their `path` is that source file's path, which would reclassify them back to
+    // "notes" if run through classify() again. Leave them as-is.
+    const isSynthesizedEntry = (item) => item.sourceKind === "location-entry" || item.sourceKind === "session-entry";
+
+    savedCampaign.files = savedCampaign.files.map((item) => (isSynthesizedEntry(item)
       ? item
       : {
           ...item,
@@ -1093,7 +1276,7 @@
           isTemplate: Boolean(item.isTemplate || window.CampaignOSCampaign.isTemplatePath(item.path || ""))
         }));
 
-    savedCampaign.files = savedCampaign.files.map((item) => (item.sourceKind === "location-entry"
+    savedCampaign.files = savedCampaign.files.map((item) => (isSynthesizedEntry(item)
       ? item
       : {
           ...item,
@@ -1128,4 +1311,5 @@
   }
 
   render();
+  tryRestoreDMBridge();
 })();

@@ -96,6 +96,17 @@
           </section>
 
           <section class="panel-section">
+            <h2>Token Library</h2>
+            <p class="library-hint">Art here attaches automatically by name (case-insensitive; "Goblin 3" matches a "goblin" entry) whenever a token is spawned or added -- including by Claude DM. Pick one file plus a name for a custom label, or pick several files at once to add them all using their filenames (e.g. "orc-warrior.png" becomes "orc warrior").</p>
+            <form id="libraryAddForm" class="library-add-form">
+              <input id="libraryName" type="text" placeholder="Name (only used for a single file)" aria-label="Library entry name">
+              <input id="libraryImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Library entry image(s)" multiple required>
+              <button type="submit">Add</button>
+            </form>
+            <div id="libraryList" class="library-list"></div>
+          </section>
+
+          <section class="panel-section">
             <h2>Claude DM</h2>
             <div class="dm-bridge-row">
               <button id="dmBridgeConnect" type="button">Connect to Claude Code</button>
@@ -119,6 +130,9 @@
     <script src="engine/encounter.js"></script>
     <script src="engine/campaign.js"></script>
     <script src="engine/dmBridge.js"></script>
+    <script src="ui/tokenLibrary.js"></script>
+    <script src="ui/dmBridgeStore.js"></script>
+    <script src="ui/imageStore.js"></script>
     <script src="ui/app.js"></script>
   </body>
 </html>

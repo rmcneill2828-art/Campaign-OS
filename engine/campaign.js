@@ -36,6 +36,11 @@
         campaign.files.push(locationItem);
         campaign.categories.locations.push(locationItem);
       });
+
+      extractSessionEntries(item).forEach((sessionItem) => {
+        campaign.files.push(sessionItem);
+        campaign.categories.sessions.push(sessionItem);
+      });
     }
 
     return campaign;
@@ -81,6 +86,7 @@
 
   function classify(path, text) {
     if (isWorldState(path)) return "notes";
+    if (isSessionLog(path)) return "notes";
     if (isCampaignIndex(path)) return "notes";
     if (/(^|[\\/])characters?[\\/]/i.test(path) || /(^|[\\/])npcs?[\\/]/i.test(path)) return "characters";
     if (/(^|[\\/])locations?[\\/]/i.test(path) || /(^|[\\/])maps?[\\/]/i.test(path)) return "locations";
@@ -97,6 +103,47 @@
 
   function isWorldState(path) {
     return /(^|[\\/])world-state\.md$/i.test(path);
+  }
+
+  function isSessionLog(path) {
+    return /(^|[\\/])session-log\.md$/i.test(path);
+  }
+
+  // session-log.md keeps every session in one running file (## Session N -- date
+  // headings), so the campaign browser only ever showed a single "Session Log" item --
+  // no way to jump straight to session 15. Split on those headings into individually
+  // browsable/searchable entries instead, the same way extractLocationEntries pulls
+  // named places out of world-state.md's table.
+  function extractSessionEntries(item) {
+    if (!isSessionLog(item.path)) return [];
+    const lines = (item.text || "").split(/\r?\n/);
+    const headingIndices = [];
+    lines.forEach((line, index) => {
+      if (/^##\s+.*session\s+\d+/i.test(line)) headingIndices.push(index);
+    });
+    if (!headingIndices.length) return [];
+
+    return headingIndices.map((startIndex, position) => {
+      const endIndex = position + 1 < headingIndices.length ? headingIndices[position + 1] : lines.length;
+      const heading = lines[startIndex].replace(/^##\s+/, "").trim();
+      const body = lines.slice(startIndex + 1, endIndex).join("\n");
+      return buildSessionItem(item, heading, body);
+    });
+  }
+
+  function buildSessionItem(sourceItem, heading, body) {
+    return {
+      id: `${sourceItem.path}#session-${slugify(heading)}`,
+      title: heading,
+      path: sourceItem.path,
+      category: "sessions",
+      canSpawnToken: false,
+      isTemplate: sourceItem.isTemplate,
+      summary: summarize(body),
+      wordCount: body.trim() ? body.trim().split(/\s+/).length : 0,
+      text: `# ${heading}\n\n${body}`,
+      sourceKind: "session-entry"
+    };
   }
 
   // Matches a path segment that is "template" once an optional leading underscore

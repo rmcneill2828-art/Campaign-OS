@@ -29,6 +29,9 @@ Current features:
 - Add imported characters to the encounter board
 - Open imported character sheets in a separate page
 - Open imported locations as the active map context
+- Named locations are parsed individually out of `world-state.md`'s table, and each
+  session is parsed individually out of `session-log.md`'s `## Session N` headings --
+  both browsable and searchable on their own, not just as one giant source file
 - Use sessions and notes as quick DM context
 - Add persistent image portraits to tokens
 - Import persistent map images behind the encounter grid
@@ -41,6 +44,9 @@ Current features:
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`
 - Optional Claude DM bridge for real narration and tool-calling (see below)
+- Token library: save art by name once, and it's attached automatically to any
+  matching token from then on -- manual spawns, imported characters, and Claude DM
+  bridge actions alike
 
 Week 3 attack command:
 
@@ -81,6 +87,20 @@ Costs are billed to whatever the `claude` CLI on your machine is authenticated w
 subscription) -- there's no separate key stored in the browser. The first call in a while is the
 most expensive (Claude Code's own tool/system scaffolding has to populate the prompt cache);
 repeated calls within the cache window are much cheaper.
+
+## Token library
+
+The "Token Library" panel lets you save a portrait once and have it show up automatically from
+then on, without re-uploading it per token:
+
+- Add an entry with a name and an image. Matching is by name, case-insensitive, with a spawned
+  monster's trailing instance number stripped -- an entry named `goblin` matches "Goblin 1",
+  "Goblin 2", etc.; an entry named `Darkhawk` matches a token literally named "Darkhawk".
+- Whenever a token is created without its own image -- a manual `spawn` command, adding an
+  imported character, or a Claude DM bridge action -- the library is checked automatically and
+  the art attaches if there's a match.
+- Entries are stored in IndexedDB (not localStorage), since portrait images are exactly the kind
+  of content that would otherwise blow past localStorage's origin quota.
 
 ## Planned Shape
 
