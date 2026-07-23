@@ -23,16 +23,20 @@
       <main class="workspace">
         <section class="map-panel" aria-label="Encounter map">
           <div class="map-toolbar">
-            <label>
-              Map
-              <select id="mapSelect"></select>
-            </label>
-            <div class="map-actions">
-              <button id="adjustGrid" type="button">Adjust Grid</button>
+            <div class="map-toolbar-primary">
+              <label>
+                Map
+                <select id="mapSelect"></select>
+              </label>
               <label class="map-toggle">
                 <input id="showGrid" type="checkbox" checked>
                 Grid
               </label>
+              <button id="toggleFog" type="button">Toggle Fog</button>
+              <button id="mapSettingsToggle" type="button">Map Settings</button>
+            </div>
+            <div id="mapToolbarSecondary" class="map-toolbar-secondary" hidden>
+              <button id="adjustGrid" type="button">Adjust Grid</button>
               <label class="range-input">
                 Opacity
                 <input id="gridOpacity" type="range" min="0" max="100" value="35">
@@ -53,84 +57,94 @@
                 <input id="mapImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
               </label>
               <button id="clearMapImage" type="button">Clear Map</button>
-              <button id="toggleFog" type="button">Toggle Fog</button>
             </div>
           </div>
-          <div id="battleMap" class="battle-map" aria-live="polite"></div>
+          <div class="map-stage">
+            <div id="battleMap" class="battle-map" aria-live="polite"></div>
+          </div>
         </section>
 
         <aside class="side-panel">
-          <section class="panel-section">
-            <h2>Campaign</h2>
-            <div class="import-row">
-              <input id="campaignImport" type="file" accept=".md,text/markdown" webkitdirectory multiple aria-label="Import campaign folder">
-              <button id="clearCampaign" type="button">Clear</button>
-            </div>
-            <div class="campaign-controls">
-              <input id="campaignSearch" type="search" placeholder="Search campaign" aria-label="Search campaign">
-              <select id="campaignFilter" aria-label="Campaign category filter">
-                <option value="all">All</option>
-                <option value="characters">Characters</option>
-                <option value="locations">Locations</option>
-                <option value="sessions">Sessions</option>
-                <option value="notes">Notes</option>
-              </select>
-              <label class="template-toggle">
-                <input id="showTemplates" type="checkbox">
-                Templates
-              </label>
-            </div>
-            <div id="campaignSummary" class="campaign-summary">No campaign imported.</div>
-            <div id="campaignDetail" class="campaign-detail empty">Select a campaign item.</div>
-            <div id="campaignBrowser" class="campaign-browser"></div>
-          </section>
+          <div class="side-tabs" role="tablist">
+            <button id="sideTabPlay" type="button" class="side-tab" role="tab" aria-selected="true">Play</button>
+            <button id="sideTabSetup" type="button" class="side-tab" role="tab" aria-selected="false">Setup</button>
+          </div>
 
-          <section class="panel-section">
-            <h2>Initiative</h2>
-            <ol id="initiativeList" class="initiative-list"></ol>
-          </section>
+          <div id="sideGroupPlay" class="side-group" role="tabpanel">
+            <section class="panel-section">
+              <h2>Initiative</h2>
+              <ol id="initiativeList" class="initiative-list"></ol>
+            </section>
 
-          <section class="panel-section">
-            <h2>Token</h2>
-            <div id="tokenSheet" class="token-sheet empty">Select a token</div>
-          </section>
+            <section class="panel-section panel-section-primary">
+              <h2>Token</h2>
+              <div id="tokenSheet" class="token-sheet empty">Select a token</div>
+            </section>
 
-          <section class="panel-section">
-            <h2>Token Library</h2>
-            <p class="library-hint">Art here attaches automatically by name (case-insensitive; "Goblin 3" matches a "goblin" entry) whenever a token is spawned or added -- including by Claude DM. Pick one file plus a name for a custom label, or pick several files at once to add them all using their filenames (e.g. "orc-warrior.png" becomes "orc warrior").</p>
-            <form id="libraryAddForm" class="library-add-form">
-              <input id="libraryName" type="text" placeholder="Name (only used for a single file)" aria-label="Library entry name">
-              <input id="libraryImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Library entry image(s)" multiple required>
-              <button type="submit">Add</button>
-            </form>
-            <div id="libraryList" class="library-list"></div>
-          </section>
+            <section class="panel-section">
+              <h2>Claude DM</h2>
+              <div class="dm-bridge-row">
+                <button id="dmBridgeConnect" type="button">Connect to Claude Code</button>
+                <span id="dmBridgeStatus" class="dm-bridge-status">Not connected -- using local command parser</span>
+              </div>
+              <div id="dmBridgeContextRow" class="dm-bridge-context-row" hidden>
+                <span>Context: <strong id="dmBridgeContextLabel"></strong></span>
+                <button id="dmBridgeContextClear" type="button">Clear</button>
+              </div>
+              <form id="commandForm" class="command-form">
+                <input id="commandInput" type="text" value="Three goblins emerge from the trees." aria-label="DM command">
+                <button type="submit">Run</button>
+              </form>
+              <p id="commandResult" class="command-result">Ready.</p>
+              <div class="dm-bridge-end-session-row">
+                <button id="endSessionButton" type="button" title="Writes this session's combat log and narration into the DnD campaign repo's session-log.md and world-state.md (file changes only -- nothing is committed or pushed).">End Session</button>
+                <span id="endSessionStatus" class="dm-bridge-status"></span>
+              </div>
+            </section>
 
-          <section class="panel-section">
-            <h2>Claude DM</h2>
-            <div class="dm-bridge-row">
-              <button id="dmBridgeConnect" type="button">Connect to Claude Code</button>
-              <span id="dmBridgeStatus" class="dm-bridge-status">Not connected -- using local command parser</span>
-            </div>
-            <div id="dmBridgeContextRow" class="dm-bridge-context-row" hidden>
-              <span>Context: <strong id="dmBridgeContextLabel"></strong></span>
-              <button id="dmBridgeContextClear" type="button">Clear</button>
-            </div>
-            <form id="commandForm" class="command-form">
-              <input id="commandInput" type="text" value="Three goblins emerge from the trees." aria-label="DM command">
-              <button type="submit">Run</button>
-            </form>
-            <p id="commandResult" class="command-result">Ready.</p>
-            <div class="dm-bridge-end-session-row">
-              <button id="endSessionButton" type="button" title="Writes this session's combat log and narration into the DnD campaign repo's session-log.md and world-state.md (file changes only -- nothing is committed or pushed).">End Session</button>
-              <span id="endSessionStatus" class="dm-bridge-status"></span>
-            </div>
-          </section>
+            <section class="panel-section">
+              <h2>Combat Log</h2>
+              <ol id="combatLog" class="combat-log"></ol>
+            </section>
+          </div>
 
-          <section class="panel-section">
-            <h2>Combat Log</h2>
-            <ol id="combatLog" class="combat-log"></ol>
-          </section>
+          <div id="sideGroupSetup" class="side-group" role="tabpanel" hidden>
+            <section class="panel-section">
+              <h2>Campaign</h2>
+              <div class="import-row">
+                <input id="campaignImport" type="file" accept=".md,text/markdown" webkitdirectory multiple aria-label="Import campaign folder">
+                <button id="clearCampaign" type="button">Clear</button>
+              </div>
+              <div class="campaign-controls">
+                <input id="campaignSearch" type="search" placeholder="Search campaign" aria-label="Search campaign">
+                <select id="campaignFilter" aria-label="Campaign category filter">
+                  <option value="all">All</option>
+                  <option value="characters">Characters</option>
+                  <option value="locations">Locations</option>
+                  <option value="sessions">Sessions</option>
+                  <option value="notes">Notes</option>
+                </select>
+                <label class="template-toggle">
+                  <input id="showTemplates" type="checkbox">
+                  Templates
+                </label>
+              </div>
+              <div id="campaignSummary" class="campaign-summary">No campaign imported.</div>
+              <div id="campaignDetail" class="campaign-detail empty">Select a campaign item.</div>
+              <div id="campaignBrowser" class="campaign-browser"></div>
+            </section>
+
+            <section class="panel-section">
+              <h2>Token Library</h2>
+              <p class="library-hint">Art here attaches automatically by name (case-insensitive; "Goblin 3" matches a "goblin" entry) whenever a token is spawned or added -- including by Claude DM. Pick one file plus a name for a custom label, or pick several files at once to add them all using their filenames (e.g. "orc-warrior.png" becomes "orc warrior").</p>
+              <form id="libraryAddForm" class="library-add-form">
+                <input id="libraryName" type="text" placeholder="Name (only used for a single file)" aria-label="Library entry name">
+                <input id="libraryImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Library entry image(s)" multiple required>
+                <button type="submit">Add</button>
+              </form>
+              <div id="libraryList" class="library-list"></div>
+            </section>
+          </div>
         </aside>
       </main>
     </div>

@@ -64,8 +64,10 @@ input {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   padding: 18px;
+  display: flex;
+  flex-direction: column;
 }
 
 .topbar {
@@ -96,9 +98,9 @@ h1 {
 
 .topbar-actions,
 .hp-actions,
-.map-toolbar,
 .command-form,
-.map-actions {
+.map-toolbar-primary,
+.map-toolbar-secondary {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -108,22 +110,43 @@ h1 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 330px;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
 }
 
-.map-panel,
-.side-panel,
+.map-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.side-panel {
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+
 .panel-section {
   background: var(--panel);
   border: 1px solid var(--line);
 }
 
 .map-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 12px;
 }
 
-.map-toolbar {
+.map-stage {
+  display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  container-type: size;
+}
+
+.map-toolbar {
   margin-bottom: 12px;
 }
 
@@ -134,13 +157,33 @@ h1 {
   color: var(--muted);
 }
 
+.map-toolbar-primary {
+  align-items: center;
+}
+
+#mapSettingsToggle {
+  margin-left: auto;
+}
+
+.map-toolbar-secondary {
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.map-toolbar-secondary[hidden] {
+  display: none;
+}
+
 .battle-map {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(var(--grid-columns, 12), minmax(24px, 1fr));
-  grid-template-rows: repeat(var(--grid-rows, 8), minmax(24px, 1fr));
+  grid-template-columns: repeat(var(--grid-columns, 12), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--grid-rows, 8), minmax(0, 1fr));
   aspect-ratio: var(--map-aspect-ratio, 12 / 8);
-  min-height: 420px;
+  width: min(100cqw, calc(100cqh * (var(--map-aspect-ratio, 12 / 8))));
+  height: min(100cqh, calc(100cqw / (var(--map-aspect-ratio, 12 / 8))));
   border: 1px solid #52614a;
   background:
     radial-gradient(circle at 22% 35%, rgba(215, 181, 109, 0.16), transparent 20%),
@@ -152,11 +195,6 @@ h1 {
 
 .battle-map.has-map-image {
   background-color: #0f120e;
-}
-
-.map-actions {
-  align-items: center;
-  justify-content: flex-end;
 }
 
 .map-image-picker {
@@ -351,6 +389,8 @@ body[data-fog="on"] .map-tile:hover {
   flex-direction: column;
   gap: 12px;
   padding: 12px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .panel-section {
@@ -358,8 +398,55 @@ body[data-fog="on"] .map-tile:hover {
 }
 
 .panel-section h2 {
-  margin-bottom: 10px;
-  font-size: 1rem;
+  margin: -12px -12px 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--accent);
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel-section-primary {
+  border-color: var(--accent);
+}
+
+.panel-section-primary h2 {
+  background: #362c18;
+  border-bottom-color: var(--accent);
+}
+
+.side-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  background: var(--panel);
+  padding-bottom: 4px;
+}
+
+.side-tab {
+  flex: 1;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.side-tab.active {
+  border-color: var(--accent);
+  background: var(--panel-strong);
+  color: var(--text);
+}
+
+.side-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.side-group[hidden] {
+  display: none;
 }
 
 .initiative-list {
@@ -882,8 +969,22 @@ body[data-fog="on"] .map-tile:hover {
 }
 
 @media (max-width: 900px) {
+  .app-shell {
+    height: auto;
+    min-height: 100vh;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
+    flex: none;
+  }
+
+  .map-panel {
+    min-height: 340px;
+  }
+
+  .side-panel {
+    overflow-y: visible;
   }
 
   .topbar {
@@ -893,5 +994,6 @@ body[data-fog="on"] .map-tile:hover {
 
   .battle-map {
     min-height: 300px;
+    max-height: none;
   }
 }

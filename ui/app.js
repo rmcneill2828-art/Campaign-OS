@@ -37,6 +37,12 @@
   const tokenSize = document.querySelector("#tokenSize");
   const toggleFog = document.querySelector("#toggleFog");
   const clearMapImage = document.querySelector("#clearMapImage");
+  const mapSettingsToggle = document.querySelector("#mapSettingsToggle");
+  const mapToolbarSecondary = document.querySelector("#mapToolbarSecondary");
+  const sideTabPlay = document.querySelector("#sideTabPlay");
+  const sideTabSetup = document.querySelector("#sideTabSetup");
+  const sideGroupPlay = document.querySelector("#sideGroupPlay");
+  const sideGroupSetup = document.querySelector("#sideGroupSetup");
   const legacyPrototypeMaps = new Set(["The Standing Ring", "Bear Cave", "Urskelde Road"]);
 
   let preferences = loadPreferences();
@@ -44,6 +50,7 @@
   let campaign = loadCampaign();
   let selectedCampaignItemId = preferences.selectedCampaignItemId || null;
   let gridAdjusting = false;
+  let mapSettingsOpen = false;
   let gridDrag = null;
   let suppressGridClick = false;
   let dmBridgeDirHandle = null;
@@ -60,6 +67,28 @@
   campaignSearch.value = preferences.search || "";
   campaignFilter.value = preferences.filter || "all";
   showTemplates.checked = Boolean(preferences.showTemplates);
+
+  function setSideTab(tab) {
+    const isSetup = tab === "setup";
+    sideGroupPlay.hidden = isSetup;
+    sideGroupSetup.hidden = !isSetup;
+    sideTabPlay.classList.toggle("active", !isSetup);
+    sideTabSetup.classList.toggle("active", isSetup);
+    sideTabPlay.setAttribute("aria-selected", String(!isSetup));
+    sideTabSetup.setAttribute("aria-selected", String(isSetup));
+  }
+
+  setSideTab(preferences.sideTab === "setup" ? "setup" : "play");
+
+  sideTabPlay.addEventListener("click", () => {
+    setSideTab("play");
+    savePreferences();
+  });
+
+  sideTabSetup.addEventListener("click", () => {
+    setSideTab("setup");
+    savePreferences();
+  });
 
   function selectedToken() {
     return activeTokens().find((token) => token.id === state.selectedTokenId);
@@ -1147,6 +1176,12 @@
     render();
   });
 
+  mapSettingsToggle.addEventListener("click", () => {
+    mapSettingsOpen = !mapSettingsOpen;
+    mapToolbarSecondary.hidden = !mapSettingsOpen;
+    mapSettingsToggle.classList.toggle("active-toggle", mapSettingsOpen);
+  });
+
   mapImageInput.addEventListener("change", async () => {
     const file = mapImageInput.files[0];
     if (!file) return;
@@ -1499,7 +1534,8 @@
       search: campaignSearch.value,
       filter: campaignFilter.value,
       showTemplates: showTemplates.checked,
-      selectedCampaignItemId
+      selectedCampaignItemId,
+      sideTab: sideGroupSetup.hidden ? "play" : "setup"
     };
     localStorage.setItem(preferencesStorageKey, JSON.stringify(preferences));
   }
