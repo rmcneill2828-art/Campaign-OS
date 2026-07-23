@@ -73,6 +73,12 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Token library: save art by name once, and it's attached automatically to any
   matching token from then on -- manual spawns, imported characters, and Claude DM
   bridge actions alike
+- Map library: upload battle maps once (Setup tab), then click "Use" on a saved entry to
+  load it as the active map -- creates a map with that name if it doesn't exist yet, or
+  replaces an existing map's art. Unlike the token library, there's no automatic name
+  matching (maps are explicitly picked, not auto-attached to something being spawned), and
+  names aren't stripped of trailing numbers the way "Goblin 3" collapses to "goblin" --
+  a map called "Level 2" stays "Level 2".
 - Character creator: build a new 5e character sheet (computed ability modifiers,
   proficiency bonus, HP, AC, saves, skills, one attack) and write it straight into
   the campaign repo's `characters/` folder (see below)
@@ -205,7 +211,7 @@ Campaign OS
 |                   dm-bridge action dispatcher, and the character creator's 5e math/markdown
 |                   generation -- no DOM, runnable under Node
 |-- ui/             Browser UI glue: rendering, event wiring, and the IndexedDB-backed token
-|                   library / image store / dm-bridge folder-handle store
+|                   library / map library / image store / dm-bridge folder-handle store
 |-- dm-bridge/      watch.js -- the Node script that bridges the browser to the local
 |                   `claude` CLI for live combat narration and the End Session write-back,
 |                   plus a plain (Claude-free) file write for Create Character -- both

@@ -30,6 +30,10 @@
   const libraryName = document.querySelector("#libraryName");
   const libraryImageInput = document.querySelector("#libraryImageInput");
   const libraryList = document.querySelector("#libraryList");
+  const mapLibraryAddForm = document.querySelector("#mapLibraryAddForm");
+  const mapLibraryName = document.querySelector("#mapLibraryName");
+  const mapLibraryImageInput = document.querySelector("#mapLibraryImageInput");
+  const mapLibraryList = document.querySelector("#mapLibraryList");
   const mapSelect = document.querySelector("#mapSelect");
   const mapImageInput = document.querySelector("#mapImageInput");
   const adjustGrid = document.querySelector("#adjustGrid");
@@ -299,6 +303,7 @@
     renderCombatLog();
     renderCampaign();
     renderTokenLibrary();
+    renderMapLibrary();
   }
 
   function renderTokenLibrary() {
@@ -325,6 +330,54 @@
         libraryList.appendChild(row);
       });
     });
+  }
+
+  function renderMapLibrary() {
+    window.CampaignOSMapLibrary.listEntries().then((entries) => {
+      mapLibraryList.innerHTML = "";
+      if (!entries.length) {
+        const empty = document.createElement("p");
+        empty.className = "library-empty";
+        empty.textContent = "No maps saved yet.";
+        mapLibraryList.appendChild(empty);
+        return;
+      }
+      entries.forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "library-item map-library-item";
+        row.innerHTML = `
+          <img src="${entry.image}" alt="">
+          <span>${escapeHtml(entry.displayName)}</span>
+          <button type="button" data-action="use">Use</button>
+          <button type="button" data-action="remove">Remove</button>
+        `;
+        row.querySelector('[data-action="use"]').addEventListener("click", () => useMapLibraryEntry(entry));
+        row.querySelector('[data-action="remove"]').addEventListener("click", () => {
+          window.CampaignOSMapLibrary.deleteEntry(entry.key).then(renderMapLibrary);
+        });
+        mapLibraryList.appendChild(row);
+      });
+    });
+  }
+
+  // Loads a saved Map Library entry as the active map: creates a map with that name if it
+  // doesn't exist yet (same as picking a file directly always has), or replaces the art on
+  // an existing map of that name. Copies the library's own copy of the image into the
+  // shared image store under a fresh key first, exactly like a direct file upload does --
+  // the encounter state only ever holds that short key, never the raw image data.
+  async function useMapLibraryEntry(entry) {
+    const mapName = entry.displayName;
+    const previousKey = state.maps?.[mapName]?.image;
+    const key = window.CampaignOSImageStore.generateKey("map");
+    await window.CampaignOSImageStore.saveImage(key, entry.image);
+    if (previousKey && !previousKey.startsWith("data:")) {
+      window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
+    }
+    setActiveMap(mapName);
+    updateState(window.CampaignOS.setMapImage(state, mapName, key, {
+      aspectRatio: entry.aspectRatio || "12 / 8"
+    }));
+    commandResult.textContent = `${mapName} loaded from the map library.`;
   }
 
   // Attaches library art (matched by name) to any token that doesn't already have an
@@ -1168,6 +1221,28 @@
       : `Added ${files.length} tokens to the library from their filenames.`;
     libraryAddForm.reset();
     renderTokenLibrary();
+  });
+
+  mapLibraryAddForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const files = Array.from(mapLibraryImageInput.files);
+    if (!files.length) return;
+
+    const typedName = mapLibraryName.value.trim();
+    const useTypedName = files.length === 1 && typedName;
+
+    for (const file of files) {
+      const name = useTypedName ? typedName : nameFromFileName(file.name);
+      const image = await readFileAsDataUrl(file);
+      const details = await readImageDetails(image);
+      await window.CampaignOSMapLibrary.saveEntry(name, image, `${details.width} / ${details.height}`);
+    }
+
+    commandResult.textContent = files.length === 1
+      ? `Added "${useTypedName ? typedName : nameFromFileName(files[0].name)}" to the map library.`
+      : `Added ${files.length} maps to the library from their filenames.`;
+    mapLibraryAddForm.reset();
+    renderMapLibrary();
   });
 
   function nameFromFileName(fileName) {

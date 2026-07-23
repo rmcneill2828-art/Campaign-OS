@@ -891,6 +891,16 @@ body[data-fog="on"] .map-tile:hover {
   white-space: nowrap;
 }
 
+.map-library-item {
+  grid-template-columns: 44px 1fr auto auto;
+}
+
+.map-library-item img {
+  width: 44px;
+  height: 28px;
+  border-radius: 3px;
+}
+
 .character-creator-form {
   display: flex;
   flex-direction: column;

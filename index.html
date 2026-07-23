@@ -154,6 +154,17 @@
             </section>
 
             <section class="panel-section">
+              <h2>Map Library</h2>
+              <p class="library-hint">Upload battle maps once and reuse them later instead of picking a file every time -- click "Use" on an entry to load it as the active map (creating one with that name if it doesn't exist yet, or replacing the current map's art if you type over an existing map name first). Pick one file plus a name for a custom label, or pick several files at once to add them all using their filenames.</p>
+              <form id="mapLibraryAddForm" class="library-add-form">
+                <input id="mapLibraryName" type="text" placeholder="Name (only used for a single file)" aria-label="Map library entry name">
+                <input id="mapLibraryImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label="Map library entry image(s)" multiple required>
+                <button type="submit">Add</button>
+              </form>
+              <div id="mapLibraryList" class="library-list map-library-list"></div>
+            </section>
+
+            <section class="panel-section">
               <h2>Create Character</h2>
               <p class="library-hint">Builds a new 5e character sheet (ability scores, saves, skills, HP, AC, one
                 attack) and writes it into the campaign repo's <code>characters/</code> folder via the DM bridge --
@@ -281,6 +292,7 @@
     <script src="engine/dmBridge.js"></script>
     <script src="engine/characterCreator.js"></script>
     <script src="ui/tokenLibrary.js"></script>
+    <script src="ui/mapLibrary.js"></script>
     <script src="ui/dmBridgeStore.js"></script>
     <script src="ui/imageStore.js"></script>
     <script src="ui/app.js"></script>
