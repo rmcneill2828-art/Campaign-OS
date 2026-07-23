@@ -38,6 +38,8 @@
   const mapLibraryClearAll = document.querySelector("#mapLibraryClearAll");
   const tokenFolderConnect = document.querySelector("#tokenFolderConnect");
   const tokenFolderStatus = document.querySelector("#tokenFolderStatus");
+  const tokenFolderSearch = document.querySelector("#tokenFolderSearch");
+  const tokenFolderResults = document.querySelector("#tokenFolderResults");
   const mapFolderConnect = document.querySelector("#mapFolderConnect");
   const mapFolderStatus = document.querySelector("#mapFolderStatus");
   const mapFolderSearch = document.querySelector("#mapFolderSearch");
@@ -1464,9 +1466,12 @@
     tokensFolderHandle = handle;
     tokenFolderStatus.textContent = `Indexing "${handle.name}"...`;
     tokenFolderStatus.classList.remove("connected");
+    tokenFolderSearch.disabled = true;
     tokensFolderIndex = await window.CampaignOSFolderAssets.indexFolder(handle, window.CampaignOSTokenLibrary.normalizeName);
     tokenFolderStatus.textContent = `Connected to "${handle.name}" -- ${tokensFolderIndex.length} images indexed.`;
     tokenFolderStatus.classList.add("connected");
+    tokenFolderSearch.disabled = false;
+    renderTokenFolderResults();
   }
 
   mapFolderConnect.addEventListener("click", async () => {
@@ -1568,6 +1573,69 @@
       sourcePath: `Maps folder/${entry.name}`
     }));
     commandResult.textContent = `${mapName} loaded from the Maps folder.`;
+  }
+
+  const TOKEN_FOLDER_RESULTS_LIMIT = 50;
+
+  // Many packs (Forgotten Adventures' class-based portraits, e.g. "!Core_Barbarian_A1_...")
+  // won't auto-match a spawned token's name at all -- this is the manual counterpart to
+  // applyLibraryImages()'s automatic name-matching, letting the DM browse and attach a
+  // specific piece to whatever token is currently selected.
+  function renderTokenFolderResults() {
+    tokenFolderResults.innerHTML = "";
+    if (!tokensFolderIndex.length) return;
+
+    const query = tokenFolderSearch.value.trim().toLowerCase();
+    const matches = query
+      ? tokensFolderIndex.filter((entry) => entry.name.toLowerCase().includes(query))
+      : tokensFolderIndex.slice().sort((a, b) => a.name.localeCompare(b.name)).slice(0, TOKEN_FOLDER_RESULTS_LIMIT);
+
+    if (!query) {
+      const hint = document.createElement("p");
+      hint.className = "library-empty";
+      hint.textContent = `Showing the first ${Math.min(TOKEN_FOLDER_RESULTS_LIMIT, tokensFolderIndex.length)} of ${tokensFolderIndex.length} -- type to search.`;
+      tokenFolderResults.appendChild(hint);
+    } else if (!matches.length) {
+      const empty = document.createElement("p");
+      empty.className = "library-empty";
+      empty.textContent = "No matches.";
+      tokenFolderResults.appendChild(empty);
+      return;
+    }
+
+    matches.slice(0, TOKEN_FOLDER_RESULTS_LIMIT).forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "library-item";
+      row.innerHTML = `
+        <span></span>
+        <span>${escapeHtml(entry.name)}</span>
+        <button type="button" data-action="use">Use</button>
+      `;
+      row.querySelector('[data-action="use"]').addEventListener("click", () => useTokenFolderEntry(entry));
+      tokenFolderResults.appendChild(row);
+    });
+  }
+
+  tokenFolderSearch.addEventListener("input", renderTokenFolderResults);
+
+  // Reads exactly one file from the connected Tokens folder and attaches it to whichever
+  // token is currently selected on the map -- the manual counterpart to auto-attach-by-name.
+  async function useTokenFolderEntry(entry) {
+    const token = selectedToken();
+    if (!token) {
+      commandResult.textContent = "Select a token on the map first, then click Use.";
+      return;
+    }
+    const raw = await window.CampaignOSFolderAssets.readEntryAsDataUrl(entry);
+    const resized = await resizeImageDataUrl(raw, 512, "image/png");
+    const previousKey = token.image;
+    const key = window.CampaignOSImageStore.generateKey("token");
+    await window.CampaignOSImageStore.saveImage(key, resized.dataUrl);
+    if (previousKey && !previousKey.startsWith("data:")) {
+      window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
+    }
+    updateState(window.CampaignOS.updateToken(state, token.id, { image: key }));
+    commandResult.textContent = `${entry.name} attached to ${token.name}.`;
   }
 
   async function sendDMBridgeCommand(command) {

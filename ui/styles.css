@@ -917,7 +917,8 @@ body[data-fog="on"] .map-tile:hover {
   color: var(--accent);
 }
 
-#mapFolderSearch {
+#mapFolderSearch,
+#tokenFolderSearch {
   width: 100%;
   margin-bottom: 10px;
 }

@@ -156,11 +156,13 @@
 
             <section class="panel-section">
               <h2>Tokens Folder</h2>
-              <p class="library-hint">For a whole art pack (hundreds/thousands of portraits): connect the folder directly instead of uploading everything into the app. Nothing is copied in bulk -- art is read straight from disk and only cached (downscaled, one at a time) for tokens that actually get spawned. Subfolders are searched too. Matching works the same as the Token Library above (case-insensitive, "Goblin 3" matches a "goblin" file).</p>
+              <p class="library-hint">For a whole art pack (hundreds/thousands of portraits): connect the folder directly instead of uploading everything into the app. Nothing is copied in bulk -- art is read straight from disk and only cached (downscaled, one at a time) for tokens that actually get spawned. Subfolders are searched too. Matching works the same as the Token Library above (case-insensitive, "Goblin 3" matches a "goblin" file). Most packs (like Forgotten Adventures' class-based portraits) won't auto-match a spawned name -- search below and click "Use" to attach a specific piece to whichever token is currently selected on the map.</p>
               <div class="folder-connect">
                 <button id="tokenFolderConnect" type="button">Connect Tokens Folder</button>
                 <span id="tokenFolderStatus" class="folder-status">Not connected.</span>
               </div>
+              <input id="tokenFolderSearch" type="search" placeholder="Search tokens by name..." aria-label="Search the connected tokens folder" disabled>
+              <div id="tokenFolderResults" class="library-list"></div>
             </section>
 
             <section class="panel-section">

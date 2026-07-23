@@ -91,7 +91,11 @@ dependencies to install for the app itself. See Tests, below, for running the te
   the libraries above is exactly what crashed the tab with "Aw, Snap" (Out of Memory)
   during development; see git history around the image-downscaling and library-render
   fixes if curious. Permission is per-browser-session (re-click Connect to re-grant after
-  reopening the app, same as the DM bridge folder).
+  reopening the app, same as the DM bridge folder). Tokens attach automatically by name
+  when a token spawns (same matching as the Token Library above), but most packs won't
+  auto-match most of their contents that way -- both folders also have a search box so you
+  can browse and manually pick an entry: Maps' "Use" loads it as the active map, Tokens'
+  "Use" attaches it to whichever token is currently selected on the board.
 - Character creator: build a new 5e character sheet (computed ability modifiers,
   proficiency bonus, HP, AC, saves, skills, one attack) and write it straight into
   the campaign repo's `characters/` folder (see below)
