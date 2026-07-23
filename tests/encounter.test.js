@@ -57,14 +57,24 @@ test("parseCommand spawning goblins gives them their canonical stat block and in
   assert.equal(first.damageDice, "1d6+2");
 });
 
-test("parseCommand spawning an unlisted monster falls back to a generic stat block", () => {
+test("parseCommand spawning orcs gives them their canonical (SRD) stat block, distinct from goblins", () => {
   const state = stateOnMap("Urskelde");
   const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one orc"));
   const [orc] = result.state.tokens;
-  assert.equal(orc.hp, 10);
+  assert.equal(orc.hp, 15);
   assert.equal(orc.ac, 13);
-  assert.equal(orc.attackBonus, 3);
-  assert.equal(orc.damageDice, "1d8+1");
+  assert.equal(orc.attackBonus, 5);
+  assert.equal(orc.damageDice, "1d12+3");
+});
+
+test("parseCommand spawning a troll gives it Multiattack (Bite + two Claws), not a single generic attack", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one troll"));
+  const [troll] = result.state.tokens;
+  assert.equal(troll.hp, 84);
+  assert.equal(troll.ac, 15);
+  assert.equal(troll.attacks.length, 3);
+  assert.deepEqual(troll.attacks.map((a) => a.name), ["Bite", "Claw", "Claw"]);
 });
 
 test("addToken clamps HP/AC/attackBonus into their valid ranges and defaults missing fields", () => {
@@ -111,6 +121,19 @@ test("attack doubles damage on a natural 20 that clears target AC", () => {
   assert.equal(result.state.tokens.find((t) => t.id === target.id).hp, 8, "1d1 critical should deal 2 damage (1 doubled)");
 });
 
+test("a critical hit doubles the damage dice only, not a flat modifier (RAW)", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, damageDice: "1d4+3", hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 1, hp: 50, maxHp: 50 }).state;
+  const [attacker, target] = state.tokens;
+
+  // Math.random -> ~1 gives a natural 20 and a max-face 1d4 (4).
+  const result = withRandom([0.999999], () => CampaignOS.attack(state, attacker.id, target.id));
+  assert.match(result.message, /Critical hit\./);
+  // Correct: (4 * 2) + 3 = 11. The old bug would have doubled to (4 + 3) * 2 = 14.
+  assert.equal(result.state.tokens.find((t) => t.id === target.id).hp, 39, "1d4+3 critical should deal 11 damage, not 14");
+});
+
 test("a natural 20 is an automatic critical hit even against an AC the attack bonus alone can't clear", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, damageDice: "1d1", hp: 10, maxHp: 10 }).state;
@@ -132,6 +155,67 @@ test("attack reports a miss when the roll is below target AC (and no natural 1/2
   const result = withRandom([0.45], () => CampaignOS.attack(state, attacker.id, target.id));
   assert.match(result.message, /Miss\.$/);
   assert.doesNotMatch(result.message, /Critical/);
+});
+
+test("attack with advantage rolls two d20s and keeps the higher", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 15, hp: 10, maxHp: 10 }).state;
+  const [attacker, target] = state.tokens;
+
+  // rollDie(20) from 0.2 -> 5, from 0.85 -> 18. Advantage should keep 18 (a hit vs AC 15);
+  // a normal roll of just the first die (5) would have missed.
+  const result = withRandom([0.2, 0.85], () => CampaignOS.attack(state, attacker.id, target.id, { advantage: true }));
+  assert.match(result.message, /18 \(advantage: 5, 18\)/);
+  assert.match(result.message, /Hit\./);
+});
+
+test("attack with disadvantage rolls two d20s and keeps the lower", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 15, hp: 10, maxHp: 10 }).state;
+  const [attacker, target] = state.tokens;
+
+  // Same two rolls (5, 18) but disadvantage keeps the lower: 5, a miss vs AC 15.
+  const result = withRandom([0.2, 0.85], () => CampaignOS.attack(state, attacker.id, target.id, { disadvantage: true }));
+  assert.match(result.message, /5 \(disadvantage: 5, 18\)/);
+  assert.match(result.message, /Miss\./);
+});
+
+test("attack against a token with a Multiattack profile (attacks[]) rolls every sub-attack and labels each by name", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Troll 1", attackBonus: 7, damageDice: "1d6+4", hp: 84, maxHp: 84 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 5, hp: 50, maxHp: 50 }).state;
+  const [troll, target] = state.tokens;
+  troll.attacks = [
+    { name: "Bite", attackBonus: 7, damageDice: "1d6+4" },
+    { name: "Claw", attackBonus: 7, damageDice: "2d6+4" },
+    { name: "Claw", attackBonus: 7, damageDice: "2d6+4" }
+  ];
+
+  // 0.5 -> d20 = 11 (hits AC 5 every time, never a crit); damage dice also resolve off the
+  // same repeating value: 1d6 -> 4 (+4 = 8), 2d6 -> 4+4 (+4 = 12) each. Total: 8+12+12 = 32.
+  const result = withRandom([0.5], () => CampaignOS.attack(state, troll.id, target.id));
+  assert.match(result.message, /Troll 1's Bite attacks Target/);
+  assert.match(result.message, /Troll 1's Claw attacks Target/);
+  assert.equal((result.message.match(/Troll 1's Claw/g) || []).length, 2, "both claw attacks should appear");
+  assert.equal(result.state.tokens.find((t) => t.id === target.id).hp, 18, "50 - (8 + 12 + 12) = 18");
+});
+
+test("Multiattack stops rolling further sub-attacks once the target is already dropped to 0 HP", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Troll 1", attackBonus: 7, damageDice: "1d6+4", hp: 84, maxHp: 84 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 1, hp: 5, maxHp: 5 }).state;
+  const [troll, target] = state.tokens;
+  troll.attacks = [
+    { name: "Bite", attackBonus: 7, damageDice: "1d6+4" },
+    { name: "Claw", attackBonus: 7, damageDice: "2d6+4" },
+    { name: "Claw", attackBonus: 7, damageDice: "2d6+4" }
+  ];
+
+  const result = withRandom([0.5], () => CampaignOS.attack(state, troll.id, target.id));
+  assert.equal((result.message.match(/attacks Target/g) || []).length, 1, "only the first sub-attack should resolve once the target is at 0 HP");
+  assert.equal(result.state.tokens.find((t) => t.id === target.id).hp, 0);
 });
 
 test("attack returns a failure message when attacker or target cannot be found", () => {
@@ -209,6 +293,16 @@ test("parseCommand resolves an attack command by token name", () => {
 
   const result = withRandom([0], () => CampaignOS.parseCommand(state, "Goblin 1 attacks Darkhawk."));
   assert.match(result.message, /Goblin 1 attacks Darkhawk/);
+});
+
+test("parseCommand strips a trailing 'with advantage' phrase before resolving the target name", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Darkhawk", ac: 15, hp: 10, maxHp: 10 }).state;
+
+  const result = withRandom([0.2, 0.85], () => CampaignOS.parseCommand(state, "Goblin 1 attacks Darkhawk with advantage."));
+  assert.match(result.message, /Goblin 1 attacks Darkhawk/);
+  assert.match(result.message, /advantage: 5, 18/);
 });
 
 test("parseCommand spawns the requested number of monsters from natural-language phrasing", () => {

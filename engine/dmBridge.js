@@ -39,7 +39,10 @@
             alreadyLogged: false
           };
         }
-        const result = window.CampaignOS.attack(state, attacker.id, target.id);
+        const result = window.CampaignOS.attack(state, attacker.id, target.id, {
+          advantage: Boolean(action.advantage),
+          disadvantage: Boolean(action.disadvantage)
+        });
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
       case "apply_damage": {

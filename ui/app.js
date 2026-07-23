@@ -561,6 +561,14 @@
           Target
           <select name="targetId"></select>
         </label>
+        <label>
+          Roll
+          <select name="mode">
+            <option value="normal">Normal</option>
+            <option value="advantage">Advantage</option>
+            <option value="disadvantage">Disadvantage</option>
+          </select>
+        </label>
         <button type="submit">Attack</button>
       </form>
       <form class="hp-control">
@@ -643,8 +651,13 @@
       });
     attackControl.addEventListener("submit", (event) => {
       event.preventDefault();
-      const targetId = new FormData(attackControl).get("targetId");
-      const result = window.CampaignOS.attack(state, token.id, targetId);
+      const formData = new FormData(attackControl);
+      const targetId = formData.get("targetId");
+      const mode = formData.get("mode");
+      const result = window.CampaignOS.attack(state, token.id, targetId, {
+        advantage: mode === "advantage",
+        disadvantage: mode === "disadvantage"
+      });
       state = result.state;
       saveEncounter();
       commandResult.textContent = result.message;

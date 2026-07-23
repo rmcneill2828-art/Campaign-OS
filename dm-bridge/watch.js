@@ -48,7 +48,7 @@ const SYSTEM_PROMPT = [
   "",
   "Each action is one of:",
   '{"type": "spawn_monster", "monster": "goblin|orc|troll|bandit|wolf", "count": <integer>}',
-  '{"type": "attack", "attacker": "<exact token name>", "target": "<exact token name>"}',
+  '{"type": "attack", "attacker": "<exact token name>", "target": "<exact token name>", "advantage": <optional true>, "disadvantage": <optional true>}',
   '{"type": "apply_damage", "target": "<exact token name>", "amount": <integer>}',
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',
   `{"type": "toggle_condition", "target": "<exact token name>", "condition": "${CONDITION_LIST.join("|")}"}`,
@@ -61,6 +61,13 @@ const SYSTEM_PROMPT = [
   "Use move_token when narration implies a token repositions on the grid -- closing to melee range,",
   "retreating, circling around -- using the grid size and each token's current (x, y) given below to",
   "pick a destination that's actually plausible, and stay within the grid bounds.",
+  "",
+  "Set advantage/disadvantage on an attack when 5e rules-as-written call for it -- Reckless Attack,",
+  "Pack Tactics with an ally adjacent to the target, attacking a prone/blinded/restrained target in",
+  "melee, the attacker being blinded or the target hidden, etc. Don't set both; RAW they cancel out,",
+  "so just omit both flags instead. A single attack action already resolves a monster's full",
+  "Multiattack (e.g. a troll's Bite + two Claws) automatically -- issue one attack action per turn,",
+  "not one per individual attack in its stat block.",
   "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
@@ -78,7 +85,9 @@ function isValidAction(action) {
       return MONSTER_LIST.includes(String(action.monster || "").toLowerCase())
         && Number.isFinite(action.count) && action.count > 0;
     case "attack":
-      return typeof action.attacker === "string" && typeof action.target === "string";
+      return typeof action.attacker === "string" && typeof action.target === "string"
+        && (action.advantage === undefined || typeof action.advantage === "boolean")
+        && (action.disadvantage === undefined || typeof action.disadvantage === "boolean");
     case "apply_damage":
     case "apply_healing":
       return typeof action.target === "string" && Number.isFinite(action.amount);

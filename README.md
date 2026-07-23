@@ -21,7 +21,14 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Flexible damage and healing
 - Expanded condition tracking
 - Remove defeated or accidental tokens
-- Dice-backed attacks
+- Dice-backed attacks, rules-as-written: SRD-accurate stat blocks for the five monsters
+  `spawn` recognizes (goblin, orc, wolf, bandit, troll), a critical hit that doubles only
+  the damage dice (not a flat modifier), advantage/disadvantage on any attack (manual
+  attack-control dropdown, `attacks Y with advantage`/`at disadvantage` phrasing, or the
+  Claude DM bridge's `advantage`/`disadvantage` action flags), and automatic Multiattack
+  for monsters that have one (a troll's Bite + two Claws resolve as one attack action,
+  each roll shown individually). Troll's Regeneration is a known, intentional gap -- there's
+  no start-of-turn hook in the engine to key it off, so apply it by hand.
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes

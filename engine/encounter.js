@@ -11,6 +11,38 @@
     "Unconscious"
   ];
 
+  // SRD 5.1 stat blocks for the monsters `parseCommand`'s spawn phrasing recognizes
+  // (see monsterPattern below). attackBonus/damageDice reflect the monster's primary
+  // attack for single-attack resolution and the token sheet's editable fields; `attacks`
+  // (when present) lists every attack a Multiattack action makes, consumed by attack()
+  // below. `initiativeMod` is the monster's real Dex modifier, not a flat guess.
+  //
+  // Troll's Regeneration (10 HP at the start of its turn unless it took acid/fire damage
+  // since its last turn) is intentionally NOT automated here -- this engine has no
+  // start-of-turn hook to key it off. Apply it by hand via applyHealing on the troll's turn.
+  const STAT_BLOCKS = {
+    goblin: { hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2 },
+    orc: { hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", initiativeMod: 1 },
+    wolf: { hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", initiativeMod: 2 },
+    bandit: { hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1 },
+    troll: {
+      hp: 84,
+      ac: 15,
+      attackBonus: 7,
+      damageDice: "1d6+4",
+      initiativeMod: -1,
+      attacks: [
+        { name: "Bite", attackBonus: 7, damageDice: "1d6+4" },
+        { name: "Claw", attackBonus: 7, damageDice: "2d6+4" },
+        { name: "Claw", attackBonus: 7, damageDice: "2d6+4" }
+      ]
+    }
+  };
+  // Safety net for a monster name that reaches spawnMonster without a STAT_BLOCKS entry
+  // (not reachable through parseCommand today, since monsterPattern only matches the
+  // names above, but spawnMonster itself doesn't enforce that).
+  const GENERIC_STAT_BLOCK = { hp: 10, ac: 13, attackBonus: 3, damageDice: "1d8+1", initiativeMod: 2 };
+
   const initialState = {
     mapName: "",
     maps: {},
@@ -78,6 +110,7 @@
     const nextState = clone(state);
     const spawned = [];
     const baseName = monsterName.charAt(0).toUpperCase() + monsterName.slice(1).toLowerCase();
+    const stats = STAT_BLOCKS[monsterName.toLowerCase()] || GENERIC_STAT_BLOCK;
 
     for (let index = 0; index < count; index += 1) {
       const number = nextMonsterNumber(nextState, baseName);
@@ -90,14 +123,15 @@
         mapName: nextState.mapName,
         x: tile.x,
         y: tile.y,
-        hp: monsterName.toLowerCase() === "goblin" ? 7 : 10,
-        maxHp: monsterName.toLowerCase() === "goblin" ? 7 : 10,
-        ac: monsterName.toLowerCase() === "goblin" ? 15 : 13,
-        attackBonus: monsterName.toLowerCase() === "goblin" ? 4 : 3,
-        damageDice: monsterName.toLowerCase() === "goblin" ? "1d6+2" : "1d8+1",
-        initiative: rollDie(20) + 2,
+        hp: stats.hp,
+        maxHp: stats.hp,
+        ac: stats.ac,
+        attackBonus: stats.attackBonus,
+        damageDice: stats.damageDice,
+        initiative: rollDie(20) + stats.initiativeMod,
         conditions: []
       };
+      if (stats.attacks) token.attacks = stats.attacks;
       nextState.tokens.push(token);
       spawned.push(token);
     }
@@ -279,7 +313,58 @@
     return nextState;
   }
 
-  function attack(state, attackerId, targetId) {
+  // Rolls one d20 (or two, for advantage/disadvantage, keeping the higher/lower) and
+  // reports both the chosen roll and the raw rolls behind it, so callers can show their
+  // work the same way a natural-1/natural-20 already does.
+  function rollD20WithMode(mode) {
+    if (mode === "advantage" || mode === "disadvantage") {
+      const a = rollDie(20);
+      const b = rollDie(20);
+      const roll = mode === "advantage" ? Math.max(a, b) : Math.min(a, b);
+      return { roll, rolls: [a, b] };
+    }
+    return { roll: rollDie(20), rolls: [] };
+  }
+
+  // Resolves a single attack roll + damage roll against one target. `label` (an attack
+  // name like "Claw") is only included in the message when set -- single-attack callers
+  // leave it null so the message format matches a plain "<attacker> attacks <target>" line.
+  function resolveOneAttack(attacker, target, attackBonus, damageDice, mode, label) {
+    const d20Info = rollD20WithMode(mode);
+    const d20 = d20Info.roll;
+    const bonus = Number(attackBonus || 0);
+    const total = d20 + bonus;
+    const targetAc = Number(target.ac || 10);
+    const isCritical = d20 === 20;
+    const isMiss = d20 === 1 || (!isCritical && total < targetAc);
+    const rollLabel = d20Info.rolls.length
+      ? `${d20} (${mode}: ${d20Info.rolls.join(", ")})`
+      : `${d20}`;
+    const actorLabel = label ? `${attacker.name}'s ${label}` : attacker.name;
+
+    if (isMiss) {
+      return {
+        damageTotal: 0,
+        message: `${actorLabel} attacks ${target.name}: ${rollLabel} + ${bonus} = ${total} vs AC ${targetAc}. Miss.`
+      };
+    }
+
+    const damage = rollDice(damageDice || "1d4");
+    // RAW: a critical hit doubles the damage dice only, not any flat modifier.
+    const diceTotal = damage.total - damage.modifier;
+    const damageTotal = isCritical ? diceTotal * 2 + damage.modifier : damage.total;
+    const critText = isCritical ? " Critical hit." : "";
+    return {
+      damageTotal,
+      message: `${actorLabel} attacks ${target.name}: ${rollLabel} + ${bonus} = ${total} vs AC ${targetAc}. Hit.${critText} Damage ${damageTotal} (${damage.notation}).`
+    };
+  }
+
+  // options: { advantage: bool, disadvantage: bool } -- applies to every d20 rolled this
+  // call. If the attacker has an `attacks` array (Multiattack, e.g. a troll's Bite + two
+  // Claws), each one resolves in order against the same target, stopping early if the
+  // target drops to 0 HP so a dead target doesn't keep eating attack rolls.
+  function attack(state, attackerId, targetId, options = {}) {
     let nextState = clone(state);
     const activeTokens = tokensOnCurrentMap(nextState);
     const attacker = activeTokens.find((token) => token.id === attackerId);
@@ -288,23 +373,25 @@
       return { state, message: "Attack failed: attacker or target was not found." };
     }
 
-    const d20 = rollDie(20);
-    const attackBonus = Number(attacker.attackBonus || 0);
-    const total = d20 + attackBonus;
-    const targetAc = Number(target.ac || 10);
-    const isCritical = d20 === 20;
-    const isMiss = d20 === 1 || (!isCritical && total < targetAc);
+    const mode = options.disadvantage ? "disadvantage" : options.advantage ? "advantage" : null;
+    const profiles = Array.isArray(attacker.attacks) && attacker.attacks.length
+      ? attacker.attacks
+      : [{ name: null, attackBonus: attacker.attackBonus, damageDice: attacker.damageDice }];
+    const useLabel = profiles.length > 1;
 
-    if (isMiss) {
-      const message = `${attacker.name} attacks ${target.name}: ${d20} + ${attackBonus} = ${total} vs AC ${targetAc}. Miss.`;
-      return { state: addLogEntry(nextState, message), message };
+    const messages = [];
+    for (const profile of profiles) {
+      const liveTarget = tokensOnCurrentMap(nextState).find((token) => token.id === target.id);
+      if (!liveTarget || liveTarget.hp <= 0) break;
+
+      const result = resolveOneAttack(attacker, liveTarget, profile.attackBonus, profile.damageDice, mode, useLabel ? profile.name : null);
+      messages.push(result.message);
+      if (result.damageTotal > 0) {
+        nextState = applyDamage(nextState, target.id, result.damageTotal);
+      }
     }
 
-    const damage = rollDice(attacker.damageDice || "1d4");
-    const damageTotal = isCritical ? damage.total * 2 : damage.total;
-    nextState = applyDamage(nextState, target.id, damageTotal);
-    const critText = isCritical ? " Critical hit." : "";
-    const message = `${attacker.name} attacks ${target.name}: ${d20} + ${attackBonus} = ${total} vs AC ${targetAc}. Hit.${critText} Damage ${damageTotal} (${damage.notation}).`;
+    const message = messages.join(" ");
     return { state: addLogEntry(nextState, message), message };
   }
 
@@ -359,7 +446,21 @@
     const actionFirst = new RegExp(`(?:spawn|summon|emerge|appear|add).*?${countPattern}\\s+${monsterPattern}`);
     const countFirst = new RegExp(`${countPattern}\\s+${monsterPattern}.*?(?:spawn|summon|emerge|appear|add)`);
     const spawnMatch = normalized.match(actionFirst) || normalized.match(countFirst);
-    const attackMatch = command.match(/^(.+?)\s+attacks?\s+(.+?)[.!?]?$/i);
+
+    // Strip a trailing "with advantage"/"at disadvantage" phrase before matching the
+    // attacker/target names, otherwise it gets swallowed into the target name.
+    const disadvantageSuffix = /\s+(?:with disadvantage|at disadvantage)\s*[.!?]?$/i;
+    const advantageSuffix = /\s+(?:with advantage|at advantage)\s*[.!?]?$/i;
+    let attackOptions = {};
+    let attackCommand = command;
+    if (disadvantageSuffix.test(command)) {
+      attackOptions = { disadvantage: true };
+      attackCommand = command.replace(disadvantageSuffix, "");
+    } else if (advantageSuffix.test(command)) {
+      attackOptions = { advantage: true };
+      attackCommand = command.replace(advantageSuffix, "");
+    }
+    const attackMatch = attackCommand.match(/^(.+?)\s+attacks?\s+(.+?)[.!?]?$/i);
 
     if (attackMatch) {
       const attacker = findTokenByName(state, attackMatch[1]);
@@ -367,7 +468,7 @@
       if (!attacker || !target) {
         return { state, message: "I could not find the attacker or target." };
       }
-      return attack(state, attacker.id, target.id);
+      return attack(state, attacker.id, target.id, attackOptions);
     }
 
     if (spawnMatch) {

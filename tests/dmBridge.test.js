@@ -54,6 +54,18 @@ test("applyActions spawns monsters then resolves attacks against the just-spawne
   assert.match(messages[2], /Goblin 2 attacks Darkhawk/);
 });
 
+test("applyActions passes an attack action's advantage/disadvantage flags through to CampaignOS.attack", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Darkhawk", ac: 15, hp: 10, maxHp: 10 }).state;
+
+  const { messages } = withRandom([0.2, 0.85], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "attack", attacker: "Goblin 1", target: "Darkhawk", advantage: true }
+  ]));
+
+  assert.match(messages[0], /advantage: 5, 18/);
+});
+
 test("applyActions applies damage, healing, and condition toggles by token name", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Mara Fenn", hp: 50, maxHp: 86 }).state;
