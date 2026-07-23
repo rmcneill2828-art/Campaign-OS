@@ -117,7 +117,11 @@
   let dmBridgePendingId = null;
   let dmBridgePollTimer = null;
   let dmBridgeTimeoutHandle = null;
-  const dmBridgeResponseTimeoutMs = 20000;
+  // The actual round trip is a real `claude -p` subprocess invocation (CLI cold-start,
+  // system prompt load, generation), not a direct API call -- watched one take 84s for a
+  // fairly ordinary combat command, well past the 20s this used to allow. 2 minutes gives
+  // real headroom without leaving a genuinely stuck request hanging forever.
+  const dmBridgeResponseTimeoutMs = 120000;
   let dmBridgeContext = null;
   let sessionTranscript = loadSessionTranscript();
   let endSessionPendingId = null;
@@ -1701,14 +1705,14 @@
     recordTranscript(`DM: ${command}`);
     dmBridgePendingId = id;
     setDMBridgeBusy(true);
-    commandResult.textContent = "Waiting for Claude Code (run dm-bridge/watch.js if it isn't already running)...";
+    commandResult.textContent = "Waiting for Claude Code (run dm-bridge/watch.js if it isn't already running) -- can take up to 2 minutes...";
 
     clearTimeout(dmBridgeTimeoutHandle);
     dmBridgeTimeoutHandle = setTimeout(() => {
       if (dmBridgePendingId !== id) return; // a later response already resolved this
       dmBridgePendingId = null;
       setDMBridgeBusy(false);
-      commandResult.textContent = "No response after 20s -- make sure `node dm-bridge/watch.js` is running, then try again.";
+      commandResult.textContent = "No response after 2 minutes -- make sure `node dm-bridge/watch.js` is running, then try again.";
     }, dmBridgeResponseTimeoutMs);
   }
 
