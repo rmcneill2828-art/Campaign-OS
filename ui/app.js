@@ -7,6 +7,9 @@
   const initiativeList = document.querySelector("#initiativeList");
   const turnStatus = document.querySelector("#turnStatus");
   const nextTurnButton = document.querySelector("#nextTurnButton");
+  const quickAddTokenForm = document.querySelector("#quickAddTokenForm");
+  const quickAddTokenName = document.querySelector("#quickAddTokenName");
+  const quickAddTokenType = document.querySelector("#quickAddTokenType");
   const tokenSheet = document.querySelector("#tokenSheet");
   const combatLog = document.querySelector("#combatLog");
   const campaignImport = document.querySelector("#campaignImport");
@@ -1031,6 +1034,26 @@
     commandResult.textContent = `${result.token.name} joined the encounter from ${item.title}.`;
     render();
   }
+
+  // Blank token with engine defaults (10 HP, AC 12, +3/1d6+1, 30 ft speed) -- for a PC or
+  // NPC that doesn't have a real campaign sheet yet (a quick stand-in, a test token), rather
+  // than requiring an import or one of the five built-in spawnable monster types.
+  quickAddTokenForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.mapName) {
+      commandResult.textContent = "Load or open a map before adding tokens.";
+      return;
+    }
+    const name = quickAddTokenName.value.trim();
+    if (!name) return;
+    const result = window.CampaignOS.addToken(state, { name, type: quickAddTokenType.value });
+    const enriched = await applyLibraryImages(result.state);
+    state = enriched.state;
+    saveEncounter();
+    commandResult.textContent = `${result.token.name} added to the encounter.`;
+    quickAddTokenForm.reset();
+    render();
+  });
 
   function openCharacterSheet(item) {
     const url = `character.html?id=${encodeURIComponent(item.id)}`;

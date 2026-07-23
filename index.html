@@ -84,6 +84,19 @@
               <ol id="initiativeList" class="initiative-list"></ol>
             </section>
 
+            <section class="panel-section">
+              <h2>Add Token</h2>
+              <p class="library-hint">A blank token with default stats (10 HP, AC 12, +3/1d6+1, 30 ft speed) -- edit them on the token sheet below after adding. For a real PC/NPC with accurate stats, import it from the campaign browser or use the Character Creator instead.</p>
+              <form id="quickAddTokenForm" class="library-add-form">
+                <input id="quickAddTokenName" type="text" placeholder="Name" aria-label="New token name" required>
+                <select id="quickAddTokenType" aria-label="New token type">
+                  <option value="hero">Hero</option>
+                  <option value="monster">Monster</option>
+                </select>
+                <button type="submit">Add</button>
+              </form>
+            </section>
+
             <section class="panel-section panel-section-primary">
               <h2>Token</h2>
               <div id="tokenSheet" class="token-sheet empty">Select a token</div>
