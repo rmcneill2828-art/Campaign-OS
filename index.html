@@ -121,6 +121,10 @@
               <button type="submit">Run</button>
             </form>
             <p id="commandResult" class="command-result">Ready.</p>
+            <div class="dm-bridge-end-session-row">
+              <button id="endSessionButton" type="button" title="Writes this session's combat log and narration into the DnD campaign repo's session-log.md and world-state.md (file changes only -- nothing is committed or pushed).">End Session</button>
+              <span id="endSessionStatus" class="dm-bridge-status"></span>
+            </div>
           </section>
 
           <section class="panel-section">

@@ -14,8 +14,12 @@
     return { ...state, log: [message, ...(state.log || [])].slice(0, 12) };
   }
 
-  // Applies one action against `state`, returning the next state and a log line
-  // (or null if nothing worth logging happened -- e.g. an unresolved token name).
+  // Applies one action against `state`, returning the next state, the action's
+  // resulting description (or null if nothing worth describing happened -- e.g. an
+  // unresolved token name), and whether that description is already sitting in
+  // state.log (attack() logs its own message internally; appending it again there
+  // would double it up, but callers that want the full text regardless -- like the
+  // session transcript -- still need it back).
   function applyAction(state, action) {
     switch (action.type) {
       case "spawn_monster": {
@@ -23,46 +27,51 @@
         // parseCommand's natural-language spawn phrasing is the supported entry point,
         // and it already produces the right stat block, naming, and log message.
         const result = window.CampaignOS.parseCommand(state, `spawn ${action.count} ${action.monster}`);
-        return { state: result.state, message: result.message };
+        return { state: result.state, message: result.message, alreadyLogged: false };
       }
       case "attack": {
         const attacker = findTokenByName(state, action.attacker);
         const target = findTokenByName(state, action.target);
         if (!attacker || !target) {
-          return { state, message: `(DM assistant) could not resolve "${action.attacker}" attacking "${action.target}".` };
+          return {
+            state,
+            message: `(DM assistant) could not resolve "${action.attacker}" attacking "${action.target}".`,
+            alreadyLogged: false
+          };
         }
-        // attack() already appends its own message via addLogEntry -- returning it here
-        // too would double-log every attack.
         const result = window.CampaignOS.attack(state, attacker.id, target.id);
-        return { state: result.state, message: null };
+        return { state: result.state, message: result.message, alreadyLogged: true };
       }
       case "apply_damage": {
         const target = findTokenByName(state, action.target);
-        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to damage.` };
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to damage.`, alreadyLogged: false };
         return {
           state: window.CampaignOS.applyDamage(state, target.id, action.amount),
-          message: `${target.name} takes ${action.amount} damage.`
+          message: `${target.name} takes ${action.amount} damage.`,
+          alreadyLogged: false
         };
       }
       case "apply_healing": {
         const target = findTokenByName(state, action.target);
-        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to heal.` };
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to heal.`, alreadyLogged: false };
         return {
           state: window.CampaignOS.applyHealing(state, target.id, action.amount),
-          message: `${target.name} heals ${action.amount} HP.`
+          message: `${target.name} heals ${action.amount} HP.`,
+          alreadyLogged: false
         };
       }
       case "toggle_condition": {
         const target = findTokenByName(state, action.target);
-        if (!target) return { state, message: `(DM assistant) could not find "${action.target}".` };
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}".`, alreadyLogged: false };
         const hadCondition = target.conditions.includes(action.condition);
         return {
           state: window.CampaignOS.toggleCondition(state, target.id, action.condition),
-          message: `${target.name} is ${hadCondition ? "no longer" : "now"} ${action.condition}.`
+          message: `${target.name} is ${hadCondition ? "no longer" : "now"} ${action.condition}.`,
+          alreadyLogged: false
         };
       }
       default:
-        return { state, message: null };
+        return { state, message: null, alreadyLogged: false };
     }
   }
 
@@ -70,13 +79,22 @@
   // token names against the *current* state after each step) matters because a
   // spawn_monster action is routinely followed by attack actions targeting the
   // monsters it just created (e.g. "Goblin 1" doesn't exist until spawn runs).
+  // Returns every action's description in `messages`, in order, regardless of
+  // whether it's also in state.log -- callers building a longer-lived record (the
+  // session transcript) need the full list, not just what fits in the 12-entry cap.
   function applyActions(state, actions) {
     let nextState = state;
+    const messages = [];
     (actions || []).forEach((action) => {
       const result = applyAction(nextState, action);
-      nextState = result.message ? appendLog(result.state, result.message) : result.state;
+      if (result.message) {
+        messages.push(result.message);
+        nextState = result.alreadyLogged ? result.state : appendLog(result.state, result.message);
+      } else {
+        nextState = result.state;
+      }
     });
-    return nextState;
+    return { state: nextState, messages };
   }
 
   window.CampaignOSDMBridge = {

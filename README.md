@@ -102,6 +102,35 @@ the default) occasionally under-use attached context on oddly-phrased or self-re
 commands -- if narration seems to ignore it, try rephrasing, or set `DM_BRIDGE_MODEL=sonnet` for
 more consistent context use.
 
+### Writing session results back to the campaign repo
+
+Campaign-OS only *imports* from your DnD campaign repo -- combat and narration run here don't
+change anything in that repo on their own, so without a way to feed results back, the repo's
+`world-state.md` and `session-log.md` would silently drift out of sync with what actually
+happened. The **End Session** button (below the command box) closes that loop:
+
+1. Set `DND_REPO_PATH` to your local checkout of the campaign repo before starting the watcher:
+   ```text
+   DND_REPO_PATH=/path/to/DND/Campaign node dm-bridge/watch.js
+   ```
+2. Play the session as normal (local commands or the Claude DM bridge, either records to the
+   session transcript). When you're done, click **End Session**.
+3. The watcher hands the *entire* session's transcript and final token states to a real Claude
+   Code call with actual Read/Write/Edit access scoped to `DND_REPO_PATH` -- not the constrained,
+   JSON-only call combat narration uses. It reads `active.md` to find the active campaign, reads
+   the current `session-log.md` and `world-state.md`, and drafts an update in the campaign's
+   existing narrative style (the same kind of prose you'd get writing it by hand with Claude Code)
+   rather than dumping a raw combat log.
+
+**This only ever edits files -- it never runs git, never commits, never pushes.** Review the
+diff in the campaign repo afterward the same way you would any other edit, and commit it
+yourself when you're happy with it. If `DND_REPO_PATH` isn't set (or doesn't exist), End Session
+fails with a message telling you so rather than guessing at a path or writing anywhere unexpected.
+
+The full session transcript persists across page reloads (separately from the 12-entry Combat Log
+shown in the UI, which is just a rolling display) until a successful End Session clears it, so
+losing your browser tab mid-session doesn't lose the record.
+
 ## Token library
 
 The "Token Library" panel lets you save a portrait once and have it show up automatically from
@@ -127,7 +156,8 @@ Campaign OS
 |-- ui/             Browser UI glue: rendering, event wiring, and the IndexedDB-backed token
 |                   library / image store / dm-bridge folder-handle store
 |-- dm-bridge/      watch.js -- the Node script that bridges the browser to the local
-|                   `claude` CLI (see Claude DM bridge, above)
+|                   `claude` CLI, both for live combat narration and for the End
+|                   Session write-back into the DnD campaign repo (see above)
 `-- tests/          node:test suite for engine/ and the IndexedDB name-matching logic in
                     ui/tokenLibrary.js
 ```

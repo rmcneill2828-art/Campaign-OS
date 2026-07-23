@@ -18,6 +18,8 @@ const { spawn } = require("child_process");
 const bridgeDir = __dirname;
 const requestPath = path.join(bridgeDir, "request.json");
 const responsePath = path.join(bridgeDir, "response.json");
+const endSessionRequestPath = path.join(bridgeDir, "end-session-request.json");
+const endSessionResponsePath = path.join(bridgeDir, "end-session-response.json");
 
 // The system prompt is written to the OS temp dir (not this project folder) because
 // the project path contains a space ("Campaign OS"), and on Windows the `claude` CLI
@@ -220,6 +222,158 @@ function poll() {
   });
 }
 
+// --- End Session write-back -------------------------------------------------------
+//
+// Unlike the combat-narration flow above (which deliberately disallows every tool and
+// demands a single strict JSON reply), this is a real, multi-step Claude Code call
+// with actual Read/Write/Edit access to the DnD campaign repo -- it reads the current
+// session-log.md and world-state.md, drafts an update in the campaign's existing
+// narrative style, and writes it directly. It never runs Bash and is never given a
+// reason to touch git: nothing is committed or pushed here, on purpose. The DM
+// reviews the resulting diff in the campaign repo and commits it themselves, same as
+// any other edit to that repo.
+
+const END_SESSION_SYSTEM_PROMPT = [
+  "You are helping a Dungeon Master fold the results of a combat/roleplay session run in a",
+  "virtual tabletop app (Campaign OS) back into their campaign's markdown records.",
+  "",
+  "Your working directory is the root of the campaign repository. Steps:",
+  "1. Read active.md to find the active campaign's slug and folder (campaigns/<slug>/).",
+  "2. Read that campaign's session-log.md. Find the highest existing \"## Session N\" heading",
+  "   and determine the next session number.",
+  "3. Using the provided transcript and final token states, write a new \"## Session N -- <date>\"",
+  "   section at the END of session-log.md, in the SAME narrative prose style as the existing",
+  "   entries -- named beats, character voice, thematic callbacks, not a mechanical log dump.",
+  "   Use today's date if no better date is implied by the transcript.",
+  "4. Read that campaign's world-state.md. Update only what actually changed: party",
+  "   location/HP/conditions, the quest log, NPC statuses, location statuses. Leave unrelated",
+  "   sections untouched. world-state.md is a living tracker of ACTIVE threads only --",
+  "   full blow-by-blow history belongs in session-log.md, not here.",
+  "5. Do not modify character sheet files unless the transcript clearly implies a permanent",
+  "   change (e.g. a level-up, a name/identity reveal) -- ordinary HP loss during the session",
+  "   is not permanent once the party rests, so do not update character HP fields for that alone.",
+  "6. Do not run git commands and do not attempt to commit or push anything -- file edits only.",
+  "",
+  "When finished, reply with a short plain-text summary (2-4 sentences) of exactly which files",
+  "you changed and what you added -- this is shown directly to the DM, not parsed as JSON."
+].join("\n");
+
+const endSessionSystemPromptPath = path.join(os.tmpdir(), "campaign-os-dm-bridge-end-session-system-prompt.txt");
+fs.writeFileSync(endSessionSystemPromptPath, END_SESSION_SYSTEM_PROMPT, "utf8");
+
+let lastProcessedEndSessionId = null;
+
+function buildEndSessionPrompt(request) {
+  const state = request.finalState || {};
+  const tokens = Array.isArray(state.tokens) ? state.tokens : [];
+  const lines = [
+    "Session transcript (chronological):",
+    ...((request.transcript || []).map((line) => `- ${line}`)),
+    "",
+    `Final map: ${state.mapName || "(none)"}`,
+    "Final token states:"
+  ];
+  if (tokens.length === 0) {
+    lines.push("(none)");
+  } else {
+    tokens.forEach((t) => {
+      const conditions = Array.isArray(t.conditions) && t.conditions.length ? `, conditions: ${t.conditions.join(", ")}` : "";
+      lines.push(`- ${t.name} (${t.type}, on ${t.mapName || "unknown map"}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}${conditions}`);
+    });
+  }
+  if (request.contextTitle) {
+    lines.push("", `DM had "${request.contextTitle}" attached as context during this session.`);
+  }
+  return lines.join("\n");
+}
+
+function writeEndSessionResponse(id, ok, message) {
+  const response = { id, ok, message, respondedAt: new Date().toISOString() };
+  fs.writeFile(endSessionResponsePath, JSON.stringify(response, null, 2), (err) => {
+    if (err) console.error("[dm-bridge] failed to write end-session-response.json:", err.message);
+    else console.log(`[dm-bridge] end-session ${id} ${ok ? "succeeded" : "failed"}: ${message}`);
+  });
+}
+
+function handleEndSessionRequest(request) {
+  console.log(`[dm-bridge] processing end-session ${request.id}`);
+  const dndRepoPath = process.env.DND_REPO_PATH;
+  if (!dndRepoPath) {
+    writeEndSessionResponse(request.id, false,
+      "DND_REPO_PATH isn't set. Stop the watcher, set it to your campaign repo's path (e.g. " +
+      "DND_REPO_PATH=/path/to/DND/Campaign node dm-bridge/watch.js), and try again.");
+    return;
+  }
+  if (!fs.existsSync(dndRepoPath)) {
+    writeEndSessionResponse(request.id, false, `DND_REPO_PATH is set to "${dndRepoPath}", but that path doesn't exist.`);
+    return;
+  }
+
+  const prompt = buildEndSessionPrompt(request);
+  const model = process.env.DM_BRIDGE_MODEL || "haiku";
+  const args = [
+    "-p",
+    "--output-format", "json",
+    "--system-prompt-file", endSessionSystemPromptPath,
+    "--model", model,
+    "--allowedTools", "Read,Write,Edit",
+    "--permission-mode", "acceptEdits",
+    "--max-budget-usd", "2.00"
+  ];
+
+  const child = spawn("claude", args, {
+    cwd: dndRepoPath,
+    shell: process.platform === "win32",
+    windowsHide: true
+  });
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("error", (err) => {
+    writeEndSessionResponse(request.id, false, `Couldn't start claude: ${err.message}`);
+  });
+  child.on("close", () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {
+      console.error("[dm-bridge] could not parse end-session claude output as JSON:", stdout.slice(0, 300));
+      writeEndSessionResponse(request.id, false, "Claude's response wasn't valid JSON -- check the watcher's console output.");
+      return;
+    }
+    if (parsed.is_error) {
+      writeEndSessionResponse(request.id, false, `Claude reported an error: ${parsed.result}`);
+      return;
+    }
+    writeEndSessionResponse(request.id, true, String(parsed.result || "Done, but Claude didn't summarize what changed."));
+  });
+
+  child.stdin.write(prompt);
+  child.stdin.end();
+}
+
+function pollEndSession() {
+  fs.readFile(endSessionRequestPath, "utf8", (err, data) => {
+    if (!err) {
+      try {
+        const request = JSON.parse(data);
+        if (request.id && request.id !== lastProcessedEndSessionId) {
+          lastProcessedEndSessionId = request.id;
+          handleEndSessionRequest(request);
+        }
+      } catch {
+        // partial write mid-poll -- try again next tick
+      }
+    }
+    setTimeout(pollEndSession, 1500);
+  });
+}
+
 console.log(`[dm-bridge] watching ${requestPath}`);
 console.log(`[dm-bridge] model: ${process.env.DM_BRIDGE_MODEL || "haiku"} (override with DM_BRIDGE_MODEL env var)`);
+console.log(`[dm-bridge] watching ${endSessionRequestPath}`);
+console.log(`[dm-bridge] DND_REPO_PATH: ${process.env.DND_REPO_PATH || "(not set -- End Session will fail until this is set)"}`);
 poll();
+pollEndSession();

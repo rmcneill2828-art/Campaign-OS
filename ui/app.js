@@ -2,6 +2,7 @@
   const storageKey = "campaign-os-encounter-state";
   const campaignStorageKey = "campaign-os-campaign-import";
   const preferencesStorageKey = "campaign-os-preferences";
+  const sessionTranscriptStorageKey = "campaign-os-session-transcript";
   const map = document.querySelector("#battleMap");
   const initiativeList = document.querySelector("#initiativeList");
   const tokenSheet = document.querySelector("#tokenSheet");
@@ -21,6 +22,8 @@
   const dmBridgeContextRow = document.querySelector("#dmBridgeContextRow");
   const dmBridgeContextLabel = document.querySelector("#dmBridgeContextLabel");
   const dmBridgeContextClear = document.querySelector("#dmBridgeContextClear");
+  const endSessionButton = document.querySelector("#endSessionButton");
+  const endSessionStatus = document.querySelector("#endSessionStatus");
   const libraryAddForm = document.querySelector("#libraryAddForm");
   const libraryName = document.querySelector("#libraryName");
   const libraryImageInput = document.querySelector("#libraryImageInput");
@@ -49,6 +52,11 @@
   let dmBridgeTimeoutHandle = null;
   const dmBridgeResponseTimeoutMs = 20000;
   let dmBridgeContext = null;
+  let sessionTranscript = loadSessionTranscript();
+  let endSessionPendingId = null;
+  let endSessionTimeoutHandle = null;
+  let endSessionPollTimer = null;
+  const endSessionResponseTimeoutMs = 120000;
   campaignSearch.value = preferences.search || "";
   campaignFilter.value = preferences.filter || "all";
   showTemplates.checked = Boolean(preferences.showTemplates);
@@ -684,6 +692,89 @@
     commandResult.textContent = "DM context cleared.";
   });
 
+  // "End Session" write-back: hands this session's full transcript (not just the
+  // UI's 12-entry combat log) and final token states to the watcher, which asks a
+  // real Claude Code invocation -- with actual Read/Write/Edit access to the DnD
+  // campaign repo (see DND_REPO_PATH in dm-bridge/watch.js) -- to draft a session-log
+  // entry and world-state.md updates in the campaign's existing narrative style.
+  // File changes only: nothing is committed or pushed, so the DM reviews the diff
+  // and commits it themselves same as any other campaign-repo edit.
+  endSessionButton.addEventListener("click", async () => {
+    if (!dmBridgeDirHandle) {
+      endSessionStatus.textContent = "Connect to Claude Code first (see the button above).";
+      return;
+    }
+    if (!sessionTranscript.length) {
+      endSessionStatus.textContent = "Nothing recorded yet this session -- run a few commands first.";
+      return;
+    }
+
+    const id = `end-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const payload = {
+      id,
+      transcript: sessionTranscript.map((entry) => entry.text),
+      contextTitle: dmBridgeContext?.title || null,
+      finalState: {
+        mapName: state.mapName,
+        tokens: state.tokens.map((token) => ({
+          name: token.name,
+          type: token.type,
+          mapName: token.mapName,
+          hp: token.hp,
+          maxHp: token.maxHp,
+          ac: token.ac,
+          conditions: token.conditions
+        }))
+      },
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await writeBridgeJson("end-session-request.json", payload);
+    } catch (err) {
+      endSessionStatus.textContent = `Could not write to the DM bridge folder: ${err.message}`;
+      return;
+    }
+
+    endSessionPendingId = id;
+    endSessionButton.disabled = true;
+    endSessionStatus.textContent = "Ending session -- Claude is updating the campaign repo's files (this can take a minute)...";
+    startEndSessionPolling();
+
+    clearTimeout(endSessionTimeoutHandle);
+    endSessionTimeoutHandle = setTimeout(() => {
+      if (endSessionPendingId !== id) return;
+      endSessionPendingId = null;
+      endSessionButton.disabled = false;
+      endSessionStatus.textContent = "No response after 2 minutes -- check the watcher is running and DND_REPO_PATH is set, then try again.";
+    }, endSessionResponseTimeoutMs);
+  });
+
+  function startEndSessionPolling() {
+    if (endSessionPollTimer) return;
+    endSessionPollTimer = setInterval(checkEndSessionResponse, 1500);
+  }
+
+  async function checkEndSessionResponse() {
+    if (!dmBridgeDirHandle || !endSessionPendingId) return;
+    let response;
+    try {
+      response = await readBridgeJson("end-session-response.json");
+    } catch {
+      return;
+    }
+    if (!response || response.id !== endSessionPendingId) return;
+
+    clearTimeout(endSessionTimeoutHandle);
+    endSessionPendingId = null;
+    endSessionButton.disabled = false;
+
+    if (response.ok) {
+      clearSessionTranscript();
+    }
+    endSessionStatus.textContent = response.message || "Done.";
+  }
+
   function renderMapOptions() {
     const names = loadedMapNames();
     mapSelect.innerHTML = "";
@@ -796,6 +887,8 @@
     const enriched = await applyLibraryImages(result.state);
     state = enriched.state;
     saveEncounter();
+    recordTranscript(`DM: ${commandInput.value}`);
+    recordTranscript(result.message);
     commandResult.textContent = result.message;
     render();
   });
@@ -914,6 +1007,7 @@
       return;
     }
 
+    recordTranscript(`DM: ${command}`);
     dmBridgePendingId = id;
     setDMBridgeBusy(true);
     commandResult.textContent = "Waiting for Claude Code (run dm-bridge/watch.js if it isn't already running)...";
@@ -950,10 +1044,12 @@
     clearTimeout(dmBridgeTimeoutHandle);
     dmBridgePendingId = null;
     setDMBridgeBusy(false);
-    const withActions = window.CampaignOSDMBridge.applyActions(state, response.actions || []);
+    const { state: withActions, messages: actionMessages } = window.CampaignOSDMBridge.applyActions(state, response.actions || []);
     const enriched = await applyLibraryImages(withActions);
     state = enriched.state;
     saveEncounter();
+    actionMessages.forEach(recordTranscript);
+    recordTranscript(response.message);
     commandResult.textContent = response.message || "(The DM assistant didn't include a narration.)";
     render();
   }
@@ -1107,6 +1203,30 @@
 
   function saveEncounter() {
     localStorage.setItem(storageKey, JSON.stringify(state));
+  }
+
+  // Everything worth remembering for the "End Session" write-back -- combat log lines
+  // and Claude DM narration alike -- kept in its own uncapped store, since state.log
+  // exists only for the UI's rolling 12-entry display and would lose most of a real
+  // session's history long before the session ends.
+  function recordTranscript(text) {
+    if (!text) return;
+    sessionTranscript.push({ at: new Date().toISOString(), text });
+    localStorage.setItem(sessionTranscriptStorageKey, JSON.stringify(sessionTranscript));
+  }
+
+  function loadSessionTranscript() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(sessionTranscriptStorageKey));
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function clearSessionTranscript() {
+    sessionTranscript = [];
+    localStorage.removeItem(sessionTranscriptStorageKey);
   }
 
   function setActiveMap(mapName) {
