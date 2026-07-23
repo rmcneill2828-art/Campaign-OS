@@ -121,6 +121,11 @@
                 <button id="endSessionButton" type="button" title="Writes this session's combat log and narration into the DnD campaign repo's session-log.md and world-state.md (file changes only -- nothing is committed or pushed).">End Session</button>
                 <span id="endSessionStatus" class="dm-bridge-status"></span>
               </div>
+              <div class="dm-bridge-end-session-row">
+                <button id="sessionReportButton" type="button" title="Formats this session's transcript and final token states as plain text -- no Claude call, nothing written to any file. Paste it to your DM (in a Claude Code chat) as a factual check on what actually happened, alongside their own session-log write-up.">Copy Session Report</button>
+                <span id="sessionReportStatus" class="dm-bridge-status"></span>
+              </div>
+              <textarea id="sessionReportOutput" class="session-report-output" readonly hidden></textarea>
             </section>
 
             <section class="panel-section">

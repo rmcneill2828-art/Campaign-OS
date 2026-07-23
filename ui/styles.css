@@ -840,6 +840,16 @@ body[data-fog="on"] .map-tile:hover {
   border-top: 1px solid var(--line);
 }
 
+.session-report-output {
+  width: 100%;
+  min-height: 160px;
+  margin-top: 10px;
+  font-family: monospace;
+  font-size: 0.78rem;
+  white-space: pre;
+  resize: vertical;
+}
+
 .library-hint {
   margin: 0 0 10px;
   color: var(--muted);

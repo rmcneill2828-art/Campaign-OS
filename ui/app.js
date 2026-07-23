@@ -29,6 +29,9 @@
   const dmBridgeContextClear = document.querySelector("#dmBridgeContextClear");
   const endSessionButton = document.querySelector("#endSessionButton");
   const endSessionStatus = document.querySelector("#endSessionStatus");
+  const sessionReportButton = document.querySelector("#sessionReportButton");
+  const sessionReportStatus = document.querySelector("#sessionReportStatus");
+  const sessionReportOutput = document.querySelector("#sessionReportOutput");
   const libraryAddForm = document.querySelector("#libraryAddForm");
   const libraryName = document.querySelector("#libraryName");
   const libraryImageInput = document.querySelector("#libraryImageInput");
@@ -1147,6 +1150,58 @@
       endSessionButton.disabled = false;
       endSessionStatus.textContent = "No response after 2 minutes -- check the watcher is running and DND_REPO_PATH is set, then try again.";
     }, endSessionResponseTimeoutMs);
+  });
+
+  // Pure client-side formatting -- same underlying data End Session sends (transcript +
+  // final token states), but no Claude call, no repo write, no cost. For a workflow where
+  // the DM (a separate Claude Code chat, not this bridge) writes the actual session-log
+  // entry themselves and wants an objective, code-derived record of what happened to check
+  // their own narrated recap against, rather than Campaign-OS writing the campaign repo
+  // directly.
+  function buildSessionReportText() {
+    const lines = [`Session report -- ${new Date().toLocaleString()}`, ""];
+
+    lines.push("Transcript:");
+    if (!sessionTranscript.length) {
+      lines.push("(nothing recorded this session)");
+    } else {
+      sessionTranscript.forEach((entry) => lines.push(`- ${entry.text}`));
+    }
+
+    lines.push("", `Final map: ${state.mapName || "(none)"}`, "Final token states:");
+    if (!state.tokens.length) {
+      lines.push("(none)");
+    } else {
+      state.tokens.forEach((token) => {
+        const conditions = Array.isArray(token.conditions) && token.conditions.length
+          ? `, conditions: ${token.conditions.join(", ")}`
+          : "";
+        lines.push(`- ${token.name} (${token.type}, on ${token.mapName || "unknown map"}): ${token.hp}/${token.maxHp} HP, AC ${token.ac}${conditions}`);
+      });
+    }
+
+    return lines.join("\n");
+  }
+
+  sessionReportButton.addEventListener("click", async () => {
+    const text = buildSessionReportText();
+    sessionReportOutput.value = text;
+    sessionReportOutput.hidden = false;
+    sessionReportOutput.select();
+
+    // navigator.clipboard requires a secure context -- file:// pages don't get it in most
+    // browsers, so this is a nice-to-have, not something to depend on. The textarea above
+    // (already selected) is the reliable fallback either way: Ctrl+C always works.
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        sessionReportStatus.textContent = "Copied to clipboard -- paste it to your DM.";
+        return;
+      } catch {
+        // fall through to the manual-copy message below
+      }
+    }
+    sessionReportStatus.textContent = "Ready below -- select all and copy (Ctrl+C).";
   });
 
   function startEndSessionPolling() {
