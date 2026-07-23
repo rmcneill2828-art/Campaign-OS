@@ -91,7 +91,25 @@ const SYSTEM_PROMPT = [
 
 fs.writeFileSync(systemPromptPath, SYSTEM_PROMPT, "utf8");
 
-let lastProcessedId = null;
+// A request file left over from a previous run of the watcher (the app crashed, the DM
+// closed the terminal mid-command, a stray click before DND_REPO_PATH was set) would
+// otherwise get reprocessed on every restart, since lastProcessedId resets to null and
+// the file's `id` looks "new" to a fresh process. That's surprising at best (an old combat
+// command replaying against however the encounter looks now) and wasteful at worst (a real
+// Claude Code call for End Session/Create Character, potentially writing to the campaign
+// repo, firing again with stale/insufficient data). Reading whatever's already on disk at
+// startup and treating its id as already-handled closes that gap -- only a genuinely new
+// write (a fresh id) after the watcher is up will ever be processed.
+function primeLastProcessedId(filePath) {
+  try {
+    const request = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    return request.id || null;
+  } catch {
+    return null;
+  }
+}
+
+let lastProcessedId = primeLastProcessedId(requestPath);
 
 function isValidAction(action) {
   if (!action || typeof action !== "object") return false;
@@ -307,7 +325,7 @@ const END_SESSION_SYSTEM_PROMPT = [
 const endSessionSystemPromptPath = path.join(os.tmpdir(), "campaign-os-dm-bridge-end-session-system-prompt.txt");
 fs.writeFileSync(endSessionSystemPromptPath, END_SESSION_SYSTEM_PROMPT, "utf8");
 
-let lastProcessedEndSessionId = null;
+let lastProcessedEndSessionId = primeLastProcessedId(endSessionRequestPath);
 
 function buildEndSessionPrompt(request) {
   const state = request.finalState || {};
@@ -429,7 +447,7 @@ function pollEndSession() {
 
 const createCharacterRequestPath = path.join(bridgeDir, "create-character-request.json");
 const createCharacterResponsePath = path.join(bridgeDir, "create-character-response.json");
-let lastProcessedCreateCharacterId = null;
+let lastProcessedCreateCharacterId = primeLastProcessedId(createCharacterRequestPath);
 
 function writeCreateCharacterResponse(id, ok, message) {
   const response = { id, ok, message, respondedAt: new Date().toISOString() };
