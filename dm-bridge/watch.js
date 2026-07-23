@@ -380,9 +380,90 @@ function pollEndSession() {
   });
 }
 
+// --- Create Character write-back ----------------------------------------------------
+//
+// Deterministic, not an LLM call: the browser (ui/app.js, via engine/characterCreator.js)
+// already computed the full sheet markdown and just needs it written into the campaign
+// repo's characters/ folder. No Claude subprocess, no cost, near-instant. Still gated by
+// DND_REPO_PATH like End Session, and never overwrites an existing file -- if the name
+// collides, the DM picks a different one rather than silently clobbering a real sheet.
+// The requested file name is run through path.basename() before use so a malformed or
+// malicious fileName value can't escape the characters/ directory.
+
+const createCharacterRequestPath = path.join(bridgeDir, "create-character-request.json");
+const createCharacterResponsePath = path.join(bridgeDir, "create-character-response.json");
+let lastProcessedCreateCharacterId = null;
+
+function writeCreateCharacterResponse(id, ok, message) {
+  const response = { id, ok, message, respondedAt: new Date().toISOString() };
+  fs.writeFile(createCharacterResponsePath, JSON.stringify(response, null, 2), (err) => {
+    if (err) console.error("[dm-bridge] failed to write create-character-response.json:", err.message);
+    else console.log(`[dm-bridge] create-character ${id} ${ok ? "succeeded" : "failed"}: ${message}`);
+  });
+}
+
+function handleCreateCharacterRequest(request) {
+  console.log(`[dm-bridge] processing create-character ${request.id}`);
+  const dndRepoPath = process.env.DND_REPO_PATH;
+  if (!dndRepoPath) {
+    writeCreateCharacterResponse(request.id, false,
+      "DND_REPO_PATH isn't set. Stop the watcher, set it to your campaign repo's path (e.g. " +
+      "DND_REPO_PATH=/path/to/DND/Campaign node dm-bridge/watch.js), and try again.");
+    return;
+  }
+  if (!fs.existsSync(dndRepoPath)) {
+    writeCreateCharacterResponse(request.id, false, `DND_REPO_PATH is set to "${dndRepoPath}", but that path doesn't exist.`);
+    return;
+  }
+
+  const fileName = path.basename(String(request.fileName || "").trim()) || "Character.md";
+  if (!fileName.toLowerCase().endsWith(".md")) {
+    writeCreateCharacterResponse(request.id, false, "Character file name must end in .md.");
+    return;
+  }
+
+  const charactersDir = path.join(dndRepoPath, "characters");
+  fs.mkdirSync(charactersDir, { recursive: true });
+  const targetPath = path.join(charactersDir, fileName);
+
+  if (fs.existsSync(targetPath)) {
+    writeCreateCharacterResponse(request.id, false,
+      `A character file named "${fileName}" already exists -- pick a different name.`);
+    return;
+  }
+
+  try {
+    fs.writeFileSync(targetPath, String(request.markdown || ""), "utf8");
+  } catch (err) {
+    writeCreateCharacterResponse(request.id, false, `Couldn't write the character file: ${err.message}`);
+    return;
+  }
+
+  writeCreateCharacterResponse(request.id, true, `Created characters/${fileName} in the campaign repo.`);
+}
+
+function pollCreateCharacter() {
+  fs.readFile(createCharacterRequestPath, "utf8", (err, data) => {
+    if (!err) {
+      try {
+        const request = JSON.parse(data);
+        if (request.id && request.id !== lastProcessedCreateCharacterId) {
+          lastProcessedCreateCharacterId = request.id;
+          handleCreateCharacterRequest(request);
+        }
+      } catch {
+        // partial write mid-poll -- try again next tick
+      }
+    }
+    setTimeout(pollCreateCharacter, 1500);
+  });
+}
+
 console.log(`[dm-bridge] watching ${requestPath}`);
 console.log(`[dm-bridge] model: ${process.env.DM_BRIDGE_MODEL || "haiku"} (override with DM_BRIDGE_MODEL env var)`);
 console.log(`[dm-bridge] watching ${endSessionRequestPath}`);
-console.log(`[dm-bridge] DND_REPO_PATH: ${process.env.DND_REPO_PATH || "(not set -- End Session will fail until this is set)"}`);
+console.log(`[dm-bridge] watching ${createCharacterRequestPath}`);
+console.log(`[dm-bridge] DND_REPO_PATH: ${process.env.DND_REPO_PATH || "(not set -- End Session and Create Character will fail until this is set)"}`);
 poll();
 pollEndSession();
+pollCreateCharacter();

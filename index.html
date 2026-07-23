@@ -144,6 +144,125 @@
               </form>
               <div id="libraryList" class="library-list"></div>
             </section>
+
+            <section class="panel-section">
+              <h2>Create Character</h2>
+              <p class="library-hint">Builds a new 5e character sheet (ability scores, saves, skills, HP, AC, one
+                attack) and writes it into the campaign repo's <code>characters/</code> folder via the DM bridge --
+                requires <code>DND_REPO_PATH</code> to be set when the watcher was started. File changes only,
+                nothing is committed or pushed; review it in the campaign repo like any other edit.</p>
+              <form id="createCharacterForm" class="character-creator-form">
+                <div class="cc-grid">
+                  <label>Name<input id="ccName" type="text" required aria-label="Character name"></label>
+                  <label>Race<input id="ccRace" type="text" list="ccRaceOptions" aria-label="Race"></label>
+                  <label>Class<select id="ccClass" aria-label="Class"></select></label>
+                  <label>Level<input id="ccLevel" type="number" min="1" max="20" value="1" aria-label="Level"></label>
+                  <label>Background<input id="ccBackground" type="text" aria-label="Background"></label>
+                  <label>Alignment<input id="ccAlignment" type="text" list="ccAlignmentOptions" aria-label="Alignment"></label>
+                </div>
+                <datalist id="ccRaceOptions">
+                  <option value="Human"></option>
+                  <option value="Elf"></option>
+                  <option value="Dwarf"></option>
+                  <option value="Halfling"></option>
+                  <option value="Half-Elf"></option>
+                  <option value="Half-Orc"></option>
+                  <option value="Dragonborn"></option>
+                  <option value="Gnome"></option>
+                  <option value="Tiefling"></option>
+                </datalist>
+                <datalist id="ccAlignmentOptions">
+                  <option value="Lawful Good"></option>
+                  <option value="Neutral Good"></option>
+                  <option value="Chaotic Good"></option>
+                  <option value="Lawful Neutral"></option>
+                  <option value="True Neutral"></option>
+                  <option value="Chaotic Neutral"></option>
+                  <option value="Lawful Evil"></option>
+                  <option value="Neutral Evil"></option>
+                  <option value="Chaotic Evil"></option>
+                </datalist>
+
+                <p class="subheading">Ability Scores</p>
+                <div class="cc-score-actions">
+                  <button id="ccStandardArray" type="button">Standard Array</button>
+                  <button id="ccRollScores" type="button">Roll Scores</button>
+                </div>
+                <div class="cc-scores">
+                  <label>STR<input id="ccStr" type="number" min="1" max="30" value="10"></label>
+                  <label>DEX<input id="ccDex" type="number" min="1" max="30" value="10"></label>
+                  <label>CON<input id="ccCon" type="number" min="1" max="30" value="10"></label>
+                  <label>INT<input id="ccInt" type="number" min="1" max="30" value="10"></label>
+                  <label>WIS<input id="ccWis" type="number" min="1" max="30" value="10"></label>
+                  <label>CHA<input id="ccCha" type="number" min="1" max="30" value="10"></label>
+                </div>
+
+                <p class="subheading">Combat</p>
+                <div class="cc-grid">
+                  <label>AC override<input id="ccAc" type="number" placeholder="auto" aria-label="AC override"></label>
+                  <label>Speed (ft)<input id="ccSpeed" type="number" value="30" aria-label="Speed"></label>
+                </div>
+                <div class="cc-grid">
+                  <label>Weapon<input id="ccWeaponName" type="text" value="Weapon" aria-label="Weapon name"></label>
+                  <label>Damage die
+                    <select id="ccWeaponDice" aria-label="Damage die">
+                      <option value="1d4">1d4</option>
+                      <option value="1d6" selected>1d6</option>
+                      <option value="1d8">1d8</option>
+                      <option value="1d10">1d10</option>
+                      <option value="1d12">1d12</option>
+                      <option value="2d6">2d6</option>
+                    </select>
+                  </label>
+                  <label>Attack ability
+                    <select id="ccWeaponAbility" aria-label="Attack ability">
+                      <option value="STR" selected>STR (melee)</option>
+                      <option value="DEX">DEX (finesse/ranged)</option>
+                    </select>
+                  </label>
+                </div>
+
+                <p class="subheading">Proficient Skills</p>
+                <div id="ccSkillList" class="cc-skill-list"></div>
+
+                <p class="subheading">Proficiencies</p>
+                <div class="cc-grid">
+                  <label>Languages<input id="ccLanguages" type="text" aria-label="Languages"></label>
+                  <label>Tools/weapons/armor<input id="ccTools" type="text" aria-label="Tools, weapons, armor"></label>
+                </div>
+                <label class="cc-textarea">Features &amp; Traits<textarea id="ccFeatures" rows="2"></textarea></label>
+
+                <p class="subheading">Spellcasting</p>
+                <label class="cc-caster-toggle">
+                  <input id="ccIsCaster" type="checkbox">
+                  This character casts spells
+                </label>
+                <div id="ccSpellFields" class="cc-grid" hidden>
+                  <label>Spellcasting ability
+                    <select id="ccSpellAbility" aria-label="Spellcasting ability">
+                      <option value="INT">Intelligence</option>
+                      <option value="WIS">Wisdom</option>
+                      <option value="CHA">Charisma</option>
+                    </select>
+                  </label>
+                  <label class="cc-textarea">Spells known/prepared<textarea id="ccSpellsKnown" rows="2"></textarea></label>
+                </div>
+
+                <label class="cc-textarea">Equipment<textarea id="ccEquipment" rows="2"></textarea></label>
+
+                <p class="subheading">Personality</p>
+                <div class="cc-grid">
+                  <label>Traits<input id="ccTraits" type="text" aria-label="Personality traits"></label>
+                  <label>Ideals<input id="ccIdeals" type="text" aria-label="Ideals"></label>
+                  <label>Bonds<input id="ccBonds" type="text" aria-label="Bonds"></label>
+                  <label>Flaws<input id="ccFlaws" type="text" aria-label="Flaws"></label>
+                </div>
+                <label class="cc-textarea">Backstory<textarea id="ccBackstory" rows="3"></textarea></label>
+
+                <button id="createCharacterButton" type="submit">Create Character</button>
+                <p id="createCharacterStatus" class="command-result"></p>
+              </form>
+            </section>
           </div>
         </aside>
       </main>
@@ -152,6 +271,7 @@
     <script src="engine/encounter.js"></script>
     <script src="engine/campaign.js"></script>
     <script src="engine/dmBridge.js"></script>
+    <script src="engine/characterCreator.js"></script>
     <script src="ui/tokenLibrary.js"></script>
     <script src="ui/dmBridgeStore.js"></script>
     <script src="ui/imageStore.js"></script>

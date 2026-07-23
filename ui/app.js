@@ -43,6 +43,42 @@
   const sideTabSetup = document.querySelector("#sideTabSetup");
   const sideGroupPlay = document.querySelector("#sideGroupPlay");
   const sideGroupSetup = document.querySelector("#sideGroupSetup");
+  const createCharacterForm = document.querySelector("#createCharacterForm");
+  const createCharacterButton = document.querySelector("#createCharacterButton");
+  const createCharacterStatus = document.querySelector("#createCharacterStatus");
+  const ccName = document.querySelector("#ccName");
+  const ccRace = document.querySelector("#ccRace");
+  const ccClass = document.querySelector("#ccClass");
+  const ccLevel = document.querySelector("#ccLevel");
+  const ccBackground = document.querySelector("#ccBackground");
+  const ccAlignment = document.querySelector("#ccAlignment");
+  const ccStandardArray = document.querySelector("#ccStandardArray");
+  const ccRollScores = document.querySelector("#ccRollScores");
+  const ccStr = document.querySelector("#ccStr");
+  const ccDex = document.querySelector("#ccDex");
+  const ccCon = document.querySelector("#ccCon");
+  const ccInt = document.querySelector("#ccInt");
+  const ccWis = document.querySelector("#ccWis");
+  const ccCha = document.querySelector("#ccCha");
+  const ccAc = document.querySelector("#ccAc");
+  const ccSpeed = document.querySelector("#ccSpeed");
+  const ccWeaponName = document.querySelector("#ccWeaponName");
+  const ccWeaponDice = document.querySelector("#ccWeaponDice");
+  const ccWeaponAbility = document.querySelector("#ccWeaponAbility");
+  const ccSkillList = document.querySelector("#ccSkillList");
+  const ccLanguages = document.querySelector("#ccLanguages");
+  const ccTools = document.querySelector("#ccTools");
+  const ccFeatures = document.querySelector("#ccFeatures");
+  const ccIsCaster = document.querySelector("#ccIsCaster");
+  const ccSpellFields = document.querySelector("#ccSpellFields");
+  const ccSpellAbility = document.querySelector("#ccSpellAbility");
+  const ccSpellsKnown = document.querySelector("#ccSpellsKnown");
+  const ccEquipment = document.querySelector("#ccEquipment");
+  const ccTraits = document.querySelector("#ccTraits");
+  const ccIdeals = document.querySelector("#ccIdeals");
+  const ccBonds = document.querySelector("#ccBonds");
+  const ccFlaws = document.querySelector("#ccFlaws");
+  const ccBackstory = document.querySelector("#ccBackstory");
   const legacyPrototypeMaps = new Set(["The Standing Ring", "Bear Cave", "Urskelde Road"]);
 
   let preferences = loadPreferences();
@@ -64,6 +100,10 @@
   let endSessionTimeoutHandle = null;
   let endSessionPollTimer = null;
   const endSessionResponseTimeoutMs = 120000;
+  let createCharacterPendingId = null;
+  let createCharacterTimeoutHandle = null;
+  let createCharacterPollTimer = null;
+  const createCharacterResponseTimeoutMs = 20000;
   campaignSearch.value = preferences.search || "";
   campaignFilter.value = preferences.filter || "all";
   showTemplates.checked = Boolean(preferences.showTemplates);
@@ -89,6 +129,144 @@
     setSideTab("setup");
     savePreferences();
   });
+
+  // --- Create Character -----------------------------------------------------------
+  //
+  // Builds a brand-new level-appropriate 5e character sheet (engine/characterCreator.js
+  // does the actual math/markdown) and writes it into the DnD campaign repo's
+  // characters/ folder through the DM bridge -- a deterministic file write handled
+  // directly by dm-bridge/watch.js, not a Claude call (the sheet is already fully
+  // computed here; there's nothing left to draft). Requires the DM bridge folder to be
+  // connected and DND_REPO_PATH to be set when the watcher was started, same as End
+  // Session.
+
+  ccClass.innerHTML = window.CampaignOSCharacterCreator.CLASS_LIST
+    .map((name) => `<option value="${name}">${name}</option>`).join("");
+  ccClass.value = "Fighter";
+
+  ccSkillList.innerHTML = window.CampaignOSCharacterCreator.SKILL_LIST.map((skill) => `
+    <label class="cc-skill">
+      <input type="checkbox" value="${escapeAttribute(skill.name)}">
+      ${escapeHtml(skill.name)} <span>(${skill.ability})</span>
+    </label>
+  `).join("");
+
+  ccIsCaster.addEventListener("change", () => {
+    ccSpellFields.hidden = !ccIsCaster.checked;
+  });
+
+  ccStandardArray.addEventListener("click", () => {
+    const [str, dex, con, int, wis, cha] = [15, 14, 13, 12, 10, 8];
+    ccStr.value = str; ccDex.value = dex; ccCon.value = con;
+    ccInt.value = int; ccWis.value = wis; ccCha.value = cha;
+  });
+
+  function rollAbilityScore() {
+    const rolls = [1, 2, 3, 4].map(() => 1 + Math.floor(Math.random() * 6)).sort((a, b) => a - b);
+    return rolls[1] + rolls[2] + rolls[3]; // drop the lowest of the four
+  }
+
+  ccRollScores.addEventListener("click", () => {
+    ccStr.value = rollAbilityScore();
+    ccDex.value = rollAbilityScore();
+    ccCon.value = rollAbilityScore();
+    ccInt.value = rollAbilityScore();
+    ccWis.value = rollAbilityScore();
+    ccCha.value = rollAbilityScore();
+  });
+
+  function characterDraftFromForm() {
+    const proficientSkills = Array.from(ccSkillList.querySelectorAll("input[type=checkbox]:checked"))
+      .map((input) => input.value);
+    return {
+      name: ccName.value,
+      race: ccRace.value,
+      className: ccClass.value,
+      level: ccLevel.value,
+      background: ccBackground.value,
+      alignment: ccAlignment.value,
+      abilityScores: { STR: ccStr.value, DEX: ccDex.value, CON: ccCon.value, INT: ccInt.value, WIS: ccWis.value, CHA: ccCha.value },
+      ac: ccAc.value,
+      speed: ccSpeed.value,
+      proficientSkills,
+      languages: ccLanguages.value,
+      toolsWeaponsArmor: ccTools.value,
+      features: ccFeatures.value,
+      spellcasting: ccIsCaster.checked ? {
+        isCaster: true,
+        ability: ccSpellAbility.value,
+        spellsKnown: ccSpellsKnown.value
+      } : null,
+      equipment: ccEquipment.value,
+      personality: { traits: ccTraits.value, ideals: ccIdeals.value, bonds: ccBonds.value, flaws: ccFlaws.value },
+      backstory: ccBackstory.value,
+      attack: { weaponName: ccWeaponName.value, diceSize: ccWeaponDice.value, ability: ccWeaponAbility.value }
+    };
+  }
+
+  createCharacterForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const draft = characterDraftFromForm();
+    const errors = window.CampaignOSCharacterCreator.validateDraft(draft);
+    if (errors.length) {
+      createCharacterStatus.textContent = errors.join(" ");
+      return;
+    }
+
+    if (!dmBridgeDirHandle) {
+      createCharacterStatus.textContent = "Connect to Claude Code first (Claude DM panel, Play tab) -- character files are written through the same DM bridge folder.";
+      return;
+    }
+
+    const character = window.CampaignOSCharacterCreator.computeCharacter(draft);
+    const markdown = window.CampaignOSCharacterCreator.characterMarkdown(character);
+    const fileName = window.CampaignOSCharacterCreator.fileNameForCharacter(character.name);
+
+    const id = `char-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      await writeBridgeJson("create-character-request.json", { id, fileName, markdown, createdAt: new Date().toISOString() });
+    } catch (err) {
+      createCharacterStatus.textContent = `Could not write to the DM bridge folder: ${err.message}`;
+      return;
+    }
+
+    createCharacterPendingId = id;
+    createCharacterButton.disabled = true;
+    createCharacterStatus.textContent = `Writing characters/${fileName}...`;
+    startCreateCharacterPolling();
+
+    clearTimeout(createCharacterTimeoutHandle);
+    createCharacterTimeoutHandle = setTimeout(() => {
+      if (createCharacterPendingId !== id) return;
+      createCharacterPendingId = null;
+      createCharacterButton.disabled = false;
+      createCharacterStatus.textContent = "No response after 20s -- make sure `node dm-bridge/watch.js` is running, then try again.";
+    }, createCharacterResponseTimeoutMs);
+  });
+
+  function startCreateCharacterPolling() {
+    if (createCharacterPollTimer) return;
+    createCharacterPollTimer = setInterval(checkCreateCharacterResponse, 1500);
+  }
+
+  async function checkCreateCharacterResponse() {
+    if (!dmBridgeDirHandle || !createCharacterPendingId) return;
+    let response;
+    try {
+      response = await readBridgeJson("create-character-response.json");
+    } catch {
+      return;
+    }
+    if (!response || response.id !== createCharacterPendingId) return;
+
+    clearTimeout(createCharacterTimeoutHandle);
+    createCharacterPendingId = null;
+    createCharacterButton.disabled = false;
+    createCharacterStatus.textContent = response.ok
+      ? `${response.message} Re-import the campaign folder (above) to see it in the browser.`
+      : (response.message || "Something went wrong.");
+  }
 
   function selectedToken() {
     return activeTokens().find((token) => token.id === state.selectedTokenId);

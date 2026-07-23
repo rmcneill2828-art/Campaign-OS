@@ -870,6 +870,124 @@ body[data-fog="on"] .map-tile:hover {
   white-space: nowrap;
 }
 
+.character-creator-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.cc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.cc-grid label,
+.cc-textarea,
+.cc-scores label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.cc-grid input,
+.cc-grid select {
+  width: 100%;
+}
+
+.cc-score-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cc-scores {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 10px;
+  margin-bottom: 10px;
+}
+
+.cc-scores label {
+  text-align: center;
+  font-size: 0.76rem;
+}
+
+.cc-scores input {
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+  text-align: center;
+  /* Hide the native number-input spinner so its width doesn't eat into the two
+     digits an ability score needs -- nobody increments these with tiny arrows. */
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.cc-scores input::-webkit-outer-spin-button,
+.cc-scores input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.cc-skill-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+  max-height: 180px;
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  overflow-y: auto;
+}
+
+.cc-skill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.cc-skill input {
+  min-height: 0;
+  padding: 0;
+}
+
+.cc-skill span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.cc-textarea {
+  margin-bottom: 10px;
+}
+
+.cc-textarea textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  background: #171b15;
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.cc-caster-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+#createCharacterButton {
+  width: 100%;
+}
+
 .combat-log {
   display: grid;
   gap: 8px;

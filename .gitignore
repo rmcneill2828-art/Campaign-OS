@@ -1,0 +1,4 @@
+# Runtime request/response files written by the browser and dm-bridge/watch.js at
+# play time (combat narration, End Session, Create Character) -- generated locally,
+# never meant to be committed.
+dm-bridge/*.json

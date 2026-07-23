@@ -49,6 +49,9 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Token library: save art by name once, and it's attached automatically to any
   matching token from then on -- manual spawns, imported characters, and Claude DM
   bridge actions alike
+- Character creator: build a new 5e character sheet (computed ability modifiers,
+  proficiency bonus, HP, AC, saves, skills, one attack) and write it straight into
+  the campaign repo's `characters/` folder (see below)
 
 Local command examples (works with or without the Claude DM bridge connected):
 
@@ -132,6 +135,28 @@ The full session transcript persists across page reloads (separately from the 12
 shown in the UI, which is just a rolling display) until a successful End Session clears it, so
 losing your browser tab mid-session doesn't lose the record.
 
+## Character creator
+
+The **Create Character** panel (Setup tab) builds a new level-1+ 5e character sheet without
+leaving the app: race, class, level, background, ability scores (fill in manually, or use
+**Standard Array** or **Roll Scores**), proficient skills, one attack, spellcasting if
+applicable, and personality/backstory. It computes the real numbers for you -- proficiency
+bonus, ability modifiers, HP (max hit die + CON at level 1, average roll per level after),
+AC (10 + DEX unless you override it), saving throws and skills (from the class's actual save
+proficiencies and whichever skills you check), and writes a `characters/<name>.md` file
+matching the campaign repo's existing template.
+
+This is meant for starting a *new* character, not reproducing years of an existing one's
+accumulated story -- real character files in this campaign grow far beyond the template through
+actual play, and this tool only generates the clean starting point.
+
+Writing the file reuses the same DM bridge connection and `DND_REPO_PATH` as End Session (see
+above) -- it's a plain file write handled directly by `dm-bridge/watch.js`, not a Claude call,
+since the sheet is already fully computed by the time it's sent. It refuses to overwrite an
+existing file with the same name, and like everything else that touches the campaign repo, it
+only ever writes a file -- no git commands, no commits, no pushes. Re-import the campaign folder
+afterward to see the new character in the browser.
+
 ## Token library
 
 The "Token Library" panel lets you save a portrait once and have it show up automatically from
@@ -153,12 +178,14 @@ Campaign OS
 |-- index.html      Main app shell (battle map, campaign browser, token sheet, Claude DM)
 |-- character.html  Standalone character sheet viewer, opened from an imported character
 |-- engine/         Pure, unit-tested logic: encounter state, campaign import/parsing, the
-|                   dm-bridge action dispatcher -- no DOM, runnable under Node
+|                   dm-bridge action dispatcher, and the character creator's 5e math/markdown
+|                   generation -- no DOM, runnable under Node
 |-- ui/             Browser UI glue: rendering, event wiring, and the IndexedDB-backed token
 |                   library / image store / dm-bridge folder-handle store
 |-- dm-bridge/      watch.js -- the Node script that bridges the browser to the local
-|                   `claude` CLI, both for live combat narration and for the End
-|                   Session write-back into the DnD campaign repo (see above)
+|                   `claude` CLI for live combat narration and the End Session write-back,
+|                   plus a plain (Claude-free) file write for Create Character -- both
+|                   write into the DnD campaign repo (see above)
 `-- tests/          node:test suite for engine/ and the IndexedDB name-matching logic in
                     ui/tokenLibrary.js
 ```
@@ -184,6 +211,6 @@ npm test
 ```
 
 Zero dependencies -- Node's built-in `node:test` runner against `tests/*.test.js`, covering
-`engine/encounter.js`, `engine/campaign.js`, `engine/dmBridge.js`, and the name-matching logic in
-`ui/tokenLibrary.js`. Runs automatically on push/PR to `main` via
+`engine/encounter.js`, `engine/campaign.js`, `engine/dmBridge.js`, `engine/characterCreator.js`,
+and the name-matching logic in `ui/tokenLibrary.js`. Runs automatically on push/PR to `main` via
 `.github/workflows/test.yml`.
