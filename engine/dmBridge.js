@@ -79,16 +79,11 @@
         const grid = window.CampaignOS.currentGrid(state);
         const x = Math.min(Math.max(Math.round(Number(action.x)), 1), grid.columns);
         const y = Math.min(Math.max(Math.round(Number(action.y)), 1), grid.rows);
-        const nextState = window.CampaignOS.setTokenPosition(state, target.id, x, y);
-        const moved = window.CampaignOS.tokensOnCurrentMap(nextState).find((token) => token.id === target.id);
-        const didMove = Boolean(moved && moved.x === x && moved.y === y);
-        return {
-          state: nextState,
-          message: didMove
-            ? `${target.name} moves to (${x}, ${y}).`
-            : `${target.name} could not move to (${x}, ${y}) -- tile occupied.`,
-          alreadyLogged: false
-        };
+        // moveToken enforces speed only when `target` is the currently active turn's token
+        // (state.turn.tokenId) -- otherwise it behaves exactly like the old unconstrained
+        // setTokenPosition, so narration outside formal combat/turn order isn't restricted.
+        const result = window.CampaignOS.moveToken(state, target.id, x, y);
+        return { state: result.state, message: result.message, alreadyLogged: false };
       }
       default:
         return { state, message: null, alreadyLogged: false };

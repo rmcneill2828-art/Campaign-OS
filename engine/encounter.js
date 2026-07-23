@@ -21,16 +21,17 @@
   // since its last turn) is intentionally NOT automated here -- this engine has no
   // start-of-turn hook to key it off. Apply it by hand via applyHealing on the troll's turn.
   const STAT_BLOCKS = {
-    goblin: { hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2 },
-    orc: { hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", initiativeMod: 1 },
-    wolf: { hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", initiativeMod: 2 },
-    bandit: { hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1 },
+    goblin: { hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2, speed: 30 },
+    orc: { hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", initiativeMod: 1, speed: 30 },
+    wolf: { hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", initiativeMod: 2, speed: 40 },
+    bandit: { hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30 },
     troll: {
       hp: 84,
       ac: 15,
       attackBonus: 7,
       damageDice: "1d6+4",
       initiativeMod: -1,
+      speed: 30,
       attacks: [
         { name: "Bite", attackBonus: 7, damageDice: "1d6+4" },
         { name: "Claw", attackBonus: 7, damageDice: "2d6+4" },
@@ -41,7 +42,7 @@
   // Safety net for a monster name that reaches spawnMonster without a STAT_BLOCKS entry
   // (not reachable through parseCommand today, since monsterPattern only matches the
   // names above, but spawnMonster itself doesn't enforce that).
-  const GENERIC_STAT_BLOCK = { hp: 10, ac: 13, attackBonus: 3, damageDice: "1d8+1", initiativeMod: 2 };
+  const GENERIC_STAT_BLOCK = { hp: 10, ac: 13, attackBonus: 3, damageDice: "1d8+1", initiativeMod: 2, speed: 30 };
 
   const initialState = {
     mapName: "",
@@ -49,7 +50,12 @@
     fogEnabled: false,
     selectedTokenId: null,
     log: [],
-    tokens: []
+    tokens: [],
+    // The active turn tracker. tokenId is null when no encounter turn order is running
+    // (free positioning/scene-setting outside combat); round starts at 1 once nextTurn()
+    // is first called. Movement speed limits (see moveToken) only apply to whichever token
+    // this currently points at -- everything else can still be freely repositioned.
+    turn: { tokenId: null, round: 0 }
   };
 
   function clone(value) {
@@ -128,6 +134,9 @@
         ac: stats.ac,
         attackBonus: stats.attackBonus,
         damageDice: stats.damageDice,
+        speed: stats.speed,
+        movementUsed: 0,
+        diagonalStepsThisTurn: 0,
         initiative: rollDie(20) + stats.initiativeMod,
         conditions: []
       };
@@ -156,6 +165,9 @@
       ac: clampNumber(draft.ac ?? 12, 1, 99),
       attackBonus: clampNumber(draft.attackBonus ?? 3, -20, 99),
       damageDice: draft.damageDice || "1d6+1",
+      speed: clampNumber(draft.speed ?? 30, 0, 999),
+      movementUsed: 0,
+      diagonalStepsThisTurn: 0,
       initiative: clampNumber(draft.initiative ?? rollDie(20), 0, 99),
       conditions: draft.conditions || [],
       sourcePath: draft.sourcePath || ""
@@ -250,6 +262,10 @@
       token.damageDice = changes.damageDice.trim() || token.damageDice || "1d4";
     }
 
+    if (changes.speed !== undefined) {
+      token.speed = clampNumber(changes.speed, 0, 999);
+    }
+
     if (typeof changes.image === "string") {
       token.image = changes.image;
     }
@@ -295,7 +311,8 @@
       showGrid: settings.showGrid !== false,
       gridOpacity: clampNumber(settings.gridOpacity ?? current.gridOpacity ?? 35, 0, 100),
       fitMode: settings.fitMode === "contain" ? "contain" : "cover",
-      tokenSize: clampNumber(settings.tokenSize ?? current.tokenSize ?? 78, 40, 100)
+      tokenSize: clampNumber(settings.tokenSize ?? current.tokenSize ?? 78, 40, 100),
+      feetPerSquare: clampNumber(settings.feetPerSquare ?? current.feetPerSquare ?? 5, 1, 30)
     };
     return nextState;
   }
@@ -306,6 +323,30 @@
       columns: clampNumber(mapSettings.columns || 12, 4, 80),
       rows: clampNumber(mapSettings.rows || 8, 4, 80)
     };
+  }
+
+  // The real-world scale of one grid square on the current map, in feet. Defaults to the
+  // standard 5 ft/square (used for both distance-based movement and the diagonal-cost rule).
+  function feetPerSquare(state) {
+    return clampNumber(state.maps?.[state.mapName]?.feetPerSquare ?? 5, 1, 30);
+  }
+
+  // PHB movement/diagonals: every *other* diagonal square moved this turn costs double a
+  // normal square (5/10/5/10 ft...), not a flat cost per square. `diagonalStepsAlreadyUsed`
+  // carries the parity across a token's whole turn, even across separate moveToken() calls,
+  // so ending a turn mid-alternation and moving again later still charges correctly.
+  function gridMoveCost(state, x1, y1, x2, y2, diagonalStepsAlreadyUsed) {
+    const squareFeet = feetPerSquare(state);
+    const dx = Math.abs(x2 - x1);
+    const dy = Math.abs(y2 - y1);
+    const diagonalSteps = Math.min(dx, dy);
+    const straightSteps = Math.max(dx, dy) - diagonalSteps;
+    let diagonalFeet = 0;
+    for (let step = 0; step < diagonalSteps; step += 1) {
+      const stepIndex = diagonalStepsAlreadyUsed + step;
+      diagonalFeet += stepIndex % 2 === 0 ? squareFeet : squareFeet * 2;
+    }
+    return { feet: straightSteps * squareFeet + diagonalFeet, diagonalSteps };
   }
 
   function addLogEntry(state, text) {
@@ -425,6 +466,91 @@
     return nextState;
   }
 
+  // Advances the current map's turn order (sorted by initiative, same order the sidebar
+  // shows) to the next token, resetting that token's movement budget for its new turn.
+  // Wraps to the top of the order and increments the round counter after the last token.
+  // If a token was removed since the last call (currentIndex === -1 but a turn was already
+  // active), resumes at the top of the order without incrementing the round again, since we
+  // can't know where in the round the missing token would have been.
+  function nextTurn(state) {
+    const nextState = clone(state);
+    const ordered = sortByInitiative(tokensOnCurrentMap(nextState));
+    if (!ordered.length) {
+      nextState.turn = { tokenId: null, round: 0 };
+      return nextState;
+    }
+
+    const hadActiveTurn = Boolean(nextState.turn && nextState.turn.tokenId);
+    const currentIndex = ordered.findIndex((token) => token.id === nextState.turn?.tokenId);
+    const round = nextState.turn?.round || 0;
+    let nextIndex;
+    let nextRound;
+
+    if (currentIndex === -1) {
+      nextIndex = 0;
+      nextRound = hadActiveTurn ? round : round + 1;
+    } else if (currentIndex === ordered.length - 1) {
+      nextIndex = 0;
+      nextRound = round + 1;
+    } else {
+      nextIndex = currentIndex + 1;
+      nextRound = round;
+    }
+
+    const activeTokenId = ordered[nextIndex].id;
+    nextState.turn = { tokenId: activeTokenId, round: nextRound };
+
+    const activeToken = nextState.tokens.find((token) => token.id === activeTokenId);
+    if (activeToken) {
+      activeToken.movementUsed = 0;
+      activeToken.diagonalStepsThisTurn = 0;
+    }
+
+    return nextState;
+  }
+
+  // Speed-limited move for the token whose turn is currently active (per state.turn) --
+  // computes the RAW grid cost (see gridMoveCost) against that token's remaining movement
+  // this turn and rejects the move (same state reference, like setTokenPosition's occupied-
+  // tile rejection) if it can't afford it. A token that ISN'T the active turn moves freely
+  // via setTokenPosition underneath -- this only enforces speed on your own turn, the same
+  // as a real table: setting a scene or repositioning NPCs outside combat stays unrestricted.
+  function moveToken(state, tokenId, x, y) {
+    const token = tokensOnCurrentMap(state).find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Move failed: token was not found." };
+
+    const isActiveTurn = Boolean(state.turn && state.turn.tokenId === tokenId);
+    if (!isActiveTurn) {
+      const moved = setTokenPosition(state, tokenId, x, y);
+      if (moved === state) return { state, message: `${token.name} could not move to (${x}, ${y}) -- tile occupied.` };
+      return { state: moved, message: `${token.name} moves to (${x}, ${y}).` };
+    }
+
+    const speed = Number(token.speed ?? 30);
+    const used = Number(token.movementUsed || 0);
+    const diagonalUsed = Number(token.diagonalStepsThisTurn || 0);
+    const remaining = speed - used;
+    const cost = gridMoveCost(state, token.x, token.y, x, y, diagonalUsed);
+
+    if (cost.feet > remaining) {
+      return {
+        state,
+        message: `${token.name} can't reach (${x}, ${y}) -- needs ${cost.feet} ft of movement, only ${remaining} ft left this turn (speed ${speed} ft).`
+      };
+    }
+
+    const moved = setTokenPosition(state, tokenId, x, y);
+    if (moved === state) return { state, message: `${token.name} could not move to (${x}, ${y}) -- tile occupied.` };
+
+    const movedToken = moved.tokens.find((item) => item.id === tokenId);
+    movedToken.movementUsed = used + cost.feet;
+    movedToken.diagonalStepsThisTurn = diagonalUsed + cost.diagonalSteps;
+    return {
+      state: moved,
+      message: `${token.name} moves to (${x}, ${y}) -- ${cost.feet} ft (${remaining - cost.feet} ft left this turn).`
+    };
+  }
+
   function toggleCondition(state, tokenId, condition) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
@@ -492,6 +618,10 @@
     conditionList,
     createState,
     currentGrid,
+    feetPerSquare,
+    gridMoveCost,
+    moveToken,
+    nextTurn,
     parseCommand,
     removeToken,
     setMapGrid,

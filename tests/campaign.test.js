@@ -208,6 +208,15 @@ test("tokenDraftFromItem strips a conditional bonus clause out of a damage cell"
   assert.equal(draft.damageDice, "1d8+5", "the conditional +1d6 clause should not leak into the base damage notation");
 });
 
+test("tokenDraftFromItem reads Speed from the sheet's flat field, defaulting to 30 ft", () => {
+  const sheet = ["## Combat", "- **Speed:** 40 ft (Fast Movement, Barbarian 5)"].join("\n");
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Darkhawk Blondin", path: "characters/Darkhawk Blondin.md", text: sheet });
+  assert.equal(draft.speed, 40);
+
+  const noSpeed = CampaignOSCampaign.tokenDraftFromItem({ title: "No Speed", path: "characters/No Speed.md", text: "## Combat" });
+  assert.equal(noSpeed.speed, 30, "should default to the standard 30 ft when the sheet has no Speed field");
+});
+
 test("tokenDraftFromItem falls back to generic defaults when there is no Attacks table at all", () => {
   const sheet = ["# Character Name", "", "## Combat", "- **AC:** --", "- **HP:** -- / --"].join("\n");
   const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Character Name", path: "characters/_template.md", text: sheet });

@@ -29,6 +29,18 @@ dependencies to install for the app itself. See Tests, below, for running the te
   for monsters that have one (a troll's Bite + two Claws resolve as one attack action,
   each roll shown individually). Troll's Regeneration is a known, intentional gap -- there's
   no start-of-turn hook in the engine to key it off, so apply it by hand.
+- Turn tracker: a "Next Turn" control in the Initiative panel steps through the current
+  map's initiative order, shows the round number and whose turn it is, and resets that
+  token's movement budget. Speed limits only apply to whichever token the tracker currently
+  points at -- repositioning any other token (or moving at all before a turn order is
+  running) stays free, matching how a real table only cares about your speed on your own
+  turn. A token's Speed (ft) is editable on its sheet, defaults to 30 ft, and is read
+  automatically from an imported character/NPC sheet's `**Speed:**` field or a spawned
+  monster's real stat block. Movement cost uses the map's feet-per-square scale (Map
+  Settings, defaults to 5 ft) and the RAW alternating diagonal rule (5/10/5/10 ft, not a
+  flat cost per diagonal square), with the alternation carrying across separate moves within
+  the same turn. Click-to-move, the Claude DM bridge's `move_token` action, and the manual
+  grid all go through the same speed check.
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes

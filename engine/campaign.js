@@ -267,6 +267,7 @@
       ac: readNumber(fields.ac || fields["armor class"], 12),
       attackBonus: attack?.attackBonus ?? readNumber(fields.attack || fields["attack bonus"], 3),
       damageDice: attack?.damageDice || fields.damage || fields["damage dice"] || "1d6+1",
+      speed: readNumber(fields.speed, 30),
       initiative: rollDie(20) + initiativeBonus,
       conditions: [],
       sourcePath: item.path

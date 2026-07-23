@@ -470,6 +470,27 @@ body[data-fog="on"] .map-tile:hover {
   background: var(--panel-strong);
 }
 
+.initiative-list .current-turn button {
+  border-color: #7fd88f;
+  box-shadow: 0 0 0 1px #7fd88f inset;
+}
+
+.initiative-list button small {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.8em;
+}
+
+.turn-tracker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.9em;
+  color: var(--muted);
+}
+
 .token-sheet.empty {
   color: var(--muted);
 }

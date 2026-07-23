@@ -114,6 +114,20 @@ test("applyActions moves a token to the requested grid position", () => {
   assert.match(messages[0], /Goblin 1 moves to \(7, 3\)/);
 });
 
+test("applyActions rejects a move_token action that exceeds the active turn's remaining speed", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", speed: 10, initiative: 10 }).state; // 2 squares at 5 ft/square
+  state = CampaignOS.nextTurn(state); // Goblin 1 becomes the active turn
+
+  const goblin = state.tokens[0];
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "move_token", target: "Goblin 1", x: goblin.x + 3, y: goblin.y }
+  ]);
+
+  assert.match(messages[0], /can't reach/);
+  assert.equal(next.tokens[0].x, goblin.x, "the token should not have moved");
+});
+
 test("applyActions clamps move_token coordinates to the current map's grid bounds", () => {
   let state = stateOnMap("Urskelde"); // default grid is 12 columns x 8 rows
   state = CampaignOS.addToken(state, { name: "Goblin 1" }).state;

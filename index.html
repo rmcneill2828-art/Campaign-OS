@@ -52,6 +52,10 @@
                 Token
                 <input id="tokenSize" type="range" min="40" max="100" value="78">
               </label>
+              <label class="range-input">
+                Ft/Square
+                <input id="feetPerSquare" type="number" min="1" max="30" value="5">
+              </label>
               <label class="map-image-picker">
                 Map Image
                 <input id="mapImageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
@@ -73,6 +77,10 @@
           <div id="sideGroupPlay" class="side-group" role="tabpanel">
             <section class="panel-section">
               <h2>Initiative</h2>
+              <div class="turn-tracker">
+                <span id="turnStatus">No active turn</span>
+                <button id="nextTurnButton" type="button">Next Turn</button>
+              </div>
               <ol id="initiativeList" class="initiative-list"></ol>
             </section>
 

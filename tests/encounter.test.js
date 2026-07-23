@@ -36,7 +36,8 @@ test("createState returns an empty default state", () => {
     fogEnabled: false,
     selectedTokenId: null,
     log: [],
-    tokens: []
+    tokens: [],
+    turn: { tokenId: null, round: 0 }
   });
 });
 
@@ -233,6 +234,113 @@ test("Multiattack stops rolling further sub-attacks once the target is already d
   const result = withRandom([0.5], () => CampaignOS.attack(state, troll.id, target.id));
   assert.equal((result.message.match(/attacks Target/g) || []).length, 1, "only the first sub-attack should resolve once the target is at 0 HP");
   assert.equal(result.state.tokens.find((t) => t.id === target.id).hp, 0);
+});
+
+test("nextTurn starts round 1 at the highest-initiative token, then advances in order", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Low", initiative: 5 }).state;
+  state = CampaignOS.addToken(state, { name: "High", initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Mid", initiative: 12 }).state;
+
+  const round1 = CampaignOS.nextTurn(state);
+  assert.deepEqual(round1.turn, { tokenId: round1.tokens.find((t) => t.name === "High").id, round: 1 });
+
+  const stillRound1 = CampaignOS.nextTurn(round1);
+  assert.equal(stillRound1.turn.tokenId, stillRound1.tokens.find((t) => t.name === "Mid").id);
+  assert.equal(stillRound1.turn.round, 1);
+});
+
+test("nextTurn wraps back to the top of initiative order and increments the round", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "A", initiative: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "B", initiative: 5 }).state;
+
+  let next = CampaignOS.nextTurn(state); // A, round 1
+  next = CampaignOS.nextTurn(next); // B, round 1
+  next = CampaignOS.nextTurn(next); // back to A, round 2
+
+  assert.equal(next.turn.tokenId, next.tokens.find((t) => t.name === "A").id);
+  assert.equal(next.turn.round, 2);
+});
+
+test("nextTurn resets the newly active token's movement budget for the new turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "A", initiative: 10, speed: 30 }).state;
+  const tokenId = state.tokens[0].id;
+  state.tokens[0].movementUsed = 25;
+  state.tokens[0].diagonalStepsThisTurn = 3;
+
+  const next = CampaignOS.nextTurn(state);
+  const token = next.tokens.find((t) => t.id === tokenId);
+  assert.equal(token.movementUsed, 0);
+  assert.equal(token.diagonalStepsThisTurn, 0);
+});
+
+test("moveToken moves freely (no speed check) when the token isn't the active turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Bystander", speed: 5 }).state; // tiny speed, no active turn
+  const token = state.tokens[0];
+
+  const result = CampaignOS.moveToken(state, token.id, token.x + 10, token.y);
+  assert.match(result.message, /moves to/);
+  assert.notEqual(result.state, state);
+});
+
+test("moveToken enforces the active token's speed and rejects a move that costs too much", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Slow", speed: 10, initiative: 10 }).state; // 2 squares at 5 ft/square
+  const token = state.tokens[0];
+  state = CampaignOS.nextTurn(state); // makes Slow the active turn, movementUsed reset to 0
+
+  // Straight-line move 3 squares east = 15 ft, more than the 10 ft speed allows.
+  const blocked = CampaignOS.moveToken(state, token.id, token.x + 3, token.y);
+  assert.equal(blocked.state, state, "an unaffordable move should be rejected (same state reference)");
+  assert.match(blocked.message, /can't reach/);
+  assert.match(blocked.message, /needs 15 ft/);
+  assert.match(blocked.message, /10 ft left this turn \(speed 10 ft\)/);
+
+  // Exactly 2 squares (10 ft) should be affordable.
+  const allowed = CampaignOS.moveToken(state, token.id, token.x + 2, token.y);
+  assert.notEqual(allowed.state, state);
+  const movedToken = allowed.state.tokens.find((t) => t.id === token.id);
+  assert.equal(movedToken.x, token.x + 2);
+  assert.equal(movedToken.movementUsed, 10);
+});
+
+test("moveToken charges diagonal movement at the RAW alternating 5/10 ft rate, carrying parity across separate moves", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Rook", speed: 30, initiative: 10 }).state;
+  const token = state.tokens[0];
+  state = CampaignOS.nextTurn(state);
+
+  // Move 2 squares diagonally: 1st diagonal = 5 ft, 2nd diagonal = 10 ft -> 15 ft total.
+  const first = CampaignOS.moveToken(state, token.id, token.x + 2, token.y + 2);
+  const afterFirst = first.state.tokens.find((t) => t.id === token.id);
+  assert.equal(afterFirst.movementUsed, 15);
+  assert.equal(afterFirst.diagonalStepsThisTurn, 2);
+
+  // A 3rd diagonal square continues the alternation from where it left off (parity carries
+  // across separate moveToken calls within the same turn): 3rd diagonal = 5 ft again.
+  const second = CampaignOS.moveToken(first.state, token.id, afterFirst.x + 1, afterFirst.y + 1);
+  assert.match(second.message, /5 ft/);
+  const afterSecond = second.state.tokens.find((t) => t.id === token.id);
+  assert.equal(afterSecond.movementUsed, 20);
+  assert.equal(afterSecond.diagonalStepsThisTurn, 3);
+});
+
+test("setMapView stores feetPerSquare (defaulting to 5) and moveToken's cost scales with it", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.setMapView(state, "Urskelde", { feetPerSquare: 10 });
+  assert.equal(CampaignOS.feetPerSquare(state), 10);
+
+  state = CampaignOS.addToken(state, { name: "Giant Strider", speed: 30, initiative: 10 }).state;
+  const token = state.tokens[0];
+  state = CampaignOS.nextTurn(state);
+
+  // 2 squares straight at 10 ft/square = 20 ft, leaving exactly 10 ft of a 30 ft speed.
+  const result = CampaignOS.moveToken(state, token.id, token.x + 2, token.y);
+  const moved = result.state.tokens.find((t) => t.id === token.id);
+  assert.equal(moved.movementUsed, 20);
 });
 
 test("attack returns a failure message when attacker or target cannot be found", () => {

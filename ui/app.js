@@ -5,6 +5,8 @@
   const sessionTranscriptStorageKey = "campaign-os-session-transcript";
   const map = document.querySelector("#battleMap");
   const initiativeList = document.querySelector("#initiativeList");
+  const turnStatus = document.querySelector("#turnStatus");
+  const nextTurnButton = document.querySelector("#nextTurnButton");
   const tokenSheet = document.querySelector("#tokenSheet");
   const combatLog = document.querySelector("#combatLog");
   const campaignImport = document.querySelector("#campaignImport");
@@ -35,6 +37,7 @@
   const gridOpacity = document.querySelector("#gridOpacity");
   const mapFitMode = document.querySelector("#mapFitMode");
   const tokenSize = document.querySelector("#tokenSize");
+  const feetPerSquareInput = document.querySelector("#feetPerSquare");
   const toggleFog = document.querySelector("#toggleFog");
   const clearMapImage = document.querySelector("#clearMapImage");
   const mapSettingsToggle = document.querySelector("#mapSettingsToggle");
@@ -290,6 +293,7 @@
     renderMapControls();
     renderMapOptions();
     renderMap();
+    renderTurnTracker();
     renderInitiative();
     renderTokenSheet();
     renderCombatLog();
@@ -481,15 +485,31 @@
     showGrid.checked = settings.showGrid;
     gridOpacity.value = settings.gridOpacity;
     mapFitMode.value = settings.fitMode;
+    feetPerSquareInput.value = settings.feetPerSquare;
     tokenSize.value = settings.tokenSize;
+  }
+
+  function renderTurnTracker() {
+    const activeTokenId = state.turn?.tokenId;
+    const activeToken = activeTokenId ? activeTokens().find((token) => token.id === activeTokenId) : null;
+    turnStatus.textContent = activeToken
+      ? `Round ${state.turn.round} — ${activeToken.name}'s turn`
+      : "No active turn";
   }
 
   function renderInitiative() {
     initiativeList.innerHTML = "";
+    const activeTokenId = state.turn?.tokenId;
     window.CampaignOS.sortByInitiative(activeTokens()).forEach((token) => {
       const item = document.createElement("li");
-      item.className = token.id === state.selectedTokenId ? "active" : "";
-      item.innerHTML = `<button type="button" data-id="${token.id}"><span>${token.name}</span><strong>${token.initiative}</strong></button>`;
+      const classes = [];
+      if (token.id === state.selectedTokenId) classes.push("active");
+      if (token.id === activeTokenId) classes.push("current-turn");
+      item.className = classes.join(" ");
+      const movementNote = token.id === activeTokenId
+        ? `<small>${Math.max(0, (token.speed ?? 30) - (token.movementUsed || 0))} ft left</small>`
+        : "";
+      item.innerHTML = `<button type="button" data-id="${token.id}"><span>${token.name}</span>${movementNote}<strong>${token.initiative}</strong></button>`;
       item.querySelector("button").addEventListener("click", () => selectToken(token.id));
       initiativeList.appendChild(item);
     });
@@ -552,6 +572,16 @@
           <label>
             Damage
             <input name="damageDice" type="text" value="${escapeAttribute(token.damageDice || "1d4")}">
+          </label>
+        </div>
+        <div class="stat-grid">
+          <label>
+            Speed (ft)
+            <input name="speed" type="number" min="0" max="999" value="${token.speed ?? 30}">
+          </label>
+          <label>
+            Moved (ft)
+            <input value="${token.movementUsed || 0} / ${token.speed ?? 30}" disabled>
           </label>
         </div>
         <button type="submit">Update</button>
@@ -635,7 +665,8 @@
         initiative: form.get("initiative"),
         ac: form.get("ac"),
         attackBonus: form.get("attackBonus"),
-        damageDice: form.get("damageDice")
+        damageDice: form.get("damageDice"),
+        speed: form.get("speed")
       }));
     });
 
@@ -1079,13 +1110,16 @@
       return;
     }
 
-    const nextState = window.CampaignOS.setTokenPosition(state, token.id, x, y);
-    if (nextState === state) {
-      commandResult.textContent = "That square is occupied.";
+    // moveToken only enforces speed when `token` is the active turn's token (state.turn) --
+    // otherwise this behaves exactly like the old unconstrained click-to-move.
+    const result = window.CampaignOS.moveToken(state, token.id, x, y);
+    if (result.state === state) {
+      commandResult.textContent = result.message;
       return;
     }
 
-    updateState(nextState);
+    commandResult.textContent = result.message;
+    updateState(result.state);
   }
 
   function handleMapClick(event) {
@@ -1370,6 +1404,14 @@
     render();
   });
 
+  nextTurnButton.addEventListener("click", () => {
+    if (!activeTokens().length) {
+      commandResult.textContent = "No tokens on this map to run initiative for.";
+      return;
+    }
+    updateState(window.CampaignOS.nextTurn(state));
+  });
+
   mapSettingsToggle.addEventListener("click", () => {
     mapSettingsOpen = !mapSettingsOpen;
     mapToolbarSecondary.hidden = !mapSettingsOpen;
@@ -1423,6 +1465,7 @@
   gridOpacity.addEventListener("input", updateMapView);
   mapFitMode.addEventListener("change", updateMapView);
   tokenSize.addEventListener("input", updateMapView);
+  feetPerSquareInput.addEventListener("change", updateMapView);
 
   mapSelect.addEventListener("change", () => {
     setActiveMap(mapSelect.value);
@@ -1605,7 +1648,8 @@
       showGrid: showGrid.checked,
       gridOpacity: gridOpacity.value,
       fitMode: mapFitMode.value,
-      tokenSize: tokenSize.value
+      tokenSize: tokenSize.value,
+      feetPerSquare: feetPerSquareInput.value
     }));
   }
 
@@ -1627,7 +1671,8 @@
       showGrid: mapSettings.showGrid !== false,
       gridOpacity: clampUiNumber(mapSettings.gridOpacity, 35, 0, 100),
       fitMode: mapSettings.fitMode === "contain" ? "contain" : "cover",
-      tokenSize: clampUiNumber(mapSettings.tokenSize, 78, 40, 100)
+      tokenSize: clampUiNumber(mapSettings.tokenSize, 78, 40, 100),
+      feetPerSquare: clampUiNumber(mapSettings.feetPerSquare, 5, 1, 30)
     };
   }
 
