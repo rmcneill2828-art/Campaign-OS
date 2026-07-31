@@ -556,3 +556,128 @@ test("parseCommand resolves a saving throw command by token name", () => {
   assert.equal(result.success, false);
   assert.match(result.message, /Goblin 1 rolls a WIS save: 10 -1 = 9 vs DC 10\. Failure\./);
 });
+
+test("addToken normalizes spell slots and spellcasting, clamping out-of-range values", () => {
+  const state = stateOnMap("Urskelde");
+  const { token } = CampaignOS.addToken(state, {
+    name: "Mara Fenn",
+    spellcasting: { saveDC: 99, attackBonus: 8 },
+    spellSlots: { 1: { max: 4, current: 4 }, 2: { max: 3, current: 10 }, 10: { max: 5, current: 5 } }
+  });
+  assert.deepEqual(token.spellcasting, { saveDC: 30, attackBonus: 8 });
+  assert.deepEqual(token.spellSlots, {
+    1: { max: 4, current: 4 },
+    2: { max: 3, current: 3 } // current clamped down to max
+    // level 10 is out of the valid 1-9 range and is dropped entirely
+  });
+});
+
+test("updateToken merges a partial spell-slot change without wiping other levels", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    spellSlots: { 1: { max: 4, current: 4 }, 2: { max: 3, current: 3 } }
+  });
+  const updated = CampaignOS.updateToken(withToken, token.id, { spellSlots: { 2: { max: 3, current: 2 } } });
+  const found = updated.tokens.find((t) => t.id === token.id);
+  assert.deepEqual(found.spellSlots, {
+    1: { max: 4, current: 4 },
+    2: { max: 3, current: 2 }
+  });
+});
+
+test("castSpell consumes a spell slot and logs which level it used", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Mara Fenn",
+    spellSlots: { 1: { max: 4, current: 4 } }
+  });
+  const result = CampaignOS.castSpell(withToken, token.id, { level: 1, spellName: "Cure Wounds" });
+  assert.match(result.message, /Mara Fenn casts Cure Wounds using a 1st-level spell slot \(3 remaining\)\./);
+  const found = result.state.tokens.find((t) => t.id === token.id);
+  assert.equal(found.spellSlots[1].current, 3);
+});
+
+test("castSpell fails without changing state once a level's slots are exhausted", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    spellSlots: { 1: { max: 1, current: 0 } }
+  });
+  const result = CampaignOS.castSpell(withToken, token.id, { level: 1, spellName: "Entangle" });
+  assert.match(result.message, /Sael has no 1st-level spell slots remaining\./);
+  assert.equal(result.state, withToken, "a failed cast should not change state");
+});
+
+test("castSpell treats level 0 as a cantrip -- never consumes a slot", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Ysolde" });
+  const result = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Guidance" });
+  assert.match(result.message, /Ysolde casts Guidance\./);
+});
+
+test("castSpell rolls a spell attack against a target using the caster's stated spell attack bonus", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Ysolde",
+    spellcasting: { attackBonus: 9 },
+    spellSlots: { 1: { max: 4, current: 4 } }
+  }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 10, maxHp: 10 }).state;
+  const [caster, target] = state.tokens;
+
+  // d20 roll of 15 (0.7 * 20 = 14, +1 = 15) + 9 = 24 vs AC 15 -> hit; damage roll 1d6 -> 4 (0.5*6=3,+1=4).
+  const result = withRandom([0.7, 0.5], () => CampaignOS.castSpell(state, caster.id, {
+    level: 1,
+    spellName: "Guiding Bolt",
+    targetId: target.id,
+    damageDice: "1d6"
+  }));
+  assert.match(result.message, /using a 1st-level spell slot/);
+  assert.match(result.message, /Ysolde's Guiding Bolt attacks Goblin 1.*Hit\. Damage 4/);
+  const foundTarget = result.state.tokens.find((t) => t.id === target.id);
+  assert.equal(foundTarget.hp, 6);
+});
+
+test("castSpell skips the attack roll and says so when the caster has no stated spell attack bonus", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Novice" }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", hp: 10, maxHp: 10 }).state;
+  const [caster, target] = state.tokens;
+
+  const result = CampaignOS.castSpell(state, caster.id, { level: 0, spellName: "Fire Bolt", targetId: target.id });
+  assert.match(result.message, /no stated spell attack bonus for Novice -- attack roll skipped/);
+  const foundTarget = result.state.tokens.find((t) => t.id === target.id);
+  assert.equal(foundTarget.hp, 10, "no damage should be applied when the attack roll was skipped");
+});
+
+test("castSpell reports the caster as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.castSpell(state, "nonexistent-id", { level: 1 });
+  assert.match(result.message, /caster was not found/);
+  assert.equal(result.state, state);
+});
+
+test("parseCommand resolves a cast-spell command, consuming a slot and rolling an attack against a target", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Ysolde",
+    spellcasting: { attackBonus: 9 },
+    spellSlots: { 1: { max: 4, current: 4 } }
+  }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 10, maxHp: 10 }).state;
+
+  const result = withRandom([0.7, 0.5], () => CampaignOS.parseCommand(
+    state,
+    "Ysolde casts Guiding Bolt at Goblin 1 (1st level) for 1d6."
+  ));
+  assert.match(result.message, /using a 1st-level spell slot/);
+  assert.match(result.message, /Ysolde's Guiding Bolt attacks Goblin 1/);
+});
+
+test("parseCommand resolves a cantrip cast with no target", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael" }).state;
+  const result = CampaignOS.parseCommand(state, "Sael casts Guidance (cantrip).");
+  assert.match(result.message, /Sael casts Guidance\./);
+});

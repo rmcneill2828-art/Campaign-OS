@@ -202,6 +202,10 @@
     if (abilityScores) token.abilityScores = abilityScores;
     const savingThrows = normalizeSavingThrows(draft.savingThrows);
     if (savingThrows) token.savingThrows = savingThrows;
+    const spellcasting = normalizeSpellcasting(draft.spellcasting);
+    if (spellcasting) token.spellcasting = spellcasting;
+    const spellSlots = normalizeSpellSlots(draft.spellSlots);
+    if (spellSlots) token.spellSlots = spellSlots;
     token.hp = clampNumber(token.hp, 0, token.maxHp);
     nextState.tokens.push(token);
     nextState.selectedTokenId = token.id;
@@ -274,6 +278,47 @@
     return Math.floor((Number(score) - 10) / 2);
   }
 
+  // Sparse per-level (1-9) spell slot tracker: only levels the caster actually has are
+  // present. Each level stores {max, current}; current is clamped to [0, max] so a bad
+  // update (e.g. current > max after an editor typo) can't create slots out of nowhere.
+  function normalizeSpellSlots(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const slots = {};
+    let any = false;
+    for (let level = 1; level <= 9; level += 1) {
+      const entry = raw[level];
+      if (!entry || typeof entry !== "object") continue;
+      const max = Number(entry.max);
+      if (!Number.isFinite(max) || max <= 0) continue;
+      const clampedMax = clampNumber(max, 1, 99);
+      const current = Number.isFinite(Number(entry.current)) ? Number(entry.current) : clampedMax;
+      slots[level] = { max: clampedMax, current: clampNumber(current, 0, clampedMax) };
+      any = true;
+    }
+    return any ? slots : undefined;
+  }
+
+  // A stated spell save DC / spell attack bonus (parsed from a real sheet's
+  // "Spellcasting:" line, e.g. "Spell save DC 16, spell attack +8") is stored as-is,
+  // same rationale as savingThrows: real sheets bake in proficiency/feats/magic items a
+  // flat formula can't reproduce. Sparse -- either field can be present alone.
+  function normalizeSpellcasting(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const result = {};
+    const saveDC = Number(raw.saveDC);
+    if (Number.isFinite(saveDC)) result.saveDC = clampNumber(saveDC, 1, 30);
+    const attackBonus = Number(raw.attackBonus);
+    if (Number.isFinite(attackBonus)) result.attackBonus = clampNumber(attackBonus, -20, 99);
+    return Object.keys(result).length ? result : undefined;
+  }
+
+  function ordinal(level) {
+    if (level === 1) return "1st";
+    if (level === 2) return "2nd";
+    if (level === 3) return "3rd";
+    return `${level}th`;
+  }
+
   // The bonus rollSavingThrow adds to the d20: an explicit stated save bonus if the sheet
   // has one, else the raw ability modifier (no proficiency bonus -- a token only gets that
   // if it's baked into an explicit override, matching how monsters without a stated
@@ -307,6 +352,55 @@
     const success = total >= dcNumber;
     const message = `${token.name} rolls a ${key} save: ${roll} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dcNumber}. ${success ? "Success" : "Failure"}.`;
     return { state: addLogEntry(state, message), message, success, total };
+  }
+
+  // Casts a spell for `casterId`: consumes one of the caster's spell slots at `level`
+  // (0 = cantrip, never consumes a slot), failing outright with no state change if the
+  // caster has none of that level left. When `options.targetId` is also given, rolls a
+  // single spell attack against it using the caster's stated spell attack bonus (see
+  // normalizeSpellcasting) and applies any resulting damage -- the same resolveOneAttack
+  // primitive attack() uses, just with a spell's own damage dice instead of a token's
+  // weapon damageDice. A save-based spell (Fireball, Hold Person) has no attack roll to
+  // make here; cast it alone to spend the slot, then issue separate rollSavingThrow calls
+  // per target using the caster's spellcasting.saveDC, the same one-shot-batch pattern
+  // saving_throw already uses for traps/effects (see dm-bridge/watch.js's guidance).
+  function castSpell(state, casterId, options = {}) {
+    let nextState = clone(state);
+    const caster = tokensOnCurrentMap(nextState).find((token) => token.id === casterId);
+    if (!caster) return { state, message: "Spellcasting failed: caster was not found." };
+
+    const level = clampNumber(options.level ?? 0, 0, 9);
+    const spellName = options.spellName || "a spell";
+    const messages = [];
+
+    if (level > 0) {
+      const slot = caster.spellSlots?.[level];
+      if (!slot || slot.current <= 0) {
+        return { state, message: `${caster.name} has no ${ordinal(level)}-level spell slots remaining.` };
+      }
+      slot.current -= 1;
+      messages.push(`${caster.name} casts ${spellName} using a ${ordinal(level)}-level spell slot (${slot.current} remaining).`);
+    } else {
+      messages.push(`${caster.name} casts ${spellName}.`);
+    }
+
+    if (options.targetId) {
+      const target = tokensOnCurrentMap(nextState).find((token) => token.id === options.targetId);
+      if (target) {
+        const bonus = caster.spellcasting?.attackBonus;
+        if (Number.isFinite(bonus)) {
+          const mode = options.disadvantage ? "disadvantage" : options.advantage ? "advantage" : null;
+          const result = resolveOneAttack(caster, target, bonus, options.damageDice, mode, spellName);
+          messages.push(result.message);
+          if (result.damageTotal > 0) nextState = applyDamage(nextState, target.id, result.damageTotal);
+        } else {
+          messages.push(`(no stated spell attack bonus for ${caster.name} -- attack roll skipped.)`);
+        }
+      }
+    }
+
+    const message = messages.join(" ");
+    return { state: addLogEntry(nextState, message), message };
   }
 
   function applyDamage(state, tokenId, amount) {
@@ -376,6 +470,20 @@
     if (changes.savingThrows !== undefined) {
       const merged = normalizeSavingThrows({ ...(token.savingThrows || {}), ...changes.savingThrows });
       if (merged) token.savingThrows = merged;
+    }
+
+    if (changes.spellcasting !== undefined) {
+      const merged = normalizeSpellcasting({ ...(token.spellcasting || {}), ...changes.spellcasting });
+      if (merged) token.spellcasting = merged;
+    }
+
+    // Spell slots merge per-level -- a change to level 2's {max, current} pair shouldn't
+    // touch level 1's, the same way updating one ability score doesn't touch the others.
+    // Within a given level, the caller (the token editor's combined "current/max" field)
+    // always supplies both max and current together, so a whole-entry replace is correct.
+    if (changes.spellSlots !== undefined) {
+      const merged = normalizeSpellSlots({ ...(token.spellSlots || {}), ...changes.spellSlots });
+      if (merged) token.spellSlots = merged;
     }
 
     if (typeof changes.image === "string") {
@@ -729,6 +837,31 @@
       return rollSavingThrow(state, token.id, saveMatch[2], Number(saveMatch[3]));
     }
 
+    // "<caster> casts <spell> [at <target>] (cantrip|Nth level) [for <damage dice>]" --
+    // the level/cantrip parenthetical is required so this can't misfire on ordinary
+    // narration that happens to contain the word "casts". "at <target>" + "for <dice>"
+    // together trigger a spell attack roll; either or both may be omitted for a
+    // no-attack-roll spell (buffs, utility, or a save the DM resolves separately).
+    const castMatch = command.match(
+      /^(.+?)\s+casts?\s+(.+?)(?:\s+at\s+(.+?))?\s*\((cantrip|[1-9](?:st|nd|rd|th))(?:\s+level)?\)(?:\s+for\s+(\d*d\d+(?:\s*[+-]\s*\d+)?))?\s*[.!?]?$/i
+    );
+    if (castMatch) {
+      const caster = findTokenByName(state, castMatch[1]);
+      if (!caster) return { state, message: "I could not find who's casting." };
+      let target = null;
+      if (castMatch[3]) {
+        target = findTokenByName(state, castMatch[3]);
+        if (!target) return { state, message: "I could not find the spell's target." };
+      }
+      const level = castMatch[4].toLowerCase() === "cantrip" ? 0 : Number(castMatch[4].match(/\d/)[0]);
+      return castSpell(state, caster.id, {
+        level,
+        spellName: castMatch[2].trim(),
+        targetId: target ? target.id : null,
+        damageDice: castMatch[5] ? castMatch[5].replace(/\s+/g, "") : undefined
+      });
+    }
+
     if (attackMatch) {
       const attacker = findTokenByName(state, attackMatch[1]);
       const target = findTokenByName(state, attackMatch[2]);
@@ -757,6 +890,7 @@
     applyHealing,
     attack,
     addToken,
+    castSpell,
     conditionList,
     createState,
     currentGrid,

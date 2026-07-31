@@ -208,6 +208,45 @@ test("applyActions logs an unresolved-name message for a saving_throw targeting 
   assert.match(messages[0], /could not find "Nonexistent Goblin" for a saving throw/);
 });
 
+test("applyActions resolves a cast_spell action, consuming a slot and rolling a spell attack against a target", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Mara Fenn",
+    spellcasting: { attackBonus: 8 },
+    spellSlots: { 1: { max: 4, current: 4 } }
+  }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 10, maxHp: 10 }).state;
+
+  const { state: next, messages } = withRandom([0.7, 0.5], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "cast_spell", caster: "Mara Fenn", spell: "Guiding Bolt", level: 1, target: "Goblin 1", damageDice: "4d6" }
+  ]));
+
+  assert.match(messages[0], /Mara Fenn casts Guiding Bolt using a 1st-level spell slot \(3 remaining\)/);
+  assert.match(messages[0], /Mara Fenn's Guiding Bolt attacks Goblin 1/);
+  const mara = next.tokens.find((t) => t.name === "Mara Fenn");
+  assert.equal(mara.spellSlots[1].current, 3);
+  assert.equal(next.log.length, 1, "cast_spell should not be double-logged, the same way attack()/saving_throw() aren't");
+});
+
+test("applyActions resolves a cast_spell cantrip (level 0) with no target and no slot consumption", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael" }).state;
+
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "cast_spell", caster: "Sael", spell: "Guidance", level: 0 }
+  ]);
+
+  assert.match(messages[0], /Sael casts Guidance\./);
+});
+
+test("applyActions logs an unresolved-name message for a cast_spell targeting an unknown caster", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "cast_spell", caster: "Nonexistent Caster", spell: "Fireball", level: 3 }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Caster" to cast a spell/);
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

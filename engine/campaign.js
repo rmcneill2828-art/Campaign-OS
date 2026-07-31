@@ -298,6 +298,10 @@
     const savingThrows = extractSavingThrows(fields["saving throws"]);
     if (savingThrows) draft.savingThrows = savingThrows;
 
+    const spellcastingInfo = extractSpellcasting(fields);
+    if (spellcastingInfo.spellcasting) draft.spellcasting = spellcastingInfo.spellcasting;
+    if (spellcastingInfo.spellSlots) draft.spellSlots = spellcastingInfo.spellSlots;
+
     return draft;
   }
 
@@ -354,6 +358,56 @@
       match = pattern.exec(savingThrowsText);
     }
     return Object.keys(saves).length ? saves : null;
+  }
+
+  // Reads spell save DC / spell attack bonus and per-level slot counts out of this
+  // campaign format's two freeform spellcasting mentions:
+  //   - A "**Spellcasting:**" bullet under Features & Traits, e.g. "Wisdom-based. Spell
+  //     save DC 16, spell attack +8. Known: ... Slots: 4 (1st), 3 (2nd), 3 (3rd), 1 (4th)."
+  //     -- gives the DC/attack bonus and each level's MAX slots (assumed full to start).
+  //   - A "Spell slots:" line under "## Current Status", e.g. "full (4/4 1st, 3/3 2nd,
+  //     3/3 3rd)" or, once slots have been spent, "2/4 1st, 3/3 2nd" -- gives the actual
+  //     current/max for whatever levels it lists. This is the more frequently updated
+  //     source (session to session) for what's actually left, so it overlays/wins over
+  //     the Features bullet's max-only numbers for any level it mentions.
+  // Both are free text (not a table), unlike Ability Scores/Attacks, so this is regex
+  // extraction rather than table parsing -- same trust-the-literal-sheet-value approach
+  // as extractSavingThrows.
+  function extractSpellcasting(fields) {
+    const spellcastingText = fields["spellcasting"] || "";
+    const statusText = fields["spell slots"] || "";
+
+    const spellcasting = {};
+    const dcMatch = spellcastingText.match(/spell save dc\s*(\d+)/i);
+    if (dcMatch) spellcasting.saveDC = Number(dcMatch[1]);
+    const attackMatch = spellcastingText.match(/spell attack\s*([+-]?\d+)/i);
+    if (attackMatch) spellcasting.attackBonus = Number(attackMatch[1]);
+
+    const slots = {};
+    const maxPattern = /(\d+)\s*\((\d)(?:st|nd|rd|th)\)/gi;
+    let match = maxPattern.exec(spellcastingText);
+    while (match) {
+      const level = Number(match[2]);
+      const max = Number(match[1]);
+      if (level >= 1 && level <= 9) slots[level] = { max, current: max };
+      match = maxPattern.exec(spellcastingText);
+    }
+
+    const isFull = /\bfull\b/i.test(statusText);
+    const statusPattern = /(\d+)\s*\/\s*(\d+)\s*(\d)(?:st|nd|rd|th)/gi;
+    match = statusPattern.exec(statusText);
+    while (match) {
+      const current = Number(match[1]);
+      const max = Number(match[2]);
+      const level = Number(match[3]);
+      if (level >= 1 && level <= 9) slots[level] = { max, current: isFull ? max : current };
+      match = statusPattern.exec(statusText);
+    }
+
+    return {
+      spellcasting: Object.keys(spellcasting).length ? spellcasting : null,
+      spellSlots: Object.keys(slots).length ? slots : null
+    };
   }
 
   function extractFields(text) {

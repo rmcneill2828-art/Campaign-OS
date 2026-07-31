@@ -104,6 +104,26 @@
         const result = window.CampaignOS.rollSavingThrow(state, target.id, action.ability, action.dc);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
+      case "cast_spell": {
+        const caster = findTokenByName(state, action.caster);
+        if (!caster) return { state, message: `(DM assistant) could not find "${action.caster}" to cast a spell.`, alreadyLogged: false };
+        const target = action.target ? findTokenByName(state, action.target) : null;
+        // castSpell handles everything: consuming the caster's slot at `level` (0 for a
+        // cantrip, never consumes one), and -- only when a target is given -- rolling a
+        // spell attack against it with the caster's stated spell attack bonus. A spell
+        // that instead calls for a saving throw has no target/damageDice here; Claude
+        // issues a separate saving_throw action per target this same response using the
+        // caster's stated spell save DC, same one-shot-batch pattern as any other save.
+        const result = window.CampaignOS.castSpell(state, caster.id, {
+          level: action.level,
+          spellName: action.spell,
+          targetId: target ? target.id : null,
+          damageDice: action.damageDice,
+          advantage: Boolean(action.advantage),
+          disadvantage: Boolean(action.disadvantage)
+        });
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
       case "switch_map": {
         const mapName = String(action.map || "").trim();
         const nextState = window.CampaignOS.setActiveMap(state, mapName);

@@ -274,3 +274,58 @@ test("tokenDraftFromItem leaves savingThrows unset when the sheet has no Saving 
   const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "No Saves", path: "characters/No Saves.md", text: "## Combat\n- **AC:** 15" });
   assert.equal(draft.savingThrows, undefined);
 });
+
+test("tokenDraftFromItem reads spell save DC/attack bonus and max slots from the Spellcasting bullet", () => {
+  const sheet = [
+    "## Features & Traits",
+    "- **Spellcasting:** Wisdom-based. Spell save DC 16, spell attack +8. Known: **Hunter's Mark, " +
+      "Longstrider, Cure Wounds** (new at lvl 11). Slots: 4 (1st), 3 (2nd), 3 (3rd), 1 (4th)."
+  ].join("\n");
+
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Mara Fenn", path: "characters/Mara Fenn.md", text: sheet });
+  assert.deepEqual(draft.spellcasting, { saveDC: 16, attackBonus: 8 });
+  assert.deepEqual(draft.spellSlots, {
+    1: { max: 4, current: 4 },
+    2: { max: 3, current: 3 },
+    3: { max: 3, current: 3 },
+    4: { max: 1, current: 1 }
+  });
+});
+
+test("tokenDraftFromItem overlays actual current/max slot counts from the Current Status 'Spell slots: full (...)' line", () => {
+  const sheet = [
+    "## Features & Traits",
+    "- **Spellcasting:** Wisdom-based. Spell save DC 17, spell attack +9. Slots: 4 (1st), 3 (2nd).",
+    "",
+    "## Current Status",
+    "- Spell slots: full (4/4 1st, 3/3 2nd)"
+  ].join("\n");
+
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Sister Ysolde Marrow", path: "characters/Sister Ysolde Marrow.md", text: sheet });
+  assert.deepEqual(draft.spellSlots, {
+    1: { max: 4, current: 4 },
+    2: { max: 3, current: 3 }
+  });
+});
+
+test("tokenDraftFromItem reads a partially-spent (non-'full') Current Status slot line literally", () => {
+  const sheet = [
+    "## Features & Traits",
+    "- **Spellcasting:** Wisdom-based. Spell save DC 18, spell attack +10. Slots: 4 (1st), 3 (2nd).",
+    "",
+    "## Current Status",
+    "- Spell slots: 2/4 1st, 3/3 2nd"
+  ].join("\n");
+
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Sael", path: "characters/Sael.md", text: sheet });
+  assert.deepEqual(draft.spellSlots, {
+    1: { max: 4, current: 2 },
+    2: { max: 3, current: 3 }
+  });
+});
+
+test("tokenDraftFromItem leaves spellcasting/spellSlots unset when the sheet has no spellcasting bullet", () => {
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "No Spells", path: "characters/No Spells.md", text: "## Combat\n- **AC:** 15" });
+  assert.equal(draft.spellcasting, undefined);
+  assert.equal(draft.spellSlots, undefined);
+});

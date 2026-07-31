@@ -56,6 +56,7 @@ const SYSTEM_PROMPT = [
   '{"type": "next_turn"}',
   '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
   '{"type": "saving_throw", "target": "<exact token name>", "ability": "STR|DEX|CON|INT|WIS|CHA", "dc": <integer>}',
+  '{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "advantage": <optional true>, "disadvantage": <optional true>}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -94,6 +95,19 @@ const SYSTEM_PROMPT = [
   "it never applies a follow-up effect itself. For \"half damage on a success, full on a failure\"",
   "-style effects, issue the saving_throw action alone this turn and let the DM's next command",
   "(after seeing the logged result) tell you the actual damage/condition to apply.",
+  "",
+  "Use cast_spell whenever a token casts a spell. Set level to 0 for a cantrip -- it never",
+  "consumes a slot; otherwise use the spell's real level, which consumes one of that caster's",
+  "slots at that level automatically (each token's line below shows its slots when known). If",
+  "it has none left at that level, the cast simply fails and nothing else happens -- check the",
+  "slots shown before choosing a level higher than what's actually available. Only set",
+  "target/damageDice for a spell that makes an attack roll (Fire Bolt, Guiding Bolt, etc.) --",
+  "the engine rolls to hit using the caster's own stated spell attack bonus, shown below when",
+  "known, same as saving_throw uses the target's own stated modifier. A spell that instead",
+  "calls for a saving throw (Fireball, Hold Person) has no target/damageDice here -- issue",
+  "cast_spell alone to spend the slot, then a separate saving_throw action per target this",
+  "same response using the caster's stated spell save DC (also shown below). A spell with",
+  "neither an attack roll nor a save (buffs, utility) just needs cast_spell by itself.",
   "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
@@ -145,6 +159,13 @@ function isValidAction(action) {
       return typeof action.map === "string" && action.map.trim().length > 0;
     case "saving_throw":
       return typeof action.target === "string" && typeof action.ability === "string" && Number.isFinite(action.dc);
+    case "cast_spell":
+      return typeof action.caster === "string" && typeof action.spell === "string"
+        && Number.isFinite(action.level) && action.level >= 0 && action.level <= 9
+        && (action.target === undefined || typeof action.target === "string")
+        && (action.damageDice === undefined || typeof action.damageDice === "string")
+        && (action.advantage === undefined || typeof action.advantage === "boolean")
+        && (action.disadvantage === undefined || typeof action.disadvantage === "boolean");
     default:
       return false;
   }
@@ -201,7 +222,20 @@ function buildPrompt(request) {
       const abilities = knownAbilities.length
         ? `, abilities ${knownAbilities.map((key) => `${key} ${scores[key]}`).join(" ")}`
         : "";
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}`);
+      const spellcasting = t.spellcasting || {};
+      const spellcastingParts = [];
+      if (Number.isFinite(spellcasting.saveDC)) spellcastingParts.push(`DC ${spellcasting.saveDC}`);
+      if (Number.isFinite(spellcasting.attackBonus)) spellcastingParts.push(`atk +${spellcasting.attackBonus}`);
+      const spellcastingText = spellcastingParts.length ? `, spellcasting ${spellcastingParts.join(" ")}` : "";
+      const slots = t.spellSlots || {};
+      const slotLevels = Object.keys(slots)
+        .map(Number)
+        .filter((level) => slots[level] && Number.isFinite(slots[level].current) && Number.isFinite(slots[level].max))
+        .sort((a, b) => a - b);
+      const slotsText = slotLevels.length
+        ? `, slots ${slotLevels.map((level) => `${slots[level].current}/${slots[level].max} L${level}`).join(" ")}`
+        : "";
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

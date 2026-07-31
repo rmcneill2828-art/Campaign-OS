@@ -53,6 +53,18 @@ dependencies to install for the app itself. See Tests, below, for running the te
   and reports pass/fail; it doesn't apply a follow-up effect (e.g. half damage on success)
   automatically -- decide that from the reported result the same way Troll's Regeneration
   above is handled by hand.
+- Spellcasting: every token can carry a spell save DC, spell attack bonus, and per-level
+  (1st-9th) spell slots -- editable on the token sheet, filled in automatically for any
+  imported character sheet with a `**Spellcasting:**` bullet (DC/attack bonus/max slots) and,
+  when present, a `## Current Status` `Spell slots:` line for the actual current/max count. A
+  **Cast** control on the token sheet (or `<name> casts <spell> [at <target>] (cantrip|Nth
+  level) [for <damage dice>]`, or the Claude DM bridge's `cast_spell` action) consumes one of
+  the caster's slots at that level (a cantrip, level 0, never consumes one) and fails outright
+  with no other effect if none are left. Giving it a target and damage dice also rolls a spell
+  attack against that target using the caster's stated spell attack bonus -- for a save-based
+  spell (Fireball, Hold Person) instead, cast it alone to spend the slot, then issue a separate
+  `Roll Save`/`saving_throw` per target using the caster's stated spell save DC, once the
+  attack roll or narration decides who's affected.
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes
@@ -128,9 +140,10 @@ The "Claude DM" panel works two ways:
 - **Connected:** commands are handled by a real Claude Code call, which can narrate freely
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
   token on the grid, advance to the next turn, switch to a different prepared map, roll a
-  saving throw), referencing tokens by name and reasoning about the current encounter state
-  -- including where everything stands on the grid, whose turn it is, how much movement each
-  token has left this turn, and each token's ability scores when known. `next_turn` and
+  saving throw, cast a spell), referencing tokens by name and reasoning about the current
+  encounter state -- including where everything stands on the grid, whose turn it is, how
+  much movement each token has left this turn, and each token's ability scores and
+  spellcasting (save DC, attack bonus, remaining slots per level) when known. `next_turn` and
   `move_token` are what actually let Claude run the turn tracker and RAW speed-limited
   movement described above -- without calling `next_turn`, turn order never starts and
   movement stays unconstrained (which is also the correct default for narration outside
@@ -140,7 +153,11 @@ The "Claude DM" panel works two ways:
   and applies the target's real modifier -- and only reports pass/fail; since Claude decides
   a whole response's actions before seeing any of their results, it can't conditionally apply
   a follow-up effect (e.g. half damage on a success) in that same response, so that has to be
-  a separate command once the result is visible in the log.
+  a separate command once the result is visible in the log. `cast_spell` consumes the caster's
+  slot at the given level (0 for a cantrip) and, only when a target is given, rolls a spell
+  attack against it -- a save-based spell instead needs a separate `saving_throw` per target
+  in the same response, using the caster's own stated spell save DC, for the same
+  one-shot-batch reason `saving_throw` can't chain into a follow-up effect on its own.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than

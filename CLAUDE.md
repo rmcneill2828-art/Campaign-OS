@@ -3,19 +3,20 @@
 AI-native tabletop VTT companion to the DnD campaign repo at
 https://github.com/rmcneill2828-art/DnD (locally, commonly checked out alongside this repo).
 Campaign-OS imports campaign Markdown for characters, locations, and sessions; the DnD repo
-remains the narrative source of truth. As of 2026-07-23 this isn't used for live play yet --
-see that repo's own CLAUDE.md for why (short version: no ability scores/saves/spellcasting/
-class-resource modeling until recently, still no spellcasting or class resources at all).
+remains the narrative source of truth. As of 2026-07-31 this isn't used for live play yet --
+see that repo's own CLAUDE.md for why (short version: ability scores, saves, and now
+spellcasting/spell slots are modeled; class resources beyond spell slots -- Ki points, Rage
+uses, Superiority Dice, etc. -- still aren't).
 
 See README.md for the full feature list and usage. Notes specific to working on this code:
 
 ## Architecture
 - `engine/` -- pure, DOM-free logic: `encounter.js` (state, tokens, combat, movement, turn
-  order, saving throws), `campaign.js` (markdown import/parsing), `dmBridge.js` (translates the
-  Claude DM bridge's actions into engine calls), `characterCreator.js` (5e math + markdown
-  generation for new character sheets). Runnable and unit-tested under Node (`npm test`). Keep
-  it that way: no `document`/`window` DOM access, no async IndexedDB/File System Access calls
-  here -- those belong in `ui/`.
+  order, saving throws, spellcasting/spell slots), `campaign.js` (markdown import/parsing),
+  `dmBridge.js` (translates the Claude DM bridge's actions into engine calls),
+  `characterCreator.js` (5e math + markdown generation for new character sheets). Runnable and
+  unit-tested under Node (`npm test`). Keep it that way: no `document`/`window` DOM access, no
+  async IndexedDB/File System Access calls here -- those belong in `ui/`.
 - `ui/` -- browser glue: `app.js` (rendering, event wiring), the IndexedDB-backed stores
   (`imageStore.js`, `tokenLibrary.js`, `mapLibrary.js`, `dmBridgeStore.js`), and the File System
   Access folder-reference layer (`assetFolders.js` persists picked directory handles,
@@ -48,14 +49,25 @@ See README.md for the full feature list and usage. Notes specific to working on 
   the next one in that same response. This is why `saving_throw` can only resolve and log
   pass/fail -- it can't itself decide a follow-up `apply_damage`/`toggle_condition` based on the
   outcome; that has to be a separate later command once the DM (or Claude, prompted again) has
-  seen the logged result. Don't write system-prompt guidance that implies otherwise.
+  seen the logged result. `cast_spell` has the same limitation for save-based spells (Fireball,
+  Hold Person): it only spends the slot, it never bundles a `saving_throw` for you -- Claude has
+  to issue those as separate actions in the same response instead. Don't write system-prompt
+  guidance that implies otherwise.
 - A token's `abilityScores` object is intentionally sparse (only the abilities actually known
   are present) and `savingThrows` is a sparse *override* map, not a computed value --
   `engine/campaign.js`'s `extractSavingThrows` reads a real sheet's stated bonus (e.g.
   "Wisdom +6 (Resilient, lvl Fighter 4)") literally rather than recomputing modifier +
   proficiency, since real sheets accumulate feats/multiclass bumps a flat formula can't
   reproduce. `engine/encounter.js`'s `savingThrowBonus()` prefers the stated override, falling
-  back to the raw ability modifier, falling back to 0.
+  back to the raw ability modifier, falling back to 0. `spellcasting` (`saveDC`/`attackBonus`)
+  follows the same trust-the-stated-sheet-value approach, read by `campaign.js`'s
+  `extractSpellcasting` from a sheet's freeform `**Spellcasting:**` bullet (not a table, unlike
+  Ability Scores/Attacks). `spellSlots` is sparse per level (1-9), each `{max, current}` --
+  `extractSpellcasting` also reads a `## Current Status` `Spell slots: full (4/4 1st, ...)` (or
+  partially-spent, non-"full") line when present and lets it overlay the Features bullet's
+  max-only numbers, since Current Status is the more frequently updated source for what a
+  caster actually has left. `castSpell()` mutates a slot's `current` directly and fails outright
+  (no state change) with none left at that level; level 0 is a cantrip and never touches slots.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

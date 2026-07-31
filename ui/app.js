@@ -723,7 +723,54 @@
           <label>WIS<input name="wis" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.WIS ?? ""}"></label>
           <label>CHA<input name="cha" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.CHA ?? ""}"></label>
         </div>
+        <p class="subheading">Spellcasting</p>
+        <div class="stat-grid">
+          <label>
+            Save DC
+            <input name="spellSaveDC" type="number" min="1" max="30" placeholder="—" value="${token.spellcasting?.saveDC ?? ""}">
+          </label>
+          <label>
+            Attack
+            <input name="spellAttackBonus" type="number" min="-20" max="99" placeholder="—" value="${token.spellcasting?.attackBonus ?? ""}">
+          </label>
+        </div>
+        <div class="cc-scores spell-slots">
+          ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((level) => {
+            const slot = token.spellSlots?.[level];
+            return `<label>L${level}<input name="slot${level}" type="text" placeholder="—" value="${slot ? `${slot.current}/${slot.max}` : ""}"></label>`;
+          }).join("")}
+        </div>
         <button type="submit">Update</button>
+      </form>
+      <form class="cast-control" title="Consumes a spell slot (cantrips consume none) and, if a target is picked, rolls a spell attack using this token's stated spell attack bonus.">
+        <label>
+          Spell
+          <input name="spell" type="text" placeholder="Spell name">
+        </label>
+        <label>
+          Level
+          <select name="level">
+            <option value="0">Cantrip</option>
+            <option value="1">1st</option>
+            <option value="2">2nd</option>
+            <option value="3">3rd</option>
+            <option value="4">4th</option>
+            <option value="5">5th</option>
+            <option value="6">6th</option>
+            <option value="7">7th</option>
+            <option value="8">8th</option>
+            <option value="9">9th</option>
+          </select>
+        </label>
+        <label>
+          Target
+          <select name="targetId"><option value="">(none)</option></select>
+        </label>
+        <label>
+          Damage
+          <input name="damageDice" type="text" placeholder="e.g. 4d6">
+        </label>
+        <button type="submit">Cast</button>
       </form>
       <form class="attack-control">
         <label>
@@ -824,6 +871,23 @@
         const raw = form.get(field);
         if (raw !== null && String(raw).trim() !== "") abilityScores[key] = raw;
       });
+      // Same "blank means leave it alone" rule as ability scores above.
+      const spellcasting = {};
+      const rawSaveDC = form.get("spellSaveDC");
+      if (rawSaveDC !== null && String(rawSaveDC).trim() !== "") spellcasting.saveDC = rawSaveDC;
+      const rawAttackBonus = form.get("spellAttackBonus");
+      if (rawAttackBonus !== null && String(rawAttackBonus).trim() !== "") spellcasting.attackBonus = rawAttackBonus;
+      // Each slotN field is a combined "current/max" (or a bare number, treated as both) --
+      // e.g. "3/4" means 3 of 4 remaining. Blank leaves that level untouched.
+      const spellSlots = {};
+      for (let level = 1; level <= 9; level += 1) {
+        const raw = String(form.get(`slot${level}`) || "").trim();
+        if (!raw) continue;
+        const [currentPart, maxPart] = raw.split("/").map((part) => part.trim());
+        const max = Number(maxPart ?? currentPart);
+        const current = Number(currentPart);
+        if (Number.isFinite(max)) spellSlots[level] = { max, current: Number.isFinite(current) ? current : max };
+      }
       updateState(window.CampaignOS.updateToken(state, token.id, {
         name: form.get("name"),
         hp: form.get("hp"),
@@ -833,7 +897,9 @@
         attackBonus: form.get("attackBonus"),
         damageDice: form.get("damageDice"),
         speed: form.get("speed"),
-        abilityScores
+        abilityScores,
+        spellcasting,
+        spellSlots
       }));
     });
 
@@ -867,6 +933,32 @@
       event.preventDefault();
       const formData = new FormData(saveControl);
       const result = window.CampaignOS.rollSavingThrow(state, token.id, formData.get("ability"), Number(formData.get("dc")));
+      state = result.state;
+      saveEncounter();
+      commandResult.textContent = result.message;
+      render();
+    });
+
+    const castControl = tokenSheet.querySelector(".cast-control");
+    const castTargetSelect = castControl.querySelector('select[name="targetId"]');
+    activeTokens()
+      .filter((candidate) => candidate.id !== token.id)
+      .forEach((candidate) => {
+        const option = document.createElement("option");
+        option.value = candidate.id;
+        option.textContent = candidate.name;
+        castTargetSelect.appendChild(option);
+      });
+    castControl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const formData = new FormData(castControl);
+      const targetId = formData.get("targetId");
+      const result = window.CampaignOS.castSpell(state, token.id, {
+        level: Number(formData.get("level")),
+        spellName: formData.get("spell") || undefined,
+        targetId: targetId || null,
+        damageDice: formData.get("damageDice") || undefined
+      });
       state = result.state;
       saveEncounter();
       commandResult.textContent = result.message;
@@ -1792,7 +1884,9 @@
           speed: token.speed ?? 30,
           movementLeft: Math.max(0, (token.speed ?? 30) - (token.movementUsed || 0)),
           conditions: token.conditions,
-          abilityScores: token.abilityScores
+          abilityScores: token.abilityScores,
+          spellcasting: token.spellcasting,
+          spellSlots: token.spellSlots
         }))
       },
       createdAt: new Date().toISOString()

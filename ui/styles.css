@@ -565,7 +565,8 @@ body[data-fog="on"] .map-tile:hover {
 .token-editor,
 .hp-control,
 .attack-control,
-.save-control {
+.save-control,
+.cast-control {
   display: grid;
   gap: 10px;
   margin-bottom: 12px;
@@ -574,7 +575,8 @@ body[data-fog="on"] .map-tile:hover {
 .token-editor label,
 .hp-control label,
 .attack-control label,
-.save-control label {
+.save-control label,
+.cast-control label {
   display: grid;
   gap: 5px;
   color: var(--muted);
@@ -585,12 +587,15 @@ body[data-fog="on"] .map-tile:hover {
 .hp-control input,
 .attack-control select,
 .save-control select,
-.save-control input {
+.save-control input,
+.cast-control select,
+.cast-control input {
   width: 100%;
 }
 
 .attack-control,
-.save-control {
+.save-control,
+.cast-control {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
 }
@@ -991,6 +996,12 @@ body[data-fog="on"] .map-tile:hover {
      digits an ability score needs -- nobody increments these with tiny arrows. */
   -moz-appearance: textfield;
   appearance: textfield;
+}
+
+.spell-slots {
+  /* Nine levels fit more comfortably at 5 across (two rows) than the 3-column default
+     ability-score layout .cc-scores otherwise sets. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .cc-scores input::-webkit-outer-spin-button,
