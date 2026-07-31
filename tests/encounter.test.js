@@ -463,3 +463,96 @@ test("parseCommand falls back to an unhandled message for unrecognized narration
   const result = CampaignOS.parseCommand(state, "The rain begins to fall.");
   assert.equal(result.message, "I understood the narration, but no tool action matched yet.");
 });
+
+test("abilityModifier follows the standard 5e modifier table", () => {
+  assert.equal(CampaignOS.abilityModifier(10), 0);
+  assert.equal(CampaignOS.abilityModifier(16), 3);
+  assert.equal(CampaignOS.abilityModifier(8), -1);
+  assert.equal(CampaignOS.abilityModifier(1), -5);
+});
+
+test("rollSavingThrow uses the token's ability modifier when no explicit save bonus is recorded", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael", abilityScores: { WIS: 16 } });
+  const result = withRandom([9 / 20], () => CampaignOS.rollSavingThrow(withToken, token.id, "wisdom", 12));
+  assert.equal(result.success, true);
+  assert.equal(result.total, 13); // roll 10 + WIS mod (+3)
+  assert.match(result.message, /Sael rolls a WIS save: 10 \+3 = 13 vs DC 12\. Success\./);
+});
+
+test("rollSavingThrow prefers an explicit stated save bonus over the raw ability modifier", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    abilityScores: { WIS: 10 }, // +0 modifier alone would fail this save
+    savingThrows: { WIS: 6 } // stated bonus (feat/multiclass) overrides the flat modifier
+  });
+  const result = withRandom([4 / 20], () => CampaignOS.rollSavingThrow(withToken, token.id, "WIS", 10));
+  assert.equal(result.total, 11); // roll 5 + stated bonus 6
+  assert.equal(result.success, true);
+});
+
+test("rollSavingThrow reports failure when the total doesn't meet the DC", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Mara", abilityScores: { DEX: 10 } });
+  const result = withRandom([0], () => CampaignOS.rollSavingThrow(withToken, token.id, "dex", 15));
+  assert.equal(result.success, false);
+  assert.match(result.message, /Failure\.$/);
+});
+
+test("rollSavingThrow rejects an unrecognized ability without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Ysolde" });
+  const result = CampaignOS.rollSavingThrow(withToken, token.id, "luck", 10);
+  assert.equal(result.success, false);
+  assert.match(result.message, /not a valid ability/);
+  assert.deepEqual(result.state, withToken);
+});
+
+test("rollSavingThrow reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.rollSavingThrow(state, "nonexistent-id", "str", 10);
+  assert.match(result.message, /token was not found/);
+  assert.deepEqual(result.state, state);
+});
+
+test("addToken normalizes ability scores -- clamping out-of-range values and leaving unset abilities absent", () => {
+  const state = stateOnMap("Urskelde");
+  const { token } = CampaignOS.addToken(state, { name: "Odd Scores", abilityScores: { STR: 99, DEX: -5, CON: 14 } });
+  assert.deepEqual(token.abilityScores, { STR: 30, DEX: 1, CON: 14 });
+});
+
+test("updateToken merges a partial ability-score change without wiping previously-set abilities", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Grows Over Time", abilityScores: { STR: 16, DEX: 12 } });
+  const updated = CampaignOS.updateToken(withToken, token.id, { abilityScores: { WIS: 14 } });
+  const found = updated.tokens.find((t) => t.id === token.id);
+  assert.deepEqual(found.abilityScores, { STR: 16, DEX: 12, WIS: 14 });
+});
+
+test("updateToken merges a partial saving-throw override without wiping previously-set ones", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Feats Over Time", savingThrows: { STR: 8 } });
+  const updated = CampaignOS.updateToken(withToken, token.id, { savingThrows: { WIS: 6 } });
+  const found = updated.tokens.find((t) => t.id === token.id);
+  assert.deepEqual(found.savingThrows, { STR: 8, WIS: 6 });
+});
+
+test("spawned monsters get their real SRD ability scores, including the corrected troll Dex", () => {
+  const state = stateOnMap("Urskelde");
+  const goblin = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one goblin")).state.tokens[0];
+  assert.deepEqual(goblin.abilityScores, { STR: 8, DEX: 14, CON: 10, INT: 10, WIS: 8, CHA: 8 });
+
+  const troll = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one troll")).state.tokens[0];
+  assert.deepEqual(troll.abilityScores, { STR: 18, DEX: 13, CON: 20, INT: 7, WIS: 9, CHA: 7 });
+  assert.equal(troll.initiative, 2); // roll 1 (Math.random stubbed to 0) + the corrected Dex mod (+1)
+});
+
+test("parseCommand resolves a saving throw command by token name", () => {
+  let state = stateOnMap("Urskelde");
+  state = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one goblin")).state;
+  const result = withRandom([9 / 20], () => CampaignOS.parseCommand(state, "Goblin 1 rolls a wisdom saving throw against DC 10"));
+  // Goblin's WIS is 8 (-1 mod): roll 10 - 1 = 9, vs DC 10 -> failure.
+  assert.equal(result.success, false);
+  assert.match(result.message, /Goblin 1 rolls a WIS save: 10 -1 = 9 vs DC 10\. Failure\./);
+});

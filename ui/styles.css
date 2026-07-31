@@ -564,7 +564,8 @@ body[data-fog="on"] .map-tile:hover {
 
 .token-editor,
 .hp-control,
-.attack-control {
+.attack-control,
+.save-control {
   display: grid;
   gap: 10px;
   margin-bottom: 12px;
@@ -572,7 +573,8 @@ body[data-fog="on"] .map-tile:hover {
 
 .token-editor label,
 .hp-control label,
-.attack-control label {
+.attack-control label,
+.save-control label {
   display: grid;
   gap: 5px;
   color: var(--muted);
@@ -581,11 +583,14 @@ body[data-fog="on"] .map-tile:hover {
 
 .token-editor input,
 .hp-control input,
-.attack-control select {
+.attack-control select,
+.save-control select,
+.save-control input {
   width: 100%;
 }
 
-.attack-control {
+.attack-control,
+.save-control {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
 }

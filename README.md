@@ -41,6 +41,18 @@ dependencies to install for the app itself. See Tests, below, for running the te
   flat cost per diagonal square), with the alternation carrying across separate moves within
   the same turn. Click-to-move, the Claude DM bridge's `move_token` action, and the manual
   grid all go through the same speed check.
+- Ability scores and saving throws: every token can carry real STR/DEX/CON/INT/WIS/CHA
+  scores -- editable on the token sheet, filled in automatically for the five `spawn`ed
+  monsters (real SRD ability scores, not guesses) and for any imported character/NPC sheet
+  with an `## Ability Scores` table. A **Roll Save** control on the token sheet (or
+  `<name> rolls a <ability> saving throw against DC <n>`, or the Claude DM bridge's
+  `saving_throw` action) rolls a d20 + the token's real ability modifier against a DC --
+  or a sheet's literal stated bonus instead, when there is one (`**Saving throws:**
+  Strength +10, Constitution +7...`), since a real high-level sheet's save bonuses often
+  include feats/multiclassing a flat formula can't reproduce. A saving throw only resolves
+  and reports pass/fail; it doesn't apply a follow-up effect (e.g. half damage on success)
+  automatically -- decide that from the reported result the same way Troll's Regeneration
+  above is handled by hand.
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes
@@ -115,15 +127,20 @@ The "Claude DM" panel works two ways:
   `X attacks Y` phrasing. No network calls, no setup.
 - **Connected:** commands are handled by a real Claude Code call, which can narrate freely
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
-  token on the grid, advance to the next turn, switch to a different prepared map),
-  referencing tokens by name and reasoning about the current encounter state -- including
-  where everything stands on the grid, whose turn it is, and how much movement each token
-  has left this turn. `next_turn` and `move_token` are what actually let Claude run the
-  turn tracker and RAW speed-limited movement described above -- without calling
-  `next_turn`, turn order never starts and movement stays unconstrained (which is also the
-  correct default for narration outside formal combat). `switch_map` only works for maps
-  that already have real art or a campaign location behind them; Claude is told exactly
-  which map names are valid rather than allowed to invent one.
+  token on the grid, advance to the next turn, switch to a different prepared map, roll a
+  saving throw), referencing tokens by name and reasoning about the current encounter state
+  -- including where everything stands on the grid, whose turn it is, how much movement each
+  token has left this turn, and each token's ability scores when known. `next_turn` and
+  `move_token` are what actually let Claude run the turn tracker and RAW speed-limited
+  movement described above -- without calling `next_turn`, turn order never starts and
+  movement stays unconstrained (which is also the correct default for narration outside
+  formal combat). `switch_map` only works for maps that already have real art or a campaign
+  location behind them; Claude is told exactly which map names are valid rather than allowed
+  to invent one. `saving_throw` only decides the ability and DC -- the engine rolls the die
+  and applies the target's real modifier -- and only reports pass/fail; since Claude decides
+  a whole response's actions before seeing any of their results, it can't conditionally apply
+  a follow-up effect (e.g. half damage on a success) in that same response, so that has to be
+  a separate command once the result is visible in the log.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than

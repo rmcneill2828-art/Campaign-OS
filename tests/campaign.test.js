@@ -240,3 +240,37 @@ test("tokenDraftFromItem rolls initiative from the sheet's initiative bonus rath
     Math.random = original;
   }
 });
+
+test("tokenDraftFromItem reads the Ability Scores table (ignoring the parenthetical modifier, any minus-sign glyph)", () => {
+  const sheet = [
+    "# Darkhawk Blondin",
+    "",
+    "## Ability Scores",
+    "| STR | DEX | CON | INT | WIS | CHA |",
+    "|-----|-----|-----|-----|-----|-----|",
+    "| 21 (+5) | 13 (+1) | 14 (+2) | 8 (−1) | 12 (+1) | 10 (+0) |"
+  ].join("\n");
+
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Darkhawk Blondin", path: "characters/Darkhawk Blondin.md", text: sheet });
+  assert.deepEqual(draft.abilityScores, { STR: 21, DEX: 13, CON: 14, INT: 8, WIS: 12, CHA: 10 });
+});
+
+test("tokenDraftFromItem leaves abilityScores unset when the sheet has no Ability Scores table", () => {
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "No Scores", path: "characters/No Scores.md", text: "## Combat\n- **AC:** 15" });
+  assert.equal(draft.abilityScores, undefined);
+});
+
+test("tokenDraftFromItem reads stated saving-throw bonuses (feats/multiclass and all) from the Saving throws line", () => {
+  const sheet = [
+    "## Proficiencies & Skills",
+    "- **Saving throws:** Strength +10, Constitution +7, Wisdom +6 (Resilient, lvl Fighter 4)"
+  ].join("\n");
+
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Darkhawk Blondin", path: "characters/Darkhawk Blondin.md", text: sheet });
+  assert.deepEqual(draft.savingThrows, { STR: 10, CON: 7, WIS: 6 });
+});
+
+test("tokenDraftFromItem leaves savingThrows unset when the sheet has no Saving throws line", () => {
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "No Saves", path: "characters/No Saves.md", text: "## Combat\n- **AC:** 15" });
+  assert.equal(draft.savingThrows, undefined);
+});

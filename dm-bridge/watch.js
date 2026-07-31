@@ -55,6 +55,7 @@ const SYSTEM_PROMPT = [
   '{"type": "move_token", "target": "<exact token name>", "x": <integer>, "y": <integer>}',
   '{"type": "next_turn"}',
   '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
+  '{"type": "saving_throw", "target": "<exact token name>", "ability": "STR|DEX|CON|INT|WIS|CHA", "dc": <integer>}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -83,6 +84,16 @@ const SYSTEM_PROMPT = [
   "in \"Maps available to switch to\" below. If the destination isn't listed, it hasn't been",
   "prepared yet -- narrate the transition in prose instead and let the DM load that map first,",
   "rather than inventing a switch_map action for a map that doesn't exist.",
+  "",
+  "Use saving_throw when narration calls for a save -- a trap, a spell effect, a fear aura, a",
+  "poison. You only decide the ability and DC; the engine rolls the die and adds the target's",
+  "real ability modifier (or a stated save bonus from their sheet, which can include feats/",
+  "multiclass bumps a flat formula wouldn't capture) automatically -- each token's line below",
+  "shows its ability scores when known. Important: you do NOT see the die roll's outcome before",
+  "deciding the rest of THIS response's actions -- saving_throw only resolves and logs pass/fail,",
+  "it never applies a follow-up effect itself. For \"half damage on a success, full on a failure\"",
+  "-style effects, issue the saving_throw action alone this turn and let the DM's next command",
+  "(after seeing the logged result) tell you the actual damage/condition to apply.",
   "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
@@ -132,6 +143,8 @@ function isValidAction(action) {
       return true;
     case "switch_map":
       return typeof action.map === "string" && action.map.trim().length > 0;
+    case "saving_throw":
+      return typeof action.target === "string" && typeof action.ability === "string" && Number.isFinite(action.dc);
     default:
       return false;
   }
@@ -183,7 +196,12 @@ function buildPrompt(request) {
         : "";
       const speed = Number.isFinite(t.speed) ? t.speed : 30;
       const movementLeft = Number.isFinite(t.movementLeft) ? t.movementLeft : speed;
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}`);
+      const scores = t.abilityScores || {};
+      const knownAbilities = ["STR", "DEX", "CON", "INT", "WIS", "CHA"].filter((key) => Number.isFinite(scores[key]));
+      const abilities = knownAbilities.length
+        ? `, abilities ${knownAbilities.map((key) => `${key} ${scores[key]}`).join(" ")}`
+        : "";
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

@@ -187,6 +187,27 @@ test("applyActions logs an unresolved-name message for move_token targeting an u
   assert.match(messages[0], /could not find "Nonexistent Goblin" to move/);
 });
 
+test("applyActions resolves a saving_throw action using the target's real ability modifier", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", abilityScores: { WIS: 16 } }).state;
+
+  const { state: next, messages } = withRandom([9 / 20], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "saving_throw", target: "Sael", ability: "WIS", dc: 12 }
+  ]));
+
+  assert.match(messages[0], /Sael rolls a WIS save: 10 \+3 = 13 vs DC 12\. Success\./);
+  assert.match(next.log[0], /Sael rolls a WIS save/, "the roll should be logged (not double-logged) the same way attack() is");
+  assert.equal(next.log.length, 1);
+});
+
+test("applyActions logs an unresolved-name message for a saving_throw targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "saving_throw", target: "Nonexistent Goblin", ability: "DEX", dc: 10 }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" for a saving throw/);
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

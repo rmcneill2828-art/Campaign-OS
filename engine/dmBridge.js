@@ -94,6 +94,16 @@
           alreadyLogged: false
         };
       }
+      case "saving_throw": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" for a saving throw.`, alreadyLogged: false };
+        // rollSavingThrow uses the target's real ability modifier (or a stated save bonus
+        // from their sheet) and only reports pass/fail -- it does not apply a follow-up
+        // effect (e.g. half damage on success). A separate apply_damage/toggle_condition
+        // action, decided from the reported result, covers that.
+        const result = window.CampaignOS.rollSavingThrow(state, target.id, action.ability, action.dc);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
       case "switch_map": {
         const mapName = String(action.map || "").trim();
         const nextState = window.CampaignOS.setActiveMap(state, mapName);

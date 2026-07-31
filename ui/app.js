@@ -714,6 +714,15 @@
             <input value="${token.movementUsed || 0} / ${token.speed ?? 30}" disabled>
           </label>
         </div>
+        <p class="subheading">Ability Scores</p>
+        <div class="cc-scores">
+          <label>STR<input name="str" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.STR ?? ""}"></label>
+          <label>DEX<input name="dex" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.DEX ?? ""}"></label>
+          <label>CON<input name="con" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.CON ?? ""}"></label>
+          <label>INT<input name="int" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.INT ?? ""}"></label>
+          <label>WIS<input name="wis" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.WIS ?? ""}"></label>
+          <label>CHA<input name="cha" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.CHA ?? ""}"></label>
+        </div>
         <button type="submit">Update</button>
       </form>
       <form class="attack-control">
@@ -730,6 +739,24 @@
           </select>
         </label>
         <button type="submit">Attack</button>
+      </form>
+      <form class="save-control" title="Rolls a d20 + this token's real ability modifier (or a stated save bonus from their sheet) against the DC.">
+        <label>
+          Save
+          <select name="ability">
+            <option value="STR">STR</option>
+            <option value="DEX">DEX</option>
+            <option value="CON">CON</option>
+            <option value="INT">INT</option>
+            <option value="WIS">WIS</option>
+            <option value="CHA">CHA</option>
+          </select>
+        </label>
+        <label>
+          DC
+          <input name="dc" type="number" min="1" max="30" value="10">
+        </label>
+        <button type="submit">Roll Save</button>
       </form>
       <form class="hp-control">
         <label>
@@ -789,6 +816,14 @@
     editor.addEventListener("submit", (event) => {
       event.preventDefault();
       const form = new FormData(editor);
+      // Only include an ability whose field actually has something typed in it -- a blank
+      // input means "leave this one alone" (updateToken merges, so an untouched ability
+      // stays whatever it already was), not "set it to 0".
+      const abilityScores = {};
+      [["str", "STR"], ["dex", "DEX"], ["con", "CON"], ["int", "INT"], ["wis", "WIS"], ["cha", "CHA"]].forEach(([field, key]) => {
+        const raw = form.get(field);
+        if (raw !== null && String(raw).trim() !== "") abilityScores[key] = raw;
+      });
       updateState(window.CampaignOS.updateToken(state, token.id, {
         name: form.get("name"),
         hp: form.get("hp"),
@@ -797,7 +832,8 @@
         ac: form.get("ac"),
         attackBonus: form.get("attackBonus"),
         damageDice: form.get("damageDice"),
-        speed: form.get("speed")
+        speed: form.get("speed"),
+        abilityScores
       }));
     });
 
@@ -820,6 +856,17 @@
         advantage: mode === "advantage",
         disadvantage: mode === "disadvantage"
       });
+      state = result.state;
+      saveEncounter();
+      commandResult.textContent = result.message;
+      render();
+    });
+
+    const saveControl = tokenSheet.querySelector(".save-control");
+    saveControl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const formData = new FormData(saveControl);
+      const result = window.CampaignOS.rollSavingThrow(state, token.id, formData.get("ability"), Number(formData.get("dc")));
       state = result.state;
       saveEncounter();
       commandResult.textContent = result.message;
@@ -1744,7 +1791,8 @@
           ac: token.ac,
           speed: token.speed ?? 30,
           movementLeft: Math.max(0, (token.speed ?? 30) - (token.movementUsed || 0)),
-          conditions: token.conditions
+          conditions: token.conditions,
+          abilityScores: token.abilityScores
         }))
       },
       createdAt: new Date().toISOString()

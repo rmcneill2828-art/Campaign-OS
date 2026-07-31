@@ -1,4 +1,6 @@
 (function () {
+  const ABILITY_KEYS = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
+
   const conditionList = [
     "Blinded",
     "Charmed",
@@ -15,23 +17,42 @@
   // (see monsterPattern below). attackBonus/damageDice reflect the monster's primary
   // attack for single-attack resolution and the token sheet's editable fields; `attacks`
   // (when present) lists every attack a Multiattack action makes, consumed by attack()
-  // below. `initiativeMod` is the monster's real Dex modifier, not a flat guess.
+  // below. `initiativeMod` is the monster's real Dex modifier, not a flat guess -- same
+  // number as abilityScores.DEX's modifier, kept as its own field since it predates
+  // ability scores being modeled at all. None of these five have a stated saving throw
+  // proficiency in the SRD, so their saves fall back to a flat ability modifier (see
+  // savingThrowBonus) -- no `savingThrows` override needed.
   //
   // Troll's Regeneration (10 HP at the start of its turn unless it took acid/fire damage
   // since its last turn) is intentionally NOT automated here -- this engine has no
   // start-of-turn hook to key it off. Apply it by hand via applyHealing on the troll's turn.
   const STAT_BLOCKS = {
-    goblin: { hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2, speed: 30 },
-    orc: { hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", initiativeMod: 1, speed: 30 },
-    wolf: { hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", initiativeMod: 2, speed: 40 },
-    bandit: { hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30 },
+    goblin: {
+      hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2, speed: 30,
+      abilityScores: { STR: 8, DEX: 14, CON: 10, INT: 10, WIS: 8, CHA: 8 }
+    },
+    orc: {
+      hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", initiativeMod: 1, speed: 30,
+      abilityScores: { STR: 16, DEX: 12, CON: 16, INT: 7, WIS: 11, CHA: 10 }
+    },
+    wolf: {
+      hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", initiativeMod: 2, speed: 40,
+      abilityScores: { STR: 12, DEX: 15, CON: 12, INT: 3, WIS: 12, CHA: 6 }
+    },
+    bandit: {
+      hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30,
+      abilityScores: { STR: 11, DEX: 12, CON: 12, INT: 10, WIS: 10, CHA: 10 }
+    },
     troll: {
       hp: 84,
       ac: 15,
       attackBonus: 7,
       damageDice: "1d6+4",
-      initiativeMod: -1,
+      // Real SRD Dex is 13 (+1 mod) -- fixing a pre-existing -1 here alongside adding the
+      // full ability block, since the two were clearly meant to be the same number.
+      initiativeMod: 1,
       speed: 30,
+      abilityScores: { STR: 18, DEX: 13, CON: 20, INT: 7, WIS: 9, CHA: 7 },
       attacks: [
         { name: "Bite", attackBonus: 7, damageDice: "1d6+4" },
         { name: "Claw", attackBonus: 7, damageDice: "2d6+4" },
@@ -42,7 +63,10 @@
   // Safety net for a monster name that reaches spawnMonster without a STAT_BLOCKS entry
   // (not reachable through parseCommand today, since monsterPattern only matches the
   // names above, but spawnMonster itself doesn't enforce that).
-  const GENERIC_STAT_BLOCK = { hp: 10, ac: 13, attackBonus: 3, damageDice: "1d8+1", initiativeMod: 2, speed: 30 };
+  const GENERIC_STAT_BLOCK = {
+    hp: 10, ac: 13, attackBonus: 3, damageDice: "1d8+1", initiativeMod: 2, speed: 30,
+    abilityScores: { STR: 10, DEX: 10, CON: 10, INT: 10, WIS: 10, CHA: 10 }
+  };
 
   const initialState = {
     mapName: "",
@@ -138,7 +162,8 @@
         movementUsed: 0,
         diagonalStepsThisTurn: 0,
         initiative: rollDie(20) + stats.initiativeMod,
-        conditions: []
+        conditions: [],
+        abilityScores: { ...stats.abilityScores }
       };
       if (stats.attacks) token.attacks = stats.attacks;
       nextState.tokens.push(token);
@@ -173,6 +198,10 @@
       sourcePath: draft.sourcePath || ""
     };
     if (Array.isArray(draft.attacks) && draft.attacks.length > 1) token.attacks = draft.attacks;
+    const abilityScores = normalizeAbilityScores(draft.abilityScores);
+    if (abilityScores) token.abilityScores = abilityScores;
+    const savingThrows = normalizeSavingThrows(draft.savingThrows);
+    if (savingThrows) token.savingThrows = savingThrows;
     token.hp = clampNumber(token.hp, 0, token.maxHp);
     nextState.tokens.push(token);
     nextState.selectedTokenId = token.id;
@@ -205,6 +234,79 @@
       modifier,
       notation
     };
+  }
+
+  function normalizeAbilityScores(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const scores = {};
+    let any = false;
+    ABILITY_KEYS.forEach((key) => {
+      const value = Number(raw[key]);
+      if (Number.isFinite(value)) {
+        scores[key] = clampNumber(value, 1, 30);
+        any = true;
+      }
+    });
+    return any ? scores : undefined;
+  }
+
+  // A stated saving-throw bonus (parsed from a real character sheet's "Saving throws:"
+  // line, e.g. "Wisdom +6 (Resilient, lvl Fighter 4)") is stored as-is rather than
+  // recomputed from ability score + proficiency bonus -- real sheets accumulate feats,
+  // multiclass bumps, and magic items a flat formula can't reproduce. Sparse: only the
+  // abilities actually stated are recorded, everything else falls back to the raw
+  // ability modifier (see savingThrowBonus).
+  function normalizeSavingThrows(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const saves = {};
+    let any = false;
+    ABILITY_KEYS.forEach((key) => {
+      const value = Number(raw[key]);
+      if (Number.isFinite(value)) {
+        saves[key] = Math.round(value);
+        any = true;
+      }
+    });
+    return any ? saves : undefined;
+  }
+
+  function abilityModifier(score) {
+    return Math.floor((Number(score) - 10) / 2);
+  }
+
+  // The bonus rollSavingThrow adds to the d20: an explicit stated save bonus if the sheet
+  // has one, else the raw ability modifier (no proficiency bonus -- a token only gets that
+  // if it's baked into an explicit override, matching how monsters without a stated
+  // saving-throw proficiency in the SRD just use a flat ability modifier too), else 0 if
+  // the token has no ability scores recorded at all.
+  function savingThrowBonus(token, ability) {
+    const stated = token.savingThrows?.[ability];
+    if (Number.isFinite(stated)) return stated;
+    const score = token.abilityScores?.[ability];
+    return Number.isFinite(score) ? abilityModifier(score) : 0;
+  }
+
+  // Rolls a saving throw for `tokenId` against `dc`, using its real ability modifier (or
+  // stated save bonus, see savingThrowBonus above) rather than a flat guess. Only reports
+  // pass/fail -- it does not apply any follow-up effect (e.g. half damage on a success);
+  // narration/subsequent actions apply damage or conditions based on the reported result
+  // separately, the same way a real table resolves a save before deciding the consequence.
+  function rollSavingThrow(state, tokenId, ability, dc) {
+    const key = String(ability || "").toUpperCase().slice(0, 3);
+    if (!ABILITY_KEYS.includes(key)) {
+      return { state, message: `Saving throw failed: "${ability}" is not a valid ability.`, success: false };
+    }
+
+    const token = tokensOnCurrentMap(state).find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Saving throw failed: token was not found.", success: false };
+
+    const bonus = savingThrowBonus(token, key);
+    const roll = rollDie(20);
+    const total = roll + bonus;
+    const dcNumber = Number(dc) || 0;
+    const success = total >= dcNumber;
+    const message = `${token.name} rolls a ${key} save: ${roll} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dcNumber}. ${success ? "Success" : "Failure"}.`;
+    return { state: addLogEntry(state, message), message, success, total };
   }
 
   function applyDamage(state, tokenId, amount) {
@@ -264,6 +366,16 @@
 
     if (changes.speed !== undefined) {
       token.speed = clampNumber(changes.speed, 0, 999);
+    }
+
+    if (changes.abilityScores !== undefined) {
+      const merged = normalizeAbilityScores({ ...(token.abilityScores || {}), ...changes.abilityScores });
+      if (merged) token.abilityScores = merged;
+    }
+
+    if (changes.savingThrows !== undefined) {
+      const merged = normalizeSavingThrows({ ...(token.savingThrows || {}), ...changes.savingThrows });
+      if (merged) token.savingThrows = merged;
     }
 
     if (typeof changes.image === "string") {
@@ -608,6 +720,15 @@
     }
     const attackMatch = attackCommand.match(/^(.+?)\s+attacks?\s+(.+?)[.!?]?$/i);
 
+    const saveMatch = command.match(
+      /^(.+?)\s+(?:makes?|rolls?)\s+an?\s+(strength|dexterity|constitution|intelligence|wisdom|charisma|str|dex|con|int|wis|cha)\s+sav(?:e|ing throw)s?\s+(?:against|vs\.?)?\s*dc\s*(\d+)/i
+    );
+    if (saveMatch) {
+      const token = findTokenByName(state, saveMatch[1]);
+      if (!token) return { state, message: "I could not find who's making the save." };
+      return rollSavingThrow(state, token.id, saveMatch[2], Number(saveMatch[3]));
+    }
+
     if (attackMatch) {
       const attacker = findTokenByName(state, attackMatch[1]);
       const target = findTokenByName(state, attackMatch[2]);
@@ -630,6 +751,8 @@
   }
 
   window.CampaignOS = {
+    ABILITY_KEYS,
+    abilityModifier,
     applyDamage,
     applyHealing,
     attack,
@@ -644,6 +767,8 @@
     nextTurn,
     parseCommand,
     removeToken,
+    rollSavingThrow,
+    savingThrowBonus,
     setActiveMap,
     setMapGrid,
     setMapImage,

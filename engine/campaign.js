@@ -1,4 +1,10 @@
 (function () {
+  const ABILITY_KEYS = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
+  const ABILITY_NAME_TO_KEY = {
+    strength: "STR", dexterity: "DEX", constitution: "CON",
+    intelligence: "INT", wisdom: "WIS", charisma: "CHA"
+  };
+
   const categoryRules = [
     { id: "characters", label: "Characters", patterns: [/character/i, /player/i, /npc/i, /characters?[\\/]/i, /npcs?[\\/]/i] },
     { id: "locations", label: "Locations", patterns: [/location/i, /place/i, /settlement/i, /locations?[\\/]/i, /maps?[\\/]/i] },
@@ -286,7 +292,68 @@
       }));
     }
 
+    const abilityScores = extractAbilityScores(item.text || "");
+    if (abilityScores) draft.abilityScores = abilityScores;
+
+    const savingThrows = extractSavingThrows(fields["saving throws"]);
+    if (savingThrows) draft.savingThrows = savingThrows;
+
     return draft;
+  }
+
+  // Reads the "## Ability Scores" table's STR/DEX/CON/INT/WIS/CHA header row and first
+  // data row (e.g. "21 (+5) | 13 (+1) | ..."), taking just the raw score before the
+  // parenthetical modifier -- readNumber already stops at the first integer it finds, so
+  // it naturally ignores the "(+5)"/"(−1)" part regardless of which minus-sign glyph a
+  // real sheet uses there. Matched by header name rather than column position, so it
+  // doesn't assume the template's exact STR-DEX-CON-INT-WIS-CHA column order.
+  function extractAbilityScores(text) {
+    const lines = text.split(/\r?\n/);
+    const headingIndex = lines.findIndex((line) => /^#{1,4}\s+ability scores/i.test(line.trim()));
+    if (headingIndex === -1) return null;
+
+    const searchLimit = Math.min(lines.length, headingIndex + 8);
+    let index = headingIndex + 1;
+    while (index < searchLimit) {
+      if (/^#{1,4}\s+/.test(lines[index])) return null;
+      if (isTableRow(lines[index]) && isSeparatorRow(lines[index + 1])) break;
+      index += 1;
+    }
+    if (index >= searchLimit || !isTableRow(lines[index]) || !isSeparatorRow(lines[index + 1])) return null;
+
+    const headerCells = splitTableRow(lines[index]).map((cell) => cell.toUpperCase());
+    const dataRow = splitTableRow(lines[index + 2] || "");
+    if (!dataRow.length) return null;
+
+    const scores = {};
+    ABILITY_KEYS.forEach((key) => {
+      const columnIndex = headerCells.indexOf(key);
+      if (columnIndex === -1) return;
+      const score = readNumber(dataRow[columnIndex], null);
+      if (score !== null) scores[key] = score;
+    });
+
+    return Object.keys(scores).length ? scores : null;
+  }
+
+  // Reads a "Saving throws:" line's stated bonuses directly (e.g. "Strength +10,
+  // Constitution +7, Wisdom +6 (Resilient, lvl Fighter 4)") rather than recomputing them
+  // from ability score + proficiency bonus -- real sheets accumulate feats, multiclass
+  // bumps, and magic items a flat formula can't reproduce, and this is the same "trust
+  // what's literally written in the table" approach extractAttackRows already takes for
+  // to-hit/damage. Sparse: only the abilities actually stated come back.
+  function extractSavingThrows(savingThrowsText) {
+    if (!savingThrowsText) return null;
+    const pattern = /(strength|dexterity|constitution|intelligence|wisdom|charisma)\s*([+-]\s*\d+)/gi;
+    const saves = {};
+    let match = pattern.exec(savingThrowsText);
+    while (match) {
+      const key = ABILITY_NAME_TO_KEY[match[1].toLowerCase()];
+      const bonus = Number(match[2].replace(/\s+/g, ""));
+      if (key && Number.isFinite(bonus)) saves[key] = bonus;
+      match = pattern.exec(savingThrowsText);
+    }
+    return Object.keys(saves).length ? saves : null;
   }
 
   function extractFields(text) {
