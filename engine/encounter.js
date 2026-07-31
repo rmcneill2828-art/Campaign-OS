@@ -206,6 +206,8 @@
     if (spellcasting) token.spellcasting = spellcasting;
     const spellSlots = normalizeSpellSlots(draft.spellSlots);
     if (spellSlots) token.spellSlots = spellSlots;
+    const resources = normalizeResources(draft.resources);
+    if (resources) token.resources = resources;
     token.hp = clampNumber(token.hp, 0, token.maxHp);
     nextState.tokens.push(token);
     nextState.selectedTokenId = token.id;
@@ -319,6 +321,41 @@
     return `${level}th`;
   }
 
+  // Sparse, named class-resource tracker (Rage, Wild Shape, Ki Points, Superiority Dice,
+  // Channel Divinity, Bardic Inspiration, ...) -- each entry is {max, current}, current
+  // clamped to [0, max]. Unlike spell slots (a fixed 1-9 numeric range with one canonical
+  // sheet line), class resources vary too much in name, count, and recovery wording across
+  // classes to auto-extract reliably from freeform Features & Traits prose, so these are
+  // entered by hand on the token sheet (see ui/app.js's Resources section) rather than
+  // imported from markdown -- a deliberate, known gap, same spirit as Troll's Regeneration
+  // not being automated in spawnMonster.
+  function normalizeResources(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const resources = {};
+    let any = false;
+    Object.keys(raw).forEach((name) => {
+      const key = String(name || "").trim();
+      const entry = raw[name];
+      if (!key || !entry || typeof entry !== "object") return;
+      const max = Number(entry.max);
+      if (!Number.isFinite(max) || max <= 0) return;
+      const clampedMax = clampNumber(max, 1, 99);
+      const current = Number.isFinite(Number(entry.current)) ? Number(entry.current) : clampedMax;
+      resources[key] = { max: clampedMax, current: clampNumber(current, 0, clampedMax) };
+      any = true;
+    });
+    return any ? resources : undefined;
+  }
+
+  // Resource names are free text (not a fixed enum like abilities/save keys), so lookups
+  // match case-insensitively -- narration or Claude saying "rage" should still find a
+  // token's stored "Rage" entry -- and return the actual stored key so callers can report
+  // and mutate using the sheet's own casing.
+  function findResourceKey(token, name) {
+    const normalized = String(name || "").trim().toLowerCase();
+    return Object.keys(token.resources || {}).find((key) => key.toLowerCase() === normalized);
+  }
+
   // The bonus rollSavingThrow adds to the d20: an explicit stated save bonus if the sheet
   // has one, else the raw ability modifier (no proficiency bonus -- a token only gets that
   // if it's baked into an explicit override, matching how monsters without a stated
@@ -403,6 +440,49 @@
     return { state: addLogEntry(nextState, message), message };
   }
 
+  // Spends `amount` (default 1) charges of a named class resource -- fails outright with
+  // no state change if the token has no such resource tracked, or not enough left. Only
+  // spends the charge and logs how many remain; any actual effect (damage, healing, a
+  // saving throw) needs its own separate call, the same composable-primitives approach
+  // castSpell/rollSavingThrow already use.
+  function useResource(state, tokenId, resourceName, amount) {
+    let nextState = clone(state);
+    const token = tokensOnCurrentMap(nextState).find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Resource use failed: token was not found." };
+
+    const key = findResourceKey(token, resourceName);
+    if (!key) return { state, message: `${token.name} has no "${resourceName}" resource tracked.` };
+
+    const resource = token.resources[key];
+    const spend = clampNumber(amount ?? 1, 1, 99);
+    if (resource.current < spend) {
+      return { state, message: `${token.name} doesn't have ${spend} ${key} left (${resource.current}/${resource.max} remaining).` };
+    }
+
+    resource.current -= spend;
+    const message = `${token.name} uses ${key}${spend > 1 ? ` (${spend})` : ""} (${resource.current}/${resource.max} remaining).`;
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // Restores charges to a named class resource, clamped so it can't exceed max -- covers
+  // "regains an expended resource" (a short/long rest, a feature that grants one back)
+  // without the engine modeling rest cadence itself; omitting `amount` restores to full,
+  // the same manual-trigger pattern the HP panel's Heal/Full HP buttons already use for HP.
+  function restoreResource(state, tokenId, resourceName, amount) {
+    let nextState = clone(state);
+    const token = tokensOnCurrentMap(nextState).find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Resource restore failed: token was not found." };
+
+    const key = findResourceKey(token, resourceName);
+    if (!key) return { state, message: `${token.name} has no "${resourceName}" resource tracked.` };
+
+    const resource = token.resources[key];
+    const restoreAmount = Number.isFinite(Number(amount)) ? clampNumber(amount, 1, 99) : resource.max;
+    resource.current = clampNumber(resource.current + restoreAmount, 0, resource.max);
+    const message = `${token.name} regains ${key} (${resource.current}/${resource.max} remaining).`;
+    return { state: addLogEntry(nextState, message), message };
+  }
+
   function applyDamage(state, tokenId, amount) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
@@ -484,6 +564,21 @@
     if (changes.spellSlots !== undefined) {
       const merged = normalizeSpellSlots({ ...(token.spellSlots || {}), ...changes.spellSlots });
       if (merged) token.spellSlots = merged;
+    }
+
+    // Resources merge per-name, same as spell slots merge per-level -- but resources can
+    // also be removed entirely (a resource added by mistake, or a feature retired), which
+    // spell slots never need since all 9 levels always potentially apply. Setting a name's
+    // value to null deletes it from the merged set before normalizing.
+    if (changes.resources !== undefined) {
+      const merged = { ...(token.resources || {}) };
+      Object.keys(changes.resources).forEach((name) => {
+        if (changes.resources[name] === null) delete merged[name];
+        else merged[name] = changes.resources[name];
+      });
+      const normalized = normalizeResources(merged);
+      if (normalized) token.resources = normalized;
+      else delete token.resources;
     }
 
     if (typeof changes.image === "string") {
@@ -901,8 +996,10 @@
     nextTurn,
     parseCommand,
     removeToken,
+    restoreResource,
     rollSavingThrow,
     savingThrowBonus,
+    useResource,
     setActiveMap,
     setMapGrid,
     setMapImage,

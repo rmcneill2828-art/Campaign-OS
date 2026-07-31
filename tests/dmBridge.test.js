@@ -247,6 +247,39 @@ test("applyActions logs an unresolved-name message for a cast_spell targeting an
   assert.match(messages[0], /could not find "Nonexistent Caster" to cast a spell/);
 });
 
+test("applyActions resolves a use_resource action, spending a charge and reporting how many remain", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", resources: { Rage: { max: 4, current: 4 } } }).state;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "use_resource", target: "Darkhawk", resource: "Rage" }
+  ]);
+
+  assert.match(messages[0], /Darkhawk uses Rage \(3\/4 remaining\)\./);
+  const darkhawk = next.tokens.find((t) => t.name === "Darkhawk");
+  assert.equal(darkhawk.resources.Rage.current, 3);
+  assert.equal(next.log.length, 1, "use_resource should not be double-logged, the same way attack()/saving_throw() aren't");
+});
+
+test("applyActions passes an explicit amount through to use_resource", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", resources: { "Superiority Dice": { max: 4, current: 4 } } }).state;
+
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "use_resource", target: "Darkhawk", resource: "Superiority Dice", amount: 2 }
+  ]);
+
+  assert.match(messages[0], /uses Superiority Dice \(2\) \(2\/4 remaining\)\./);
+});
+
+test("applyActions logs an unresolved-name message for a use_resource targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "use_resource", target: "Nonexistent Goblin", resource: "Rage" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" to use a resource/);
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

@@ -124,6 +124,12 @@
         });
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
+      case "use_resource": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to use a resource.`, alreadyLogged: false };
+        const result = window.CampaignOS.useResource(state, target.id, action.resource, action.amount);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
       case "switch_map": {
         const mapName = String(action.map || "").trim();
         const nextState = window.CampaignOS.setActiveMap(state, mapName);

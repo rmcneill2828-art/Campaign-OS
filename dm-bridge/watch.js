@@ -57,6 +57,7 @@ const SYSTEM_PROMPT = [
   '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
   '{"type": "saving_throw", "target": "<exact token name>", "ability": "STR|DEX|CON|INT|WIS|CHA", "dc": <integer>}',
   '{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "advantage": <optional true>, "disadvantage": <optional true>}',
+  '{"type": "use_resource", "target": "<exact token name>", "resource": "<exact resource name from that token\'s list below>", "amount": <optional integer, default 1>}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -108,6 +109,15 @@ const SYSTEM_PROMPT = [
   "cast_spell alone to spend the slot, then a separate saving_throw action per target this",
   "same response using the caster's stated spell save DC (also shown below). A spell with",
   "neither an attack roll nor a save (buffs, utility) just needs cast_spell by itself.",
+  "",
+  "Use use_resource whenever a token spends a limited class resource -- Rage, Wild Shape, Ki",
+  "Points, Superiority Dice, Channel Divinity, Bardic Inspiration, etc. -- shown in that",
+  "token's own \"resources\" list below; match the name exactly as listed there. It only spends",
+  "the charge and logs how many are left, the same composable way cast_spell only spends a",
+  "slot -- any actual effect (an attack, a saving throw, healing) still needs its own separate",
+  "action in this same response. If a token has no resources listed at all, or doesn't list the",
+  "one narration calls for, don't invent one -- narrate around it instead rather than guessing",
+  "at a name or count that isn't actually shown.",
   "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
@@ -166,6 +176,9 @@ function isValidAction(action) {
         && (action.damageDice === undefined || typeof action.damageDice === "string")
         && (action.advantage === undefined || typeof action.advantage === "boolean")
         && (action.disadvantage === undefined || typeof action.disadvantage === "boolean");
+    case "use_resource":
+      return typeof action.target === "string" && typeof action.resource === "string"
+        && (action.amount === undefined || (Number.isFinite(action.amount) && action.amount > 0));
     default:
       return false;
   }
@@ -235,7 +248,13 @@ function buildPrompt(request) {
       const slotsText = slotLevels.length
         ? `, slots ${slotLevels.map((level) => `${slots[level].current}/${slots[level].max} L${level}`).join(" ")}`
         : "";
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}`);
+      const resources = t.resources || {};
+      const resourceNames = Object.keys(resources)
+        .filter((name) => resources[name] && Number.isFinite(resources[name].current) && Number.isFinite(resources[name].max));
+      const resourcesText = resourceNames.length
+        ? `, resources ${resourceNames.map((name) => `${name} ${resources[name].current}/${resources[name].max}`).join(", ")}`
+        : "";
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

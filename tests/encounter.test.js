@@ -681,3 +681,106 @@ test("parseCommand resolves a cantrip cast with no target", () => {
   const result = CampaignOS.parseCommand(state, "Sael casts Guidance (cantrip).");
   assert.match(result.message, /Sael casts Guidance\./);
 });
+
+test("addToken normalizes named resources, clamping out-of-range values and dropping invalid entries", () => {
+  const state = stateOnMap("Urskelde");
+  const { token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    resources: {
+      Rage: { max: 4, current: 4 },
+      "Second Wind": { max: 1, current: 5 }, // current clamped down to max
+      Invalid: { max: 0, current: 0 } // max <= 0 is dropped entirely
+    }
+  });
+  assert.deepEqual(token.resources, {
+    Rage: { max: 4, current: 4 },
+    "Second Wind": { max: 1, current: 1 }
+  });
+});
+
+test("updateToken merges a partial resource change without wiping other resources, and null deletes one", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    resources: { Rage: { max: 4, current: 4 }, "Second Wind": { max: 1, current: 1 } }
+  });
+
+  const updated = CampaignOS.updateToken(withToken, token.id, { resources: { Rage: { max: 4, current: 2 } } });
+  assert.deepEqual(updated.tokens[0].resources, {
+    Rage: { max: 4, current: 2 },
+    "Second Wind": { max: 1, current: 1 }
+  });
+
+  const removed = CampaignOS.updateToken(updated, token.id, { resources: { "Second Wind": null } });
+  assert.deepEqual(removed.tokens[0].resources, { Rage: { max: 4, current: 2 } });
+});
+
+test("updateToken clears the resources field entirely once the last resource is removed", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    resources: { Rage: { max: 4, current: 4 } }
+  });
+  const cleared = CampaignOS.updateToken(withToken, token.id, { resources: { Rage: null } });
+  assert.equal(cleared.tokens[0].resources, undefined);
+});
+
+test("useResource spends a charge and reports how many remain, matching the resource name case-insensitively", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    resources: { Rage: { max: 4, current: 4 } }
+  });
+  const result = CampaignOS.useResource(withToken, token.id, "rage");
+  assert.match(result.message, /Darkhawk uses Rage \(3\/4 remaining\)\./);
+  assert.equal(result.state.tokens[0].resources.Rage.current, 3);
+});
+
+test("useResource spends more than one charge at once when asked", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    resources: { "Superiority Dice": { max: 4, current: 4 } }
+  });
+  const result = CampaignOS.useResource(withToken, token.id, "Superiority Dice", 2);
+  assert.match(result.message, /uses Superiority Dice \(2\) \(2\/4 remaining\)\./);
+});
+
+test("useResource fails without changing state once a resource is exhausted", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    resources: { "Wild Shape": { max: 2, current: 0 } }
+  });
+  const result = CampaignOS.useResource(withToken, token.id, "Wild Shape");
+  assert.match(result.message, /doesn't have 1 Wild Shape left \(0\/2 remaining\)/);
+  assert.equal(result.state, withToken);
+});
+
+test("useResource fails without changing state for a resource the token doesn't track", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Mara" });
+  const result = CampaignOS.useResource(withToken, token.id, "Ki Points");
+  assert.match(result.message, /Mara has no "Ki Points" resource tracked/);
+  assert.equal(result.state, withToken);
+});
+
+test("restoreResource defaults to restoring a resource to full", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    resources: { "Wild Shape": { max: 2, current: 0 } }
+  });
+  const result = CampaignOS.restoreResource(withToken, token.id, "Wild Shape");
+  assert.match(result.message, /Sael regains Wild Shape \(2\/2 remaining\)\./);
+});
+
+test("restoreResource restores a partial amount, clamped so it can't exceed max", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    resources: { Rage: { max: 4, current: 1 } }
+  });
+  const result = CampaignOS.restoreResource(withToken, token.id, "Rage", 10);
+  assert.equal(result.state.tokens[0].resources.Rage.current, 4);
+});

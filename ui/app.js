@@ -824,6 +824,21 @@
         <h3 class="subheading">Conditions</h3>
         <div class="conditions"></div>
       </div>
+      <div>
+        <h3 class="subheading">Resources</h3>
+        <div class="resources"></div>
+        <form class="add-resource-control" title="Track a limited class resource -- Rage, Wild Shape, Ki Points, Superiority Dice, Channel Divinity, etc.">
+          <label>
+            Name
+            <input name="name" type="text" placeholder="e.g. Rage">
+          </label>
+          <label>
+            Max
+            <input name="max" type="number" min="1" max="99" value="1">
+          </label>
+          <button type="submit">Add</button>
+        </form>
+      </div>
       <button class="danger-button" type="button" data-action="remove">Remove Token</button>
     `;
 
@@ -980,6 +995,57 @@
       label.innerHTML = `<input type="checkbox" ${token.conditions.includes(condition) ? "checked" : ""}> ${condition}`;
       label.querySelector("input").addEventListener("change", () => updateState(window.CampaignOS.toggleCondition(state, token.id, condition)));
       conditions.appendChild(label);
+    });
+
+    const resourcesContainer = tokenSheet.querySelector(".resources");
+    Object.entries(token.resources || {}).forEach(([name, resource]) => {
+      const row = document.createElement("div");
+      row.className = "resource-row";
+      row.innerHTML = `
+        <span>${escapeHtml(name)}</span>
+        <input type="text" value="${resource.current}/${resource.max}" data-resource-input>
+        <button type="button" data-action="use">Use</button>
+        <button type="button" data-action="restore">Restore</button>
+        <button type="button" data-action="remove" title="Stop tracking ${escapeAttribute(name)}">&times;</button>
+      `;
+      row.querySelector('[data-action="use"]').addEventListener("click", () => {
+        const result = window.CampaignOS.useResource(state, token.id, name);
+        state = result.state;
+        saveEncounter();
+        commandResult.textContent = result.message;
+        render();
+      });
+      row.querySelector('[data-action="restore"]').addEventListener("click", () => {
+        const result = window.CampaignOS.restoreResource(state, token.id, name);
+        state = result.state;
+        saveEncounter();
+        commandResult.textContent = result.message;
+        render();
+      });
+      row.querySelector('[data-action="remove"]').addEventListener("click", () => {
+        updateState(window.CampaignOS.updateToken(state, token.id, { resources: { [name]: null } }));
+      });
+      row.querySelector("[data-resource-input]").addEventListener("change", (event) => {
+        const raw = event.target.value.trim();
+        const [currentPart, maxPart] = raw.split("/").map((part) => part.trim());
+        const max = Number(maxPart ?? currentPart);
+        const current = Number(currentPart);
+        if (!Number.isFinite(max)) return;
+        updateState(window.CampaignOS.updateToken(state, token.id, {
+          resources: { [name]: { max, current: Number.isFinite(current) ? current : max } }
+        }));
+      });
+      resourcesContainer.appendChild(row);
+    });
+
+    const addResourceControl = tokenSheet.querySelector(".add-resource-control");
+    addResourceControl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const formData = new FormData(addResourceControl);
+      const name = String(formData.get("name") || "").trim();
+      const max = Number(formData.get("max"));
+      if (!name || !Number.isFinite(max) || max <= 0) return;
+      updateState(window.CampaignOS.updateToken(state, token.id, { resources: { [name]: { max, current: max } } }));
     });
   }
 
@@ -1886,7 +1952,8 @@
           conditions: token.conditions,
           abilityScores: token.abilityScores,
           spellcasting: token.spellcasting,
-          spellSlots: token.spellSlots
+          spellSlots: token.spellSlots,
+          resources: token.resources
         }))
       },
       createdAt: new Date().toISOString()

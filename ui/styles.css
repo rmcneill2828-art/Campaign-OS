@@ -626,6 +626,55 @@ body[data-fog="on"] .map-tile:hover {
   color: var(--muted);
 }
 
+.resources {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.resource-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px auto auto auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.resource-row span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-row input {
+  width: 100%;
+  text-align: center;
+}
+
+.resource-row button {
+  padding: 0 8px;
+}
+
+.add-resource-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px auto;
+  align-items: end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.add-resource-control label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.add-resource-control input {
+  width: 100%;
+}
+
 .danger-button {
   width: 100%;
   margin-top: 12px;

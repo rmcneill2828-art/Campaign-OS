@@ -4,19 +4,19 @@ AI-native tabletop VTT companion to the DnD campaign repo at
 https://github.com/rmcneill2828-art/DnD (locally, commonly checked out alongside this repo).
 Campaign-OS imports campaign Markdown for characters, locations, and sessions; the DnD repo
 remains the narrative source of truth. As of 2026-07-31 this isn't used for live play yet --
-see that repo's own CLAUDE.md for why (short version: ability scores, saves, and now
-spellcasting/spell slots are modeled; class resources beyond spell slots -- Ki points, Rage
-uses, Superiority Dice, etc. -- still aren't).
+see that repo's own CLAUDE.md for why (short version: ability scores, saves, spellcasting/spell
+slots, and now named class resources -- Ki, Rage, Superiority Dice, etc. -- are all modeled).
 
 See README.md for the full feature list and usage. Notes specific to working on this code:
 
 ## Architecture
 - `engine/` -- pure, DOM-free logic: `encounter.js` (state, tokens, combat, movement, turn
-  order, saving throws, spellcasting/spell slots), `campaign.js` (markdown import/parsing),
-  `dmBridge.js` (translates the Claude DM bridge's actions into engine calls),
-  `characterCreator.js` (5e math + markdown generation for new character sheets). Runnable and
-  unit-tested under Node (`npm test`). Keep it that way: no `document`/`window` DOM access, no
-  async IndexedDB/File System Access calls here -- those belong in `ui/`.
+  order, saving throws, spellcasting/spell slots, named class resources), `campaign.js`
+  (markdown import/parsing), `dmBridge.js` (translates the Claude DM bridge's actions into
+  engine calls), `characterCreator.js` (5e math + markdown generation for new character
+  sheets). Runnable and unit-tested under Node (`npm test`). Keep it that way: no
+  `document`/`window` DOM access, no async IndexedDB/File System Access calls here -- those
+  belong in `ui/`.
 - `ui/` -- browser glue: `app.js` (rendering, event wiring), the IndexedDB-backed stores
   (`imageStore.js`, `tokenLibrary.js`, `mapLibrary.js`, `dmBridgeStore.js`), and the File System
   Access folder-reference layer (`assetFolders.js` persists picked directory handles,
@@ -51,7 +51,9 @@ See README.md for the full feature list and usage. Notes specific to working on 
   outcome; that has to be a separate later command once the DM (or Claude, prompted again) has
   seen the logged result. `cast_spell` has the same limitation for save-based spells (Fireball,
   Hold Person): it only spends the slot, it never bundles a `saving_throw` for you -- Claude has
-  to issue those as separate actions in the same response instead. Don't write system-prompt
+  to issue those as separate actions in the same response instead. `use_resource` is the same
+  again -- it only spends a charge of a named resource and never bundles whatever that
+  resource actually does (an attack, healing, a saving throw). Don't write system-prompt
   guidance that implies otherwise.
 - A token's `abilityScores` object is intentionally sparse (only the abilities actually known
   are present) and `savingThrows` is a sparse *override* map, not a computed value --
@@ -68,6 +70,17 @@ See README.md for the full feature list and usage. Notes specific to working on 
   max-only numbers, since Current Status is the more frequently updated source for what a
   caster actually has left. `castSpell()` mutates a slot's `current` directly and fails outright
   (no state change) with none left at that level; level 0 is a cantrip and never touches slots.
+- A token's `resources` object is a sparse map keyed by free-text resource name (Rage, Wild
+  Shape, Ki Points, Superiority Dice, Channel Divinity, ...), each `{max, current}`, same shape
+  as a spell slot level. Unlike ability scores/saving throws/spellcasting, there is **no**
+  markdown auto-extraction for these -- the Features & Traits prose that describes them is far
+  more heterogeneous per class than the one canonical `**Spellcasting:**` bullet spellcasting
+  reads from, so reliably parsing name/count/recovery-cadence out of arbitrary text was judged
+  too fragile to risk silently mis-tracking a resource during real play. They're entered by hand
+  on the token sheet instead (see `ui/app.js`'s Resources section) -- a deliberate, known gap,
+  documented alongside Troll's Regeneration above. `useResource()`/`restoreResource()` look the
+  resource name up case-insensitively (`findResourceKey()`) so narration/Claude saying "rage"
+  still matches a stored "Rage" key, and return/mutate using the sheet's own stored casing.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

@@ -65,6 +65,17 @@ dependencies to install for the app itself. See Tests, below, for running the te
   spell (Fireball, Hold Person) instead, cast it alone to spend the slot, then issue a separate
   `Roll Save`/`saving_throw` per target using the caster's stated spell save DC, once the
   attack roll or narration decides who's affected.
+- Class resources: any token can track named limited-use resources (Rage, Wild Shape, Ki
+  Points, Superiority Dice, Channel Divinity, Bardic Inspiration, etc.), each with a current
+  and max count. Add one from the token sheet's **Resources** section (name + max, starts
+  full); a **Use** button (or the Claude DM bridge's `use_resource` action -- there's no local
+  command-line phrasing for this one yet, unlike attacks/saves/spells) spends a charge and
+  fails outright once none are left, and **Restore** tops one back up (defaults to full) for
+  whenever a rest happens. Unlike ability scores/saving throws/spellcasting, these are **not**
+  auto-imported from character sheets -- class resources vary too much in name and phrasing
+  across classes to extract reliably from freeform prose, so add them by hand once per
+  character (a one-time setup, same as any other manually-entered field before its own
+  extractor existed).
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes
@@ -140,10 +151,11 @@ The "Claude DM" panel works two ways:
 - **Connected:** commands are handled by a real Claude Code call, which can narrate freely
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
   token on the grid, advance to the next turn, switch to a different prepared map, roll a
-  saving throw, cast a spell), referencing tokens by name and reasoning about the current
-  encounter state -- including where everything stands on the grid, whose turn it is, how
-  much movement each token has left this turn, and each token's ability scores and
-  spellcasting (save DC, attack bonus, remaining slots per level) when known. `next_turn` and
+  saving throw, cast a spell, spend a class resource), referencing tokens by name and
+  reasoning about the current encounter state -- including where everything stands on the
+  grid, whose turn it is, how much movement each token has left this turn, and each token's
+  ability scores, spellcasting (save DC, attack bonus, remaining slots per level), and named
+  resources (Rage, Wild Shape, Ki Points, etc.) when known. `next_turn` and
   `move_token` are what actually let Claude run the turn tracker and RAW speed-limited
   movement described above -- without calling `next_turn`, turn order never starts and
   movement stays unconstrained (which is also the correct default for narration outside
@@ -158,6 +170,10 @@ The "Claude DM" panel works two ways:
   attack against it -- a save-based spell instead needs a separate `saving_throw` per target
   in the same response, using the caster's own stated spell save DC, for the same
   one-shot-batch reason `saving_throw` can't chain into a follow-up effect on its own.
+  `use_resource` spends a charge of a named resource shown in that token's own list and fails
+  outright if none are left or the name doesn't match one it actually has -- like the other
+  compose-only actions above, it never bundles the resource's actual effect (an attack,
+  healing, a saving throw), which still needs its own action in the same response.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than
