@@ -48,9 +48,15 @@
       case "apply_damage": {
         const target = findTokenByName(state, action.target);
         if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to damage.`, alreadyLogged: false };
+        // applyDamage only returns a message when the target was concentrating (a
+        // concentration-check result to fold in) -- it never self-logs, so this base
+        // "takes N damage" line plus whatever it reports still goes through appendLog below
+        // as one combined entry, same as attack()/castSpell() fold it into their own message.
+        const result = window.CampaignOS.applyDamage(state, target.id, action.amount);
+        const baseMessage = `${target.name} takes ${action.amount} damage.`;
         return {
-          state: window.CampaignOS.applyDamage(state, target.id, action.amount),
-          message: `${target.name} takes ${action.amount} damage.`,
+          state: result.state,
+          message: result.message ? `${baseMessage} ${result.message}` : baseMessage,
           alreadyLogged: false
         };
       }
@@ -119,6 +125,7 @@
           spellName: action.spell,
           targetId: target ? target.id : null,
           damageDice: action.damageDice,
+          concentration: Boolean(action.concentration),
           advantage: Boolean(action.advantage),
           disadvantage: Boolean(action.disadvantage)
         });
@@ -128,6 +135,12 @@
         const target = findTokenByName(state, action.target);
         if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to use a resource.`, alreadyLogged: false };
         const result = window.CampaignOS.useResource(state, target.id, action.resource, action.amount);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
+      case "drop_concentration": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to drop concentration.`, alreadyLogged: false };
+        const result = window.CampaignOS.dropConcentration(state, target.id);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
       case "switch_map": {

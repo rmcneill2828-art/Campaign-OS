@@ -56,8 +56,9 @@ const SYSTEM_PROMPT = [
   '{"type": "next_turn"}',
   '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
   '{"type": "saving_throw", "target": "<exact token name>", "ability": "STR|DEX|CON|INT|WIS|CHA", "dc": <integer>}',
-  '{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "advantage": <optional true>, "disadvantage": <optional true>}',
+  '{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "concentration": <optional true, only for a spell that requires concentration>, "advantage": <optional true>, "disadvantage": <optional true>}',
   '{"type": "use_resource", "target": "<exact token name>", "resource": "<exact resource name from that token\'s list below>", "amount": <optional integer, default 1>}',
+  '{"type": "drop_concentration", "target": "<exact token name>"}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -119,6 +120,19 @@ const SYSTEM_PROMPT = [
   "one narration calls for, don't invent one -- narrate around it instead rather than guessing",
   "at a name or count that isn't actually shown.",
   "",
+  "Set concentration: true on cast_spell only for a spell that actually requires concentration",
+  "(you know which spells do from 5e rules -- most buffs/debuffs and many ongoing-damage spells",
+  "do, most instant-effect spells don't). Casting another concentration spell automatically",
+  "ends whatever that caster was already concentrating on -- the engine handles this, you don't",
+  "need a separate drop_concentration for it. You also don't need to manage concentration",
+  "checks yourself: any damage a concentrating token takes automatically rolls a CON save (or",
+  "ends outright with no save if it drops to 0 HP) as part of apply_damage/attack/cast_spell's",
+  "own resolution, and the result is logged for you to react to on a later command -- the same",
+  "one-shot-batch reason saving_throw's outcome isn't visible to you yet either. Each token's",
+  "line below shows \"concentrating on <spell>\" when applicable. Use drop_concentration only",
+  "when a caster voluntarily stops on purpose (not as a reaction to a failed save -- the engine",
+  "already handles that case).",
+  "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
   "but it never overrides the actual token state above, which is always the current truth."
@@ -174,11 +188,14 @@ function isValidAction(action) {
         && Number.isFinite(action.level) && action.level >= 0 && action.level <= 9
         && (action.target === undefined || typeof action.target === "string")
         && (action.damageDice === undefined || typeof action.damageDice === "string")
+        && (action.concentration === undefined || typeof action.concentration === "boolean")
         && (action.advantage === undefined || typeof action.advantage === "boolean")
         && (action.disadvantage === undefined || typeof action.disadvantage === "boolean");
     case "use_resource":
       return typeof action.target === "string" && typeof action.resource === "string"
         && (action.amount === undefined || (Number.isFinite(action.amount) && action.amount > 0));
+    case "drop_concentration":
+      return typeof action.target === "string";
     default:
       return false;
   }
@@ -254,7 +271,8 @@ function buildPrompt(request) {
       const resourcesText = resourceNames.length
         ? `, resources ${resourceNames.map((name) => `${name} ${resources[name].current}/${resources[name].max}`).join(", ")}`
         : "";
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}`);
+      const concentrationText = t.concentratingOn?.spell ? `, concentrating on ${t.concentratingOn.spell}` : "";
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

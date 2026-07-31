@@ -280,6 +280,70 @@ test("applyActions logs an unresolved-name message for a use_resource targeting 
   assert.match(messages[0], /could not find "Nonexistent Goblin" to use a resource/);
 });
 
+test("applyActions passes the concentration flag through cast_spell", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael" }).state;
+
+  const { state: next } = CampaignOSDMBridge.applyActions(state, [
+    { type: "cast_spell", caster: "Sael", spell: "Bless", level: 0, concentration: true }
+  ]);
+
+  const sael = next.tokens.find((t) => t.name === "Sael");
+  assert.deepEqual(sael.concentratingOn, { spell: "Bless" });
+});
+
+test("applyActions resolves a drop_concentration action", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael" }).state;
+  state = CampaignOS.castSpell(state, state.tokens[0].id, { level: 0, spellName: "Bless", concentration: true }).state;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "drop_concentration", target: "Sael" }
+  ]);
+
+  assert.match(messages[0], /Sael stops concentrating on Bless\./);
+  assert.equal(next.tokens.find((t) => t.name === "Sael").concentratingOn, undefined);
+});
+
+test("applyActions logs an unresolved-name message for a drop_concentration targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "drop_concentration", target: "Nonexistent Goblin" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" to drop concentration/);
+});
+
+test("applyActions folds a concentration-check result into apply_damage's combined message", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", hp: 50, maxHp: 50, abilityScores: { CON: 10 } }).state;
+  state = CampaignOS.castSpell(state, state.tokens[0].id, { level: 0, spellName: "Bless", concentration: true }).state;
+
+  // 20 damage -> DC 10; roll 0 -> d20 1 + 0 = 1 < 10: concentration lost.
+  const { state: next, messages } = withRandom([0], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "apply_damage", target: "Sael", amount: 20 }
+  ]));
+
+  assert.match(messages[0], /Sael takes 20 damage\./);
+  assert.match(messages[0], /Loses concentration on Bless/);
+  // state.log already has one entry from the setup castSpell call above; this apply_damage
+  // action should add exactly one more -- a single combined entry (base damage text + the
+  // concentration check), not two separate log lines.
+  assert.equal(next.log.length, 2);
+  assert.match(next.log[0], /Sael takes 20 damage\.[\s\S]*Loses concentration on Bless/);
+  assert.equal(next.tokens.find((t) => t.name === "Sael").concentratingOn, undefined);
+});
+
+test("applyActions leaves apply_damage's message unchanged when the target isn't concentrating on anything", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", hp: 10, maxHp: 10 }).state;
+
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "apply_damage", target: "Goblin 1", amount: 5 }
+  ]);
+
+  assert.equal(messages[0], "Goblin 1 takes 5 damage.");
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

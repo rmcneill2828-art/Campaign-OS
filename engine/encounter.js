@@ -421,6 +421,16 @@
       messages.push(`${caster.name} casts ${spellName}.`);
     }
 
+    // A concentration spell always replaces whatever the caster was already concentrating
+    // on (5e RAW: only one at a time) -- a non-concentration cast (options.concentration
+    // falsy) leaves any existing concentration alone entirely.
+    if (options.concentration) {
+      if (caster.concentratingOn && caster.concentratingOn.spell !== spellName) {
+        messages.push(`${caster.name}'s concentration on ${caster.concentratingOn.spell} ends.`);
+      }
+      caster.concentratingOn = { spell: spellName };
+    }
+
     if (options.targetId) {
       const target = tokensOnCurrentMap(nextState).find((token) => token.id === options.targetId);
       if (target) {
@@ -429,7 +439,11 @@
           const mode = options.disadvantage ? "disadvantage" : options.advantage ? "advantage" : null;
           const result = resolveOneAttack(caster, target, bonus, options.damageDice, mode, spellName);
           messages.push(result.message);
-          if (result.damageTotal > 0) nextState = applyDamage(nextState, target.id, result.damageTotal);
+          if (result.damageTotal > 0) {
+            const damageResult = applyDamage(nextState, target.id, result.damageTotal);
+            nextState = damageResult.state;
+            if (damageResult.message) messages.push(damageResult.message);
+          }
         } else {
           messages.push(`(no stated spell attack bonus for ${caster.name} -- attack roll skipped.)`);
         }
@@ -437,6 +451,25 @@
     }
 
     const message = messages.join(" ");
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // Voluntarily ends whatever a token is concentrating on -- e.g. before casting a
+  // non-concentration spell, or narration just says a caster stops on purpose. A no-op
+  // message (not a failure) if the token wasn't concentrating on anything, same tone as
+  // toggleCondition removing a condition that isn't there.
+  function dropConcentration(state, tokenId) {
+    const nextState = clone(state);
+    const token = nextState.tokens.find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Drop concentration failed: token was not found." };
+
+    if (!token.concentratingOn) {
+      return { state: nextState, message: `${token.name} isn't concentrating on anything.` };
+    }
+
+    const spellName = token.concentratingOn.spell;
+    delete token.concentratingOn;
+    const message = `${token.name} stops concentrating on ${spellName}.`;
     return { state: addLogEntry(nextState, message), message };
   }
 
@@ -483,11 +516,39 @@
     return { state: addLogEntry(nextState, message), message };
   }
 
+  // Applies damage and, if the target is concentrating on a spell, resolves the resulting
+  // concentration check per 5e RAW: dropping to 0 HP ends it outright with no save (an
+  // unconscious creature can't concentrate), otherwise a CON save (DC = max(10, half the
+  // damage, rounded down)) is required to maintain it. Deliberately does NOT self-log the
+  // way rollSavingThrow/useResource do -- damage is applied from several different contexts
+  // (a weapon attack, a spell attack, a flat DM-narrated amount, a manual HP-panel click)
+  // that each already build their own single combined message/log line, so the caller folds
+  // `message` into that rather than getting a second, separately-logged entry for free. See
+  // attack(), castSpell(), dmBridge.js's apply_damage case, and the HP panel's Damage button.
   function applyDamage(state, tokenId, amount) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
-    if (token) token.hp = clampNumber(token.hp - amount, 0, token.maxHp);
-    return nextState;
+    if (!token) return { state: nextState, message: null };
+
+    token.hp = clampNumber(token.hp - amount, 0, token.maxHp);
+    if (!token.concentratingOn || amount <= 0) return { state: nextState, message: null };
+
+    const spellName = token.concentratingOn.spell;
+    if (token.hp === 0) {
+      delete token.concentratingOn;
+      return { state: nextState, message: `${token.name} falls unconscious and loses concentration on ${spellName}.` };
+    }
+
+    const dc = Math.max(10, Math.floor(amount / 2));
+    const bonus = savingThrowBonus(token, "CON");
+    const roll = rollDie(20);
+    const total = roll + bonus;
+    const rollText = `${token.name} rolls a CON save (concentration): ${roll} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dc}.`;
+    if (total >= dc) {
+      return { state: nextState, message: `${rollText} Maintains concentration on ${spellName}.` };
+    }
+    delete token.concentratingOn;
+    return { state: nextState, message: `${rollText} Loses concentration on ${spellName}.` };
   }
 
   function applyHealing(state, tokenId, amount) {
@@ -763,7 +824,9 @@
       const result = resolveOneAttack(attacker, liveTarget, profile.attackBonus, profile.damageDice, mode, useLabel ? profile.name : null);
       messages.push(result.message);
       if (result.damageTotal > 0) {
-        nextState = applyDamage(nextState, target.id, result.damageTotal);
+        const damageResult = applyDamage(nextState, target.id, result.damageTotal);
+        nextState = damageResult.state;
+        if (damageResult.message) messages.push(damageResult.message);
       }
     }
 
@@ -932,14 +995,26 @@
       return rollSavingThrow(state, token.id, saveMatch[2], Number(saveMatch[3]));
     }
 
-    // "<caster> casts <spell> [at <target>] (cantrip|Nth level) [for <damage dice>]" --
-    // the level/cantrip parenthetical is required so this can't misfire on ordinary
-    // narration that happens to contain the word "casts". "at <target>" + "for <dice>"
-    // together trigger a spell attack roll; either or both may be omitted for a
-    // no-attack-roll spell (buffs, utility, or a save the DM resolves separately).
+    // "<caster> casts <spell> [at <target>] (cantrip|Nth level[, concentration]) [for <damage
+    // dice>]" -- the level/cantrip parenthetical is required so this can't misfire on
+    // ordinary narration that happens to contain the word "casts". "at <target>" + "for
+    // <dice>" together trigger a spell attack roll; either or both may be omitted for a
+    // no-attack-roll spell (buffs, utility, or a save the DM resolves separately). The
+    // trailing ", concentration" flag starts (and, if something else was already active,
+    // ends) concentration on this cast -- see castSpell's own comment for the RAW behind it.
     const castMatch = command.match(
-      /^(.+?)\s+casts?\s+(.+?)(?:\s+at\s+(.+?))?\s*\((cantrip|[1-9](?:st|nd|rd|th))(?:\s+level)?\)(?:\s+for\s+(\d*d\d+(?:\s*[+-]\s*\d+)?))?\s*[.!?]?$/i
+      /^(.+?)\s+casts?\s+(.+?)(?:\s+at\s+(.+?))?\s*\((cantrip|[1-9](?:st|nd|rd|th))(?:\s+level)?(,\s*concentration)?\)(?:\s+for\s+(\d*d\d+(?:\s*[+-]\s*\d+)?))?\s*[.!?]?$/i
     );
+
+    // "<caster> stops concentrating" / "<caster> drops concentration" -- voluntarily ends
+    // whatever that token is concentrating on, same as the token sheet's Drop Concentration
+    // button.
+    const dropConcentrationMatch = command.match(/^(.+?)\s+(?:stops?\s+concentrating|drops?\s+concentration)\s*[.!?]?$/i);
+    if (dropConcentrationMatch) {
+      const token = findTokenByName(state, dropConcentrationMatch[1]);
+      if (!token) return { state, message: "I could not find who's concentrating." };
+      return dropConcentration(state, token.id);
+    }
     if (castMatch) {
       const caster = findTokenByName(state, castMatch[1]);
       if (!caster) return { state, message: "I could not find who's casting." };
@@ -953,7 +1028,8 @@
         level,
         spellName: castMatch[2].trim(),
         targetId: target ? target.id : null,
-        damageDice: castMatch[5] ? castMatch[5].replace(/\s+/g, "") : undefined
+        concentration: Boolean(castMatch[5]),
+        damageDice: castMatch[6] ? castMatch[6].replace(/\s+/g, "") : undefined
       });
     }
 
@@ -981,6 +1057,7 @@
   window.CampaignOS = {
     ABILITY_KEYS,
     abilityModifier,
+    addLogEntry,
     applyDamage,
     applyHealing,
     attack,
@@ -988,6 +1065,7 @@
     castSpell,
     conditionList,
     createState,
+    dropConcentration,
     currentGrid,
     feetPerSquare,
     gridMoveCost,

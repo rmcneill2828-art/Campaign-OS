@@ -5,16 +5,17 @@ https://github.com/rmcneill2828-art/DnD (locally, commonly checked out alongside
 Campaign-OS imports campaign Markdown for characters, locations, and sessions; the DnD repo
 remains the narrative source of truth. As of 2026-07-31 this isn't used for live play yet --
 see that repo's own CLAUDE.md for why (short version: ability scores, saves, spellcasting/spell
-slots, and now named class resources -- Ki, Rage, Superiority Dice, etc. -- are all modeled).
+slots, named class resources -- Ki, Rage, Superiority Dice, etc. -- and concentration are all
+modeled now).
 
 See README.md for the full feature list and usage. Notes specific to working on this code:
 
 ## Architecture
 - `engine/` -- pure, DOM-free logic: `encounter.js` (state, tokens, combat, movement, turn
-  order, saving throws, spellcasting/spell slots, named class resources), `campaign.js`
-  (markdown import/parsing), `dmBridge.js` (translates the Claude DM bridge's actions into
-  engine calls), `characterCreator.js` (5e math + markdown generation for new character
-  sheets). Runnable and unit-tested under Node (`npm test`). Keep it that way: no
+  order, saving throws, spellcasting/spell slots, named class resources, concentration),
+  `campaign.js` (markdown import/parsing), `dmBridge.js` (translates the Claude DM bridge's
+  actions into engine calls), `characterCreator.js` (5e math + markdown generation for new
+  character sheets). Runnable and unit-tested under Node (`npm test`). Keep it that way: no
   `document`/`window` DOM access, no async IndexedDB/File System Access calls here -- those
   belong in `ui/`.
 - `ui/` -- browser glue: `app.js` (rendering, event wiring), the IndexedDB-backed stores
@@ -53,8 +54,11 @@ See README.md for the full feature list and usage. Notes specific to working on 
   Hold Person): it only spends the slot, it never bundles a `saving_throw` for you -- Claude has
   to issue those as separate actions in the same response instead. `use_resource` is the same
   again -- it only spends a charge of a named resource and never bundles whatever that
-  resource actually does (an attack, healing, a saving throw). Don't write system-prompt
-  guidance that implies otherwise.
+  resource actually does (an attack, healing, a saving throw). Concentration checks are the
+  one exception to "Claude has to do it in a later command": `applyDamage()` resolves the CON
+  save (or the auto-loss at 0 HP) synchronously, in the same call that deals the damage, and
+  folds the result into that call's own message -- see the next bullet. Don't write
+  system-prompt guidance that implies otherwise for the actions that genuinely can't chain.
 - A token's `abilityScores` object is intentionally sparse (only the abilities actually known
   are present) and `savingThrows` is a sparse *override* map, not a computed value --
   `engine/campaign.js`'s `extractSavingThrows` reads a real sheet's stated bonus (e.g.
@@ -81,6 +85,21 @@ See README.md for the full feature list and usage. Notes specific to working on 
   documented alongside Troll's Regeneration above. `useResource()`/`restoreResource()` look the
   resource name up case-insensitively (`findResourceKey()`) so narration/Claude saying "rage"
   still matches a stored "Rage" key, and return/mutate using the sheet's own stored casing.
+- Concentration: a token's `concentratingOn` field is either absent or `{spell: "<name>"}`.
+  Only `castSpell({concentration: true})` sets it (auto-ending any different spell the same
+  caster was already concentrating on) and `dropConcentration()` clears it voluntarily.
+  **`applyDamage()`'s return shape changed from a bare `state` to `{state, message}`** to carry
+  the concentration-check result (a CON save, DC = max(10, half the damage, rounded down), or
+  an automatic loss with no save if the damage drops the token to 0 HP) -- `message` is `null`
+  when the target isn't concentrating, so most callers are unaffected either way. Unlike
+  `rollSavingThrow()`/`useResource()`, `applyDamage()` deliberately does **not** self-log via
+  `addLogEntry` -- damage is applied from too many different contexts (a weapon attack, a
+  spell attack, a flat DM-narrated amount, the HP panel's manual Damage button) that each
+  already build their own single combined message/log line, so every call site folds
+  `result.message` into its own text instead of getting a second, separately-logged entry for
+  free. If you add a new call site, follow `attack()`/`castSpell()`/`dmBridge.js`'s
+  `apply_damage` case/`ui/app.js`'s Damage button as the four examples of how to do this
+  correctly -- don't reintroduce the old `applyDamage(...).tokens` shape.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

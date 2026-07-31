@@ -742,6 +742,12 @@
         </div>
         <button type="submit">Update</button>
       </form>
+      ${token.concentratingOn ? `
+        <p class="concentration-status">
+          Concentrating on <strong>${escapeHtml(token.concentratingOn.spell)}</strong>
+          <button type="button" data-action="drop-concentration">Drop</button>
+        </p>
+      ` : ""}
       <form class="cast-control" title="Consumes a spell slot (cantrips consume none) and, if a target is picked, rolls a spell attack using this token's stated spell attack bonus.">
         <label>
           Spell
@@ -769,6 +775,9 @@
         <label>
           Damage
           <input name="damageDice" type="text" placeholder="e.g. 4d6">
+        </label>
+        <label class="cast-concentration">
+          <input type="checkbox" name="concentration"> Concentration
         </label>
         <button type="submit">Cast</button>
       </form>
@@ -972,7 +981,8 @@
         level: Number(formData.get("level")),
         spellName: formData.get("spell") || undefined,
         targetId: targetId || null,
-        damageDice: formData.get("damageDice") || undefined
+        damageDice: formData.get("damageDice") || undefined,
+        concentration: Boolean(formData.get("concentration"))
       });
       state = result.state;
       saveEncounter();
@@ -980,9 +990,27 @@
       render();
     });
 
+    const dropConcentrationButton = tokenSheet.querySelector('[data-action="drop-concentration"]');
+    if (dropConcentrationButton) {
+      dropConcentrationButton.addEventListener("click", () => {
+        const result = window.CampaignOS.dropConcentration(state, token.id);
+        state = result.state;
+        saveEncounter();
+        commandResult.textContent = result.message;
+        render();
+      });
+    }
+
     const hpControl = tokenSheet.querySelector(".hp-control");
     const hpAmount = () => Number(new FormData(hpControl).get("amount")) || 1;
-    tokenSheet.querySelector('[data-action="damage"]').addEventListener("click", () => updateState(window.CampaignOS.applyDamage(state, token.id, hpAmount())));
+    tokenSheet.querySelector('[data-action="damage"]').addEventListener("click", () => {
+      const amount = hpAmount();
+      const result = window.CampaignOS.applyDamage(state, token.id, amount);
+      state = result.message ? window.CampaignOS.addLogEntry(result.state, result.message) : result.state;
+      saveEncounter();
+      if (result.message) commandResult.textContent = result.message;
+      render();
+    });
     tokenSheet.querySelector('[data-action="heal"]').addEventListener("click", () => updateState(window.CampaignOS.applyHealing(state, token.id, hpAmount())));
     tokenSheet.querySelector('[data-action="bloodied"]').addEventListener("click", () => updateState(window.CampaignOS.updateToken(state, token.id, { hp: Math.floor(token.maxHp / 2) })));
     tokenSheet.querySelector('[data-action="drop"]').addEventListener("click", () => updateState(window.CampaignOS.updateToken(state, token.id, { hp: 0 })));
@@ -1953,7 +1981,8 @@
           abilityScores: token.abilityScores,
           spellcasting: token.spellcasting,
           spellSlots: token.spellSlots,
-          resources: token.resources
+          resources: token.resources,
+          concentratingOn: token.concentratingOn
         }))
       },
       createdAt: new Date().toISOString()

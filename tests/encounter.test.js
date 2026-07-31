@@ -110,9 +110,10 @@ test("applyDamage and applyHealing clamp HP within [0, maxHp]", () => {
   const { state: withToken, token } = CampaignOS.addToken(state, { name: "Target", hp: 10, maxHp: 10 });
 
   const overdamaged = CampaignOS.applyDamage(withToken, token.id, 999);
-  assert.equal(overdamaged.tokens[0].hp, 0);
+  assert.equal(overdamaged.state.tokens[0].hp, 0);
+  assert.equal(overdamaged.message, null, "no concentration is being tracked, so there's nothing to report");
 
-  const overhealed = CampaignOS.applyHealing(overdamaged, token.id, 999);
+  const overhealed = CampaignOS.applyHealing(overdamaged.state, token.id, 999);
   assert.equal(overhealed.tokens[0].hp, 10);
 });
 
@@ -783,4 +784,140 @@ test("restoreResource restores a partial amount, clamped so it can't exceed max"
   });
   const result = CampaignOS.restoreResource(withToken, token.id, "Rage", 10);
   assert.equal(result.state.tokens[0].resources.Rage.current, 4);
+});
+
+test("castSpell starts concentration on a spell when asked", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael" });
+  const result = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Guidance", concentration: true });
+  assert.deepEqual(result.state.tokens[0].concentratingOn, { spell: "Guidance" });
+  assert.ok(!/ends/.test(result.message), "nothing was concentrating before, so there's no prior spell to end");
+});
+
+test("castSpell ends a different prior concentration spell when casting a new one", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael" });
+  const first = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Guidance", concentration: true });
+  const second = CampaignOS.castSpell(first.state, token.id, { level: 0, spellName: "Moonbeam", concentration: true });
+  assert.match(second.message, /Sael's concentration on Guidance ends\./);
+  assert.deepEqual(second.state.tokens[0].concentratingOn, { spell: "Moonbeam" });
+});
+
+test("castSpell without the concentration flag leaves any existing concentration untouched", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael" });
+  const first = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Guidance", concentration: true });
+  const second = CampaignOS.castSpell(first.state, token.id, { level: 0, spellName: "Fire Bolt" });
+  assert.deepEqual(second.state.tokens[0].concentratingOn, { spell: "Guidance" });
+});
+
+test("applyDamage triggers a concentration CON save and maintains it on a success", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    hp: 50,
+    maxHp: 50,
+    abilityScores: { CON: 14 } // +2 modifier
+  });
+  const concentrating = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Bless", concentration: true }).state;
+
+  // 10 damage -> DC = max(10, floor(10/2)=5) = 10. Roll 0.5 -> d20 11, +2 CON = 13 >= 10: success.
+  const result = withRandom([0.5], () => CampaignOS.applyDamage(concentrating, token.id, 10));
+  assert.match(result.message, /Sael rolls a CON save \(concentration\): 11 \+2 = 13 vs DC 10\. Maintains concentration on Bless\./);
+  assert.deepEqual(result.state.tokens[0].concentratingOn, { spell: "Bless" });
+});
+
+test("applyDamage clears concentration on a failed CON save", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    hp: 50,
+    maxHp: 50,
+    abilityScores: { CON: 10 } // +0 modifier
+  });
+  const concentrating = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Bless", concentration: true }).state;
+
+  // 20 damage -> DC = max(10, 10) = 10. Roll 0 -> d20 1, +0 = 1 < 10: failure.
+  const result = withRandom([0], () => CampaignOS.applyDamage(concentrating, token.id, 20));
+  assert.match(result.message, /Loses concentration on Bless\./);
+  assert.equal(result.state.tokens[0].concentratingOn, undefined);
+});
+
+test("applyDamage ends concentration automatically (no save) when it drops the target to 0 HP", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael", hp: 5, maxHp: 50 });
+  const concentrating = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Bless", concentration: true }).state;
+
+  const result = CampaignOS.applyDamage(concentrating, token.id, 999);
+  assert.equal(result.state.tokens[0].hp, 0);
+  assert.match(result.message, /Sael falls unconscious and loses concentration on Bless\./);
+  assert.ok(!/CON save/.test(result.message), "an unconscious creature auto-loses concentration, no save attempted");
+  assert.equal(result.state.tokens[0].concentratingOn, undefined);
+});
+
+test("applyDamage does nothing concentration-related for a token that isn't concentrating on anything", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Goblin 1", hp: 10, maxHp: 10 });
+  const result = CampaignOS.applyDamage(withToken, token.id, 5);
+  assert.equal(result.message, null);
+});
+
+test("dropConcentration ends an active concentration and logs it", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael" });
+  const concentrating = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Guidance", concentration: true }).state;
+  const result = CampaignOS.dropConcentration(concentrating, token.id);
+  assert.match(result.message, /Sael stops concentrating on Guidance\./);
+  assert.equal(result.state.tokens[0].concentratingOn, undefined);
+});
+
+test("dropConcentration is a harmless no-op when the token wasn't concentrating on anything", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Mara" });
+  const result = CampaignOS.dropConcentration(withToken, token.id);
+  assert.match(result.message, /Mara isn't concentrating on anything\./);
+});
+
+test("dropConcentration reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.dropConcentration(state, "nonexistent-id");
+  assert.match(result.message, /token was not found/);
+  assert.equal(result.state, state);
+});
+
+test("attack folds a concentration check into its combined message when the target is concentrating", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 10, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Sael", ac: 1, hp: 50, maxHp: 50, abilityScores: { CON: 10 } }).state;
+  const [goblin, sael] = state.tokens;
+  state = CampaignOS.castSpell(state, sael.id, { level: 0, spellName: "Bless", concentration: true }).state;
+
+  // d20 15 (0.7) + attackBonus 10 = 25 vs AC 1: hit. Damage rolls next, then the
+  // concentration save rolls last (0 -> guaranteed failure at any plausible DC).
+  const result = withRandom([0.7, 0.5, 0], () => CampaignOS.attack(state, goblin.id, sael.id));
+  assert.match(result.message, /Goblin 1 attacks Sael/);
+  assert.match(result.message, /Loses concentration on Bless/);
+  const foundSael = result.state.tokens.find((t) => t.id === sael.id);
+  assert.equal(foundSael.concentratingOn, undefined);
+});
+
+test("parseCommand resolves a cast-spell command with a concentration flag", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael" }).state;
+  const result = CampaignOS.parseCommand(state, "Sael casts Bless (cantrip, concentration).");
+  assert.deepEqual(result.state.tokens[0].concentratingOn, { spell: "Bless" });
+});
+
+test("parseCommand resolves 'stops concentrating' and 'drops concentration' phrasing", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael" }).state;
+  state = CampaignOS.castSpell(state, state.tokens[0].id, { level: 0, spellName: "Bless", concentration: true }).state;
+
+  const stopped = CampaignOS.parseCommand(state, "Sael stops concentrating.");
+  assert.match(stopped.message, /Sael stops concentrating on Bless\./);
+  assert.equal(stopped.state.tokens[0].concentratingOn, undefined);
+
+  const reCast = CampaignOS.castSpell(state, state.tokens[0].id, { level: 0, spellName: "Bless", concentration: true }).state;
+  const dropped = CampaignOS.parseCommand(reCast, "Sael drops concentration.");
+  assert.match(dropped.message, /Sael stops concentrating on Bless\./);
 });
