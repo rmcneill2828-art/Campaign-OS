@@ -639,7 +639,12 @@
       const movementNote = token.id === activeTokenId
         ? `<small>${Math.max(0, (token.speed ?? 30) - (token.movementUsed || 0))} ft left</small>`
         : "";
-      item.innerHTML = `<button type="button" data-id="${token.id}"><span>${token.name}</span>${movementNote}<strong>${token.initiative}</strong></button>`;
+      const deathBadge = token.dead
+        ? `<small class="death-badge death-badge-dead">DEAD</small>`
+        : token.dying
+          ? `<small class="death-badge death-badge-dying">${token.dying.stable ? "STABLE" : "DYING"}</small>`
+          : "";
+      item.innerHTML = `<button type="button" data-id="${token.id}"><span>${token.name}</span>${deathBadge}${movementNote}<strong>${token.initiative}</strong></button>`;
       item.querySelector("button").addEventListener("click", () => selectToken(token.id));
       initiativeList.appendChild(item);
     });
@@ -663,6 +668,15 @@
         </div>
         <strong>${token.hp} / ${token.maxHp}</strong>
       </div>
+      ${token.dead ? `<p class="death-status death-status-dead">Dead</p>` : ""}
+      ${token.dying && token.dying.stable ? `<p class="death-status death-status-stable">Stable at 0 HP</p>` : ""}
+      ${token.dying && !token.dying.stable ? `
+        <p class="death-status death-status-dying">
+          Dying -- ${token.dying.successes} success${token.dying.successes === 1 ? "" : "es"},
+          ${token.dying.failures} failure${token.dying.failures === 1 ? "" : "s"}
+          <button type="button" data-action="roll-death-save">Roll Death Save</button>
+        </p>
+      ` : ""}
       <div class="token-portrait">
         <div class="portrait-preview">${token.image ? `<img data-portrait-image alt="">` : `<span>${escapeHtml(token.icon)}</span>`}</div>
         <label>
@@ -994,6 +1008,17 @@
     if (dropConcentrationButton) {
       dropConcentrationButton.addEventListener("click", () => {
         const result = window.CampaignOS.dropConcentration(state, token.id);
+        state = result.state;
+        saveEncounter();
+        commandResult.textContent = result.message;
+        render();
+      });
+    }
+
+    const rollDeathSaveButton = tokenSheet.querySelector('[data-action="roll-death-save"]');
+    if (rollDeathSaveButton) {
+      rollDeathSaveButton.addEventListener("click", () => {
+        const result = window.CampaignOS.rollDeathSave(state, token.id);
         state = result.state;
         saveEncounter();
         commandResult.textContent = result.message;
@@ -1982,7 +2007,9 @@
           spellcasting: token.spellcasting,
           spellSlots: token.spellSlots,
           resources: token.resources,
-          concentratingOn: token.concentratingOn
+          concentratingOn: token.concentratingOn,
+          dying: token.dying,
+          dead: token.dead
         }))
       },
       createdAt: new Date().toISOString()

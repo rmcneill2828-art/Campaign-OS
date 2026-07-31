@@ -5,19 +5,19 @@ https://github.com/rmcneill2828-art/DnD (locally, commonly checked out alongside
 Campaign-OS imports campaign Markdown for characters, locations, and sessions; the DnD repo
 remains the narrative source of truth. As of 2026-07-31 this isn't used for live play yet --
 see that repo's own CLAUDE.md for why (short version: ability scores, saves, spellcasting/spell
-slots, named class resources -- Ki, Rage, Superiority Dice, etc. -- and concentration are all
-modeled now).
+slots, named class resources -- Ki, Rage, Superiority Dice, etc. -- concentration, and death
+saves are all modeled now).
 
 See README.md for the full feature list and usage. Notes specific to working on this code:
 
 ## Architecture
 - `engine/` -- pure, DOM-free logic: `encounter.js` (state, tokens, combat, movement, turn
-  order, saving throws, spellcasting/spell slots, named class resources, concentration),
-  `campaign.js` (markdown import/parsing), `dmBridge.js` (translates the Claude DM bridge's
-  actions into engine calls), `characterCreator.js` (5e math + markdown generation for new
-  character sheets). Runnable and unit-tested under Node (`npm test`). Keep it that way: no
-  `document`/`window` DOM access, no async IndexedDB/File System Access calls here -- those
-  belong in `ui/`.
+  order, saving throws, spellcasting/spell slots, named class resources, concentration, death
+  saves), `campaign.js` (markdown import/parsing), `dmBridge.js` (translates the Claude DM
+  bridge's actions into engine calls), `characterCreator.js` (5e math + markdown generation
+  for new character sheets). Runnable and unit-tested under Node (`npm test`). Keep it that
+  way: no `document`/`window` DOM access, no async IndexedDB/File System Access calls here --
+  those belong in `ui/`.
 - `ui/` -- browser glue: `app.js` (rendering, event wiring), the IndexedDB-backed stores
   (`imageStore.js`, `tokenLibrary.js`, `mapLibrary.js`, `dmBridgeStore.js`), and the File System
   Access folder-reference layer (`assetFolders.js` persists picked directory handles,
@@ -54,11 +54,15 @@ See README.md for the full feature list and usage. Notes specific to working on 
   Hold Person): it only spends the slot, it never bundles a `saving_throw` for you -- Claude has
   to issue those as separate actions in the same response instead. `use_resource` is the same
   again -- it only spends a charge of a named resource and never bundles whatever that
-  resource actually does (an attack, healing, a saving throw). Concentration checks are the
-  one exception to "Claude has to do it in a later command": `applyDamage()` resolves the CON
-  save (or the auto-loss at 0 HP) synchronously, in the same call that deals the damage, and
-  folds the result into that call's own message -- see the next bullet. Don't write
-  system-prompt guidance that implies otherwise for the actions that genuinely can't chain.
+  resource actually does (an attack, healing, a saving throw). Concentration checks and
+  starting/continuing death saves are the exceptions to "Claude has to do it in a later
+  command": `applyDamage()` resolves the CON save (or the auto-loss at 0 HP), and starts
+  death-save tracking or applies an automatic failed death save, synchronously in the same
+  call that deals the damage, folding the result into that call's own message -- see the next
+  two bullets. The one death-save piece Claude DOES have to trigger explicitly is
+  `roll_death_save` for a dying token's own turn, since turn order is something only Claude
+  (via the DM's narration/`next_turn`) tracks, not the engine. Don't write system-prompt
+  guidance that implies otherwise for the actions that genuinely can't chain.
 - A token's `abilityScores` object is intentionally sparse (only the abilities actually known
   are present) and `savingThrows` is a sparse *override* map, not a computed value --
   `engine/campaign.js`'s `extractSavingThrows` reads a real sheet's stated bonus (e.g.
@@ -88,18 +92,37 @@ See README.md for the full feature list and usage. Notes specific to working on 
 - Concentration: a token's `concentratingOn` field is either absent or `{spell: "<name>"}`.
   Only `castSpell({concentration: true})` sets it (auto-ending any different spell the same
   caster was already concentrating on) and `dropConcentration()` clears it voluntarily.
-  **`applyDamage()`'s return shape changed from a bare `state` to `{state, message}`** to carry
-  the concentration-check result (a CON save, DC = max(10, half the damage, rounded down), or
-  an automatic loss with no save if the damage drops the token to 0 HP) -- `message` is `null`
-  when the target isn't concentrating, so most callers are unaffected either way. Unlike
-  `rollSavingThrow()`/`useResource()`, `applyDamage()` deliberately does **not** self-log via
-  `addLogEntry` -- damage is applied from too many different contexts (a weapon attack, a
-  spell attack, a flat DM-narrated amount, the HP panel's manual Damage button) that each
-  already build their own single combined message/log line, so every call site folds
-  `result.message` into its own text instead of getting a second, separately-logged entry for
-  free. If you add a new call site, follow `attack()`/`castSpell()`/`dmBridge.js`'s
+  **`applyDamage()`'s return shape changed from a bare `state` to `{state, message}`** (and it
+  now takes an optional third `options` argument, `{critical}`) to carry the concentration
+  check (a CON save, DC = max(10, half the damage, rounded down), or an automatic loss with no
+  save if the damage drops the token to 0 HP) and death-save bookkeeping -- `message` is
+  `null` when neither applies, so most callers are unaffected either way. Unlike
+  `rollSavingThrow()`/`useResource()`/`rollDeathSave()`, `applyDamage()` deliberately does
+  **not** self-log via `addLogEntry` -- damage is applied from too many different contexts (a
+  weapon attack, a spell attack, a flat DM-narrated amount, the HP panel's manual Damage
+  button) that each already build their own single combined message/log line, so every call
+  site folds `result.message` into its own text instead of getting a second, separately-logged
+  entry for free. If you add a new call site, follow `attack()`/`castSpell()`/`dmBridge.js`'s
   `apply_damage` case/`ui/app.js`'s Damage button as the four examples of how to do this
   correctly -- don't reintroduce the old `applyDamage(...).tokens` shape.
+- Death saves: a token's `dying` field is either absent or `{successes, failures, stable}`; a
+  separate `dead` boolean flag is set once it dies. `applyDamage()` starts `dying` the instant
+  a token's hp goes from above 0 to exactly 0 (also ending any concentration, no save), and
+  treats further damage to an already-0-HP token as an automatic failed death save -- two on a
+  critical hit (pass `{critical: true}` -- `attack()`/`castSpell()` already do, from
+  `resolveOneAttack()`'s own `isCritical`) -- rather than a roll, killing it outright at 3
+  failures. `rollDeathSave()` is the actual d20 roll (10+ succeeds, a natural 1 is two
+  failures at once, a natural 20 revives at 1 HP outright), self-logging like
+  `rollSavingThrow()`/`useResource()` since it's its own atomic event; a no-op if the token
+  isn't currently making death saves (not down, already stable, or already dead) rather than
+  an error. `applyHealing()` and `updateToken()`'s `hp` change both clear `dying`/`dead` once
+  hp is above 0 again -- healing a `dead` token is treated as a deliberate revival (Revivify,
+  Raise Dead, a DM ruling), not blocked. `attack()`'s Multiattack loop was changed to allow
+  attacking a target that's already at 0 HP (a real, meaningful hit -- an automatic failed
+  save) while still stopping further sub-attacks once *this* action's own hits bring the
+  target to/keep it at 0, so re-read that loop's comment before touching it again. This
+  applies uniformly to every token type -- a deliberate simplification of RAW, which reserves
+  death saves for PCs and leaves monsters to the DM's discretion at 0 HP.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

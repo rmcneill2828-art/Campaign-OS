@@ -86,6 +86,23 @@ dependencies to install for the app itself. See Tests, below, for running the te
   track down). Dropping to 0 HP ends concentration outright with no save, same as an
   unconscious creature really can't concentrate. Drop it voluntarily anytime with the **Drop**
   button (or `<name> stops concentrating`, or `drop_concentration`).
+- Death saves: a token that drops from above 0 HP to exactly 0 automatically starts making
+  death saves -- shown on its sheet as **Dying -- N successes, N failures** with a **Roll
+  Death Save** button (or `<name> rolls a death save`, or the Claude DM bridge's
+  `roll_death_save` action). A flat d20, no modifiers: 10+ succeeds, anything else fails (a
+  natural 1 counts as two failures at once), a natural 20 instead springs the token back to 1
+  HP immediately. Three successes **stabilizes** it (still down, but no more rolling required
+  until it takes damage again); three failures and it **dies**. Any damage taken while already
+  at 0 HP is an automatic failed save -- two on a critical hit -- not something you roll for;
+  this applies whether the hit comes from a weapon attack, a spell attack, or a flat
+  DM-narrated amount. Healing back above 0 HP (or a manual HP edit) clears the tracker --
+  including a dead flag, if the DM/Claude chooses to heal a dead token as a deliberate
+  revival (Revivify, Raise Dead, a ruling). The initiative list also shows a small DYING/
+  STABLE/DEAD badge next to a token's name for at-a-glance status. This is a deliberate
+  simplification of the real 5e monster-vs-PC distinction -- RAW reserves death saves for
+  PCs and leaves monsters to the DM's judgment at 0 HP, but this engine applies the same
+  tracker to every token type; a monster the DM just wants to consider dead at 0 HP can
+  simply be left alone or edited directly.
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes
@@ -161,12 +178,13 @@ The "Claude DM" panel works two ways:
 - **Connected:** commands are handled by a real Claude Code call, which can narrate freely
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
   token on the grid, advance to the next turn, switch to a different prepared map, roll a
-  saving throw, cast a spell, spend a class resource, start or drop concentration),
-  referencing tokens by name and reasoning about the current encounter state -- including
-  where everything stands on the grid, whose turn it is, how much movement each token has
-  left this turn, each token's ability scores, spellcasting (save DC, attack bonus, remaining
-  slots per level), named resources (Rage, Wild Shape, Ki Points, etc.), and what it's
-  currently concentrating on, when known. `next_turn` and
+  saving throw, cast a spell, spend a class resource, start or drop concentration, roll a
+  death save), referencing tokens by name and reasoning about the current encounter state --
+  including where everything stands on the grid, whose turn it is, how much movement each
+  token has left this turn, each token's ability scores, spellcasting (save DC, attack bonus,
+  remaining slots per level), named resources (Rage, Wild Shape, Ki Points, etc.), what it's
+  currently concentrating on, and its death-save status (dying/stable/dead), when known.
+  `next_turn` and
   `move_token` are what actually let Claude run the turn tracker and RAW speed-limited
   movement described above -- without calling `next_turn`, turn order never starts and
   movement stays unconstrained (which is also the correct default for narration outside
@@ -189,7 +207,11 @@ The "Claude DM" panel works two ways:
   the same caster was concentrating on); from then on, `apply_damage`/`attack`/`cast_spell`
   dealing damage to that token automatically rolls the CON save (or ends it outright at 0 HP)
   and folds the result into that same action's message -- Claude never has to manage the
-  check itself. `drop_concentration` only covers a caster stopping on purpose.
+  check itself. `drop_concentration` only covers a caster stopping on purpose. Death saves
+  work the same way for damage: a token dropping to 0 HP starts them, and further damage
+  taken while already down is an automatic failure folded into that same action's message --
+  Claude only has to explicitly call `roll_death_save` when a dying token's turn comes up
+  (per `next_turn`), since the engine has no notion of turn order on its own.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than

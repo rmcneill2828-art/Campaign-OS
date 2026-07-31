@@ -111,10 +111,11 @@ test("applyDamage and applyHealing clamp HP within [0, maxHp]", () => {
 
   const overdamaged = CampaignOS.applyDamage(withToken, token.id, 999);
   assert.equal(overdamaged.state.tokens[0].hp, 0);
-  assert.equal(overdamaged.message, null, "no concentration is being tracked, so there's nothing to report");
+  assert.match(overdamaged.message, /Target drops to 0 HP and starts making death saves\./);
 
   const overhealed = CampaignOS.applyHealing(overdamaged.state, token.id, 999);
   assert.equal(overhealed.tokens[0].hp, 10);
+  assert.equal(overhealed.tokens[0].dying, undefined, "healing back above 0 should clear the death-save tracker");
 });
 
 test("attack always misses on a natural 1, regardless of attack bonus", () => {
@@ -920,4 +921,184 @@ test("parseCommand resolves 'stops concentrating' and 'drops concentration' phra
   const reCast = CampaignOS.castSpell(state, state.tokens[0].id, { level: 0, spellName: "Bless", concentration: true }).state;
   const dropped = CampaignOS.parseCommand(reCast, "Sael drops concentration.");
   assert.match(dropped.message, /Sael stops concentrating on Bless\./);
+});
+
+test("applyDamage starts death saves when a token drops from above 0 to exactly 0 HP", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 100 });
+  const result = CampaignOS.applyDamage(withToken, token.id, 10);
+  assert.deepEqual(result.state.tokens[0].dying, { successes: 0, failures: 0, stable: false });
+  assert.match(result.message, /Darkhawk drops to 0 HP and starts making death saves\./);
+});
+
+test("rollDeathSave is a no-op when the token isn't currently making death saves", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 10 });
+  const result = CampaignOS.rollDeathSave(withToken, token.id);
+  assert.match(result.message, /Darkhawk isn't making death saves right now\./);
+});
+
+test("rollDeathSave accumulates successes and stabilizes on the 3rd", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+  const tokenId = state.tokens[0].id;
+
+  // 0.45 -> d20 10, a success (10+ succeeds).
+  const first = withRandom([0.45], () => CampaignOS.rollDeathSave(state, tokenId));
+  assert.match(first.message, /success \(1\/3\)/);
+  const second = withRandom([0.45], () => CampaignOS.rollDeathSave(first.state, tokenId));
+  assert.match(second.message, /success \(2\/3\)/);
+  const third = withRandom([0.45], () => CampaignOS.rollDeathSave(second.state, tokenId));
+  assert.match(third.message, /success \(3\/3\)/);
+  assert.match(third.message, /Darkhawk stabilizes\./);
+  assert.deepEqual(third.state.tokens[0].dying, { successes: 3, failures: 0, stable: true });
+});
+
+test("rollDeathSave accumulates failures and kills on the 3rd", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+  const tokenId = state.tokens[0].id;
+
+  // 0.4 -> d20 9, a failure (below 10 fails).
+  const first = withRandom([0.4], () => CampaignOS.rollDeathSave(state, tokenId));
+  assert.match(first.message, /failure \(1\/3\)/);
+  const second = withRandom([0.4], () => CampaignOS.rollDeathSave(first.state, tokenId));
+  assert.match(second.message, /failure \(2\/3\)/);
+  const third = withRandom([0.4], () => CampaignOS.rollDeathSave(second.state, tokenId));
+  assert.match(third.message, /failure \(3\/3\)/);
+  assert.match(third.message, /Darkhawk dies\./);
+  assert.equal(third.state.tokens[0].dying, undefined);
+  assert.equal(third.state.tokens[0].dead, true);
+});
+
+test("rollDeathSave counts a natural 1 as two failures at once", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+
+  const result = withRandom([0], () => CampaignOS.rollDeathSave(state, state.tokens[0].id));
+  assert.match(result.message, /rolls a 1 on their death save -- 2 failures \(2\/3\)/);
+  assert.equal(result.state.tokens[0].dying.failures, 2);
+});
+
+test("rollDeathSave revives the token at 1 HP on a natural 20", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+
+  const result = withRandom([0.999999], () => CampaignOS.rollDeathSave(state, state.tokens[0].id));
+  assert.match(result.message, /rolls a natural 20 on their death save and springs back to 1 HP/);
+  assert.equal(result.state.tokens[0].hp, 1);
+  assert.equal(result.state.tokens[0].dying, undefined);
+});
+
+test("rollDeathSave refuses to roll once the token is already stable", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+  const tokenId = state.tokens[0].id;
+  state = withRandom([0.45], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+  state = withRandom([0.45], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+  state = withRandom([0.45], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+
+  const result = CampaignOS.rollDeathSave(state, tokenId);
+  assert.match(result.message, /already stable and doesn't need to roll/);
+});
+
+test("rollDeathSave reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.rollDeathSave(state, "nonexistent-id");
+  assert.match(result.message, /token was not found/);
+  assert.equal(result.state, state);
+});
+
+test("applyDamage counts damage taken while already down as one automatic failed death save", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+
+  const result = CampaignOS.applyDamage(state, state.tokens[0].id, 5);
+  assert.match(result.message, /1 automatic failed death save \(1\/3 failures\)\./);
+  assert.equal(result.state.tokens[0].dying.failures, 1);
+});
+
+test("applyDamage counts a critical hit while already down as two automatic failed death saves", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+
+  const result = CampaignOS.applyDamage(state, state.tokens[0].id, 5, { critical: true });
+  assert.match(result.message, /2 automatic failed death saves \(critical hit\) \(2\/3 failures\)\./);
+  assert.equal(result.state.tokens[0].dying.failures, 2);
+});
+
+test("applyDamage kills a token whose automatic failures while down reach 3", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state; // down, 0 failures
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 5).state; // 1 failure
+
+  const result = CampaignOS.applyDamage(state, state.tokens[0].id, 5, { critical: true }); // +2 -> 3
+  assert.match(result.message, /Darkhawk dies\./);
+  assert.equal(result.state.tokens[0].dead, true);
+  assert.equal(result.state.tokens[0].dying, undefined);
+});
+
+test("applyDamage does nothing death-save-related once a token is already dead", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 5).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 5, { critical: true }).state; // now dead
+
+  const result = CampaignOS.applyDamage(state, state.tokens[0].id, 5);
+  assert.equal(result.message, null);
+});
+
+test("applyHealing clears the death-save tracker and a dead flag when it brings a token back above 0 HP", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 5).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 5, { critical: true }).state; // dead
+
+  const healed = CampaignOS.applyHealing(state, state.tokens[0].id, 10);
+  assert.equal(healed.tokens[0].hp, 10);
+  assert.equal(healed.tokens[0].dead, undefined);
+  assert.equal(healed.tokens[0].dying, undefined);
+});
+
+test("updateToken clears the death-save tracker and a dead flag when hp is manually edited above 0", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+
+  const updated = CampaignOS.updateToken(state, state.tokens[0].id, { hp: 50 });
+  assert.equal(updated.tokens[0].dying, undefined);
+});
+
+test("attack allows hitting a target already at 0 HP, counting the hit as an automatic failed death save", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 20, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Darkhawk", ac: 1, hp: 1, maxHp: 100 }).state;
+  const [goblin, darkhawk] = state.tokens;
+  state = CampaignOS.applyDamage(state, darkhawk.id, 1).state; // Darkhawk is down, dying
+
+  // d20 15 (0.7) + 20 = 35 vs AC 1: guaranteed hit.
+  const result = withRandom([0.7, 0.5], () => CampaignOS.attack(state, goblin.id, darkhawk.id));
+  assert.match(result.message, /Goblin 1 attacks Darkhawk/);
+  assert.match(result.message, /automatic failed death save/);
+  const foundDarkhawk = result.state.tokens.find((t) => t.id === darkhawk.id);
+  assert.equal(foundDarkhawk.dying.failures, 1);
+});
+
+test("parseCommand resolves a death-save command by token name", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+
+  const result = withRandom([0.45], () => CampaignOS.parseCommand(state, "Darkhawk rolls a death save."));
+  assert.match(result.message, /success \(1\/3\)/);
 });

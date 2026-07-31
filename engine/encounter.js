@@ -440,7 +440,7 @@
           const result = resolveOneAttack(caster, target, bonus, options.damageDice, mode, spellName);
           messages.push(result.message);
           if (result.damageTotal > 0) {
-            const damageResult = applyDamage(nextState, target.id, result.damageTotal);
+            const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical });
             nextState = damageResult.state;
             if (damageResult.message) messages.push(damageResult.message);
           }
@@ -516,45 +516,137 @@
     return { state: addLogEntry(nextState, message), message };
   }
 
-  // Applies damage and, if the target is concentrating on a spell, resolves the resulting
-  // concentration check per 5e RAW: dropping to 0 HP ends it outright with no save (an
-  // unconscious creature can't concentrate), otherwise a CON save (DC = max(10, half the
-  // damage, rounded down)) is required to maintain it. Deliberately does NOT self-log the
-  // way rollSavingThrow/useResource do -- damage is applied from several different contexts
-  // (a weapon attack, a spell attack, a flat DM-narrated amount, a manual HP-panel click)
-  // that each already build their own single combined message/log line, so the caller folds
-  // `message` into that rather than getting a second, separately-logged entry for free. See
-  // attack(), castSpell(), dmBridge.js's apply_damage case, and the HP panel's Damage button.
-  function applyDamage(state, tokenId, amount) {
+  // Applies damage and resolves whatever it triggers -- a concentration check if the target
+  // was concentrating, and/or death-save bookkeeping if it's at (or drops to) 0 HP:
+  //   - Still conscious after this hit, and concentrating: the normal CON save (DC = max(10,
+  //     half the damage, rounded down)) to maintain it.
+  //   - Drops from above 0 to exactly 0 this hit: concentration ends outright with no save
+  //     (an unconscious creature can't concentrate), and death saves start (skipped if the
+  //     token is already flagged dead, which shouldn't normally coincide with hp > 0 anyway).
+  //   - Already at 0 HP and takes MORE damage: that's an automatic failed death save per RAW
+  //     (not a roll) -- two failures instead of one if `options.critical` is set, same as a
+  //     real critical hit against a downed creature. Three failures kills outright.
+  // Every token type is treated the same here (RAW technically reserves death saves for PCs,
+  // leaving monsters to the DM's judgment) -- a deliberate simplification; a monster the DM
+  // just wants to treat as dead at 0 HP can simply be left alone or edited directly.
+  // Deliberately does NOT self-log the way rollSavingThrow/rollDeathSave do -- damage is
+  // applied from several different contexts (a weapon attack, a spell attack, a flat
+  // DM-narrated amount, a manual HP-panel click) that each already build their own single
+  // combined message/log line, so the caller folds `message` into that rather than getting a
+  // second, separately-logged entry for free. See attack(), castSpell(), dmBridge.js's
+  // apply_damage case, and the HP panel's Damage button.
+  function applyDamage(state, tokenId, amount, options = {}) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
     if (!token) return { state: nextState, message: null };
 
+    const wasAboveZero = token.hp > 0;
     token.hp = clampNumber(token.hp - amount, 0, token.maxHp);
-    if (!token.concentratingOn || amount <= 0) return { state: nextState, message: null };
+    if (amount <= 0) return { state: nextState, message: null };
 
-    const spellName = token.concentratingOn.spell;
-    if (token.hp === 0) {
-      delete token.concentratingOn;
-      return { state: nextState, message: `${token.name} falls unconscious and loses concentration on ${spellName}.` };
+    const messages = [];
+
+    if (wasAboveZero && token.hp === 0) {
+      if (token.concentratingOn) {
+        messages.push(`${token.name} falls unconscious and loses concentration on ${token.concentratingOn.spell}.`);
+        delete token.concentratingOn;
+      }
+      if (!token.dead) {
+        token.dying = { successes: 0, failures: 0, stable: false };
+        messages.push(`${token.name} drops to 0 HP and starts making death saves.`);
+      }
+    } else if (wasAboveZero) {
+      if (token.concentratingOn) {
+        const spellName = token.concentratingOn.spell;
+        const dc = Math.max(10, Math.floor(amount / 2));
+        const bonus = savingThrowBonus(token, "CON");
+        const roll = rollDie(20);
+        const total = roll + bonus;
+        const rollText = `${token.name} rolls a CON save (concentration): ${roll} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dc}.`;
+        if (total >= dc) {
+          messages.push(`${rollText} Maintains concentration on ${spellName}.`);
+        } else {
+          delete token.concentratingOn;
+          messages.push(`${rollText} Loses concentration on ${spellName}.`);
+        }
+      }
+    } else if (token.dying && !token.dying.stable) {
+      const failCount = options.critical ? 2 : 1;
+      token.dying.failures += failCount;
+      messages.push(`${token.name} takes damage while down: ${failCount > 1 ? "2 automatic failed death saves (critical hit)" : "1 automatic failed death save"} (${token.dying.failures}/3 failures).`);
+      if (token.dying.failures >= 3) {
+        delete token.dying;
+        token.dead = true;
+        messages.push(`${token.name} dies.`);
+      }
     }
 
-    const dc = Math.max(10, Math.floor(amount / 2));
-    const bonus = savingThrowBonus(token, "CON");
-    const roll = rollDie(20);
-    const total = roll + bonus;
-    const rollText = `${token.name} rolls a CON save (concentration): ${roll} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dc}.`;
-    if (total >= dc) {
-      return { state: nextState, message: `${rollText} Maintains concentration on ${spellName}.` };
-    }
-    delete token.concentratingOn;
-    return { state: nextState, message: `${rollText} Loses concentration on ${spellName}.` };
+    return { state: nextState, message: messages.length ? messages.join(" ") : null };
   }
 
+  // Rolls a death saving throw for a token currently making them: a flat d20, no modifiers.
+  // 10+ succeeds, anything else fails (a natural 1 counts as two failures at once); a natural
+  // 20 instead regains 1 HP and consciousness immediately. Three successes stabilizes (still
+  // unconscious at 0 HP, but no longer rolling); three failures kills. A no-op (not a
+  // failure) if the token isn't actually making death saves right now -- not down, already
+  // stable, or already dead. Self-logs, same as rollSavingThrow/useResource -- this is its own
+  // atomic, player-visible event, not something folded into a wider action's message.
+  function rollDeathSave(state, tokenId) {
+    const nextState = clone(state);
+    const token = nextState.tokens.find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Death save failed: token was not found." };
+
+    if (!token.dying) {
+      return { state: nextState, message: `${token.name} isn't making death saves right now.` };
+    }
+    if (token.dying.stable) {
+      return { state: nextState, message: `${token.name} is already stable and doesn't need to roll.` };
+    }
+
+    const roll = rollDie(20);
+    let message;
+
+    if (roll === 20) {
+      token.hp = clampNumber(1, 0, token.maxHp);
+      delete token.dying;
+      message = `${token.name} rolls a natural 20 on their death save and springs back to 1 HP!`;
+    } else if (roll === 1) {
+      token.dying.failures += 2;
+      message = `${token.name} rolls a 1 on their death save -- 2 failures (${token.dying.failures}/3).`;
+    } else if (roll >= 10) {
+      token.dying.successes += 1;
+      message = `${token.name} rolls ${roll} on their death save -- success (${token.dying.successes}/3).`;
+    } else {
+      token.dying.failures += 1;
+      message = `${token.name} rolls ${roll} on their death save -- failure (${token.dying.failures}/3).`;
+    }
+
+    if (token.dying && token.dying.failures >= 3) {
+      delete token.dying;
+      token.dead = true;
+      message += ` ${token.name} dies.`;
+    } else if (token.dying && token.dying.successes >= 3) {
+      token.dying.stable = true;
+      message += ` ${token.name} stabilizes.`;
+    }
+
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // Healing that brings a token back above 0 HP ends any in-progress death-save tracking
+  // (dying or already-stable) and clears a dead flag too -- if the caller chose to heal a
+  // token flagged dead, that's a deliberate narrative revival (Revivify, Raise Dead, DM
+  // ruling), not something this engine should second-guess.
   function applyHealing(state, tokenId, amount) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
-    if (token) token.hp = clampNumber(token.hp + amount, 0, token.maxHp);
+    if (token) {
+      token.hp = clampNumber(token.hp + amount, 0, token.maxHp);
+      if (token.hp > 0) {
+        delete token.dying;
+        delete token.dead;
+      }
+    }
     return nextState;
   }
 
@@ -581,6 +673,12 @@
 
     if (changes.hp !== undefined) {
       token.hp = clampNumber(changes.hp, 0, token.maxHp);
+      // A manual hp edit above 0 is a deliberate correction/revival -- same reasoning as
+      // applyHealing clearing dying/dead, just via the token editor instead of a heal.
+      if (token.hp > 0) {
+        delete token.dying;
+        delete token.dead;
+      }
     }
 
     if (changes.initiative !== undefined) {
@@ -782,6 +880,7 @@
     if (isMiss) {
       return {
         damageTotal: 0,
+        isCritical: false,
         message: `${actorLabel} attacks ${target.name}: ${rollLabel} + ${bonus} = ${total} vs AC ${targetAc}. Miss.`
       };
     }
@@ -793,14 +892,19 @@
     const critText = isCritical ? " Critical hit." : "";
     return {
       damageTotal,
+      isCritical,
       message: `${actorLabel} attacks ${target.name}: ${rollLabel} + ${bonus} = ${total} vs AC ${targetAc}. Hit.${critText} Damage ${damageTotal} (${damage.notation}).`
     };
   }
 
   // options: { advantage: bool, disadvantage: bool } -- applies to every d20 rolled this
   // call. If the attacker has an `attacks` array (Multiattack, e.g. a troll's Bite + two
-  // Claws), each one resolves in order against the same target, stopping early if the
-  // target drops to 0 HP so a dead target doesn't keep eating attack rolls.
+  // Claws), each one resolves in order against the same target, stopping early once this
+  // action's own hits leave the target at 0 HP (so a Bite that drops them doesn't also get
+  // followed by two more Claws in the same action). This does NOT block starting an attack
+  // against a target that was already at 0 HP before this call -- that's a real, meaningful
+  // hit against a downed creature (an automatic failed death save, see applyDamage), not a
+  // dead action; only a target removed from the map entirely stops the loop outright.
   function attack(state, attackerId, targetId, options = {}) {
     let nextState = clone(state);
     const activeTokens = tokensOnCurrentMap(nextState);
@@ -819,15 +923,18 @@
     const messages = [];
     for (const profile of profiles) {
       const liveTarget = tokensOnCurrentMap(nextState).find((token) => token.id === target.id);
-      if (!liveTarget || liveTarget.hp <= 0) break;
+      if (!liveTarget) break;
 
       const result = resolveOneAttack(attacker, liveTarget, profile.attackBonus, profile.damageDice, mode, useLabel ? profile.name : null);
       messages.push(result.message);
       if (result.damageTotal > 0) {
-        const damageResult = applyDamage(nextState, target.id, result.damageTotal);
+        const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical });
         nextState = damageResult.state;
         if (damageResult.message) messages.push(damageResult.message);
       }
+
+      const updatedTarget = tokensOnCurrentMap(nextState).find((token) => token.id === target.id);
+      if (!updatedTarget || updatedTarget.hp <= 0) break;
     }
 
     const message = messages.join(" ");
@@ -1015,6 +1122,15 @@
       if (!token) return { state, message: "I could not find who's concentrating." };
       return dropConcentration(state, token.id);
     }
+
+    // "<name> rolls a death save" / "<name> rolls a death saving throw" -- same roll the
+    // token sheet's Roll Death Save button makes.
+    const deathSaveMatch = command.match(/^(.+?)\s+rolls?\s+an?\s+death\s+sav(?:e|ing throw)s?\s*[.!?]?$/i);
+    if (deathSaveMatch) {
+      const token = findTokenByName(state, deathSaveMatch[1]);
+      if (!token) return { state, message: "I could not find who's rolling a death save." };
+      return rollDeathSave(state, token.id);
+    }
     if (castMatch) {
       const caster = findTokenByName(state, castMatch[1]);
       if (!caster) return { state, message: "I could not find who's casting." };
@@ -1075,6 +1191,7 @@
     parseCommand,
     removeToken,
     restoreResource,
+    rollDeathSave,
     rollSavingThrow,
     savingThrowBonus,
     useResource,

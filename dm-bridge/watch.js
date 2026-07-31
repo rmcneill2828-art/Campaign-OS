@@ -59,6 +59,7 @@ const SYSTEM_PROMPT = [
   '{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "concentration": <optional true, only for a spell that requires concentration>, "advantage": <optional true>, "disadvantage": <optional true>}',
   '{"type": "use_resource", "target": "<exact token name>", "resource": "<exact resource name from that token\'s list below>", "amount": <optional integer, default 1>}',
   '{"type": "drop_concentration", "target": "<exact token name>"}',
+  '{"type": "roll_death_save", "target": "<exact token name>"}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -133,6 +134,17 @@ const SYSTEM_PROMPT = [
   "when a caster voluntarily stops on purpose (not as a reaction to a failed save -- the engine",
   "already handles that case).",
   "",
+  "Death saves are also mostly automatic. A token dropping from above 0 to exactly 0 HP (from",
+  "attack, apply_damage, or cast_spell) starts them on its own -- you don't set anything up.",
+  "Further damage to a token already at 0 HP is an automatic failed death save (two if it was a",
+  "critical hit), not a roll, and is also handled for you as part of whatever action dealt that",
+  "damage. What you DO need to do: call roll_death_save for a token that is down (its line below",
+  "says \"dying\") once its turn comes up, unless it's already \"stable\" -- that's the one place",
+  "this needs an explicit action, since the engine has no way to know whose turn it is on its",
+  "own. A natural 20 revives it at 1 HP, three successes stabilizes it (no more rolls needed",
+  "until it takes damage again), three failures kills it -- react to whichever happened using",
+  "the result logged, the same as any other roll you don't see the outcome of in advance.",
+  "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
   "but it never overrides the actual token state above, which is always the current truth."
@@ -195,6 +207,7 @@ function isValidAction(action) {
       return typeof action.target === "string" && typeof action.resource === "string"
         && (action.amount === undefined || (Number.isFinite(action.amount) && action.amount > 0));
     case "drop_concentration":
+    case "roll_death_save":
       return typeof action.target === "string";
     default:
       return false;
@@ -272,7 +285,11 @@ function buildPrompt(request) {
         ? `, resources ${resourceNames.map((name) => `${name} ${resources[name].current}/${resources[name].max}`).join(", ")}`
         : "";
       const concentrationText = t.concentratingOn?.spell ? `, concentrating on ${t.concentratingOn.spell}` : "";
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}`);
+      let deathStatusText = "";
+      if (t.dead) deathStatusText = ", dead";
+      else if (t.dying?.stable) deathStatusText = ", stable at 0 HP";
+      else if (t.dying) deathStatusText = `, dying (${t.dying.successes} successes, ${t.dying.failures} failures)`;
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

@@ -143,6 +143,12 @@
         const result = window.CampaignOS.dropConcentration(state, target.id);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
+      case "roll_death_save": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to roll a death save.`, alreadyLogged: false };
+        const result = window.CampaignOS.rollDeathSave(state, target.id);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
       case "switch_map": {
         const mapName = String(action.map || "").trim();
         const nextState = window.CampaignOS.setActiveMap(state, mapName);

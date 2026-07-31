@@ -344,6 +344,41 @@ test("applyActions leaves apply_damage's message unchanged when the target isn't
   assert.equal(messages[0], "Goblin 1 takes 5 damage.");
 });
 
+test("applyActions resolves a roll_death_save action", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state; // down, dying starts
+
+  const { state: next, messages } = withRandom([0.45], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "roll_death_save", target: "Darkhawk" }
+  ]));
+
+  assert.match(messages[0], /success \(1\/3\)/);
+  assert.equal(next.tokens.find((t) => t.name === "Darkhawk").dying.successes, 1);
+});
+
+test("applyActions logs an unresolved-name message for a roll_death_save targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "roll_death_save", target: "Nonexistent Goblin" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" to roll a death save/);
+});
+
+test("applyActions folds an automatic failed death save into attack's combined message when the target is already down", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 20, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Darkhawk", ac: 1, hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens.find((t) => t.name === "Darkhawk").id, 1).state;
+
+  const { messages } = withRandom([0.7, 0.5], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "attack", attacker: "Goblin 1", target: "Darkhawk" }
+  ]));
+
+  assert.match(messages[0], /Goblin 1 attacks Darkhawk/);
+  assert.match(messages[0], /automatic failed death save/);
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

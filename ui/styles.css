@@ -699,6 +699,55 @@ body[data-fog="on"] .map-tile:hover {
   gap: 6px !important;
 }
 
+.death-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+}
+
+.death-status-dying {
+  border: 1px solid rgba(185, 83, 76, 0.72);
+  color: #ffd8d4;
+}
+
+.death-status-stable {
+  border: 1px solid rgba(200, 170, 80, 0.72);
+  color: #f0dfa0;
+}
+
+.death-status-dead {
+  border: 1px solid var(--danger, #b9534c);
+  color: #ffd8d4;
+  font-weight: 600;
+}
+
+.death-status button {
+  margin-left: auto;
+  padding: 0 8px;
+}
+
+.death-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.death-badge-dying {
+  color: #ffd8d4;
+  border: 1px solid rgba(185, 83, 76, 0.72);
+}
+
+.death-badge-dead {
+  color: #ffd8d4;
+  background: rgba(185, 83, 76, 0.72);
+}
+
 .danger-button {
   width: 100%;
   margin-top: 12px;
