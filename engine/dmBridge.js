@@ -167,6 +167,16 @@
         const result = window.CampaignOS.addExhaustion(state, target.id, action.amount);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
+      case "use_legendary_action": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to use a legendary action.`, alreadyLogged: false };
+        const result = window.CampaignOS.useLegendaryAction(state, target.id, action.cost);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
+      case "trigger_lair_action": {
+        const result = window.CampaignOS.triggerLairAction(state, action.description);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
       case "switch_map": {
         const mapName = String(action.map || "").trim();
         const nextState = window.CampaignOS.setActiveMap(state, mapName);

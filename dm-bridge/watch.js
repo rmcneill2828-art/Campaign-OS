@@ -63,6 +63,8 @@ const SYSTEM_PROMPT = [
   '{"type": "long_rest", "target": "<exact token name>"}',
   '{"type": "short_rest", "target": "<exact token name>"}',
   '{"type": "add_exhaustion", "target": "<exact token name>", "amount": <optional integer, default 1; negative to remove levels>}',
+  '{"type": "use_legendary_action", "target": "<exact token name>", "cost": <optional integer, default 1>}',
+  '{"type": "trigger_lair_action", "description": "<what the lair does this round>"}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -170,6 +172,24 @@ const SYSTEM_PROMPT = [
   "isn't automated; call those out narratively or handle them as a DM ruling instead of",
   "expecting an action for either.",
   "",
+  "Use use_legendary_action for a legendary monster (its line below shows \"legendary actions",
+  "N/M\" when it has any) spending one at the end of another creature's turn -- cost defaults",
+  "to 1, set it higher only for an action that RAW costs more (e.g. 2 or 3). Like",
+  "use_resource, you don't need a target to have any listed at all if it doesn't -- don't",
+  "invent legendary actions for a token that has none. Legendary actions regain to full",
+  "automatically at the start of that token's own turn (via next_turn), so you never need to",
+  "restore them yourself. This engine has no notion of whose turn just ended beyond next_turn's",
+  "own result, so the timing judgment (\"is this actually the end of someone else's turn?\") is",
+  "yours to make from the narration/next_turn sequence, the same as roll_death_save's timing.",
+  "",
+  "Use trigger_lair_action when the scene is in a legendary creature's lair and narration",
+  "reaches initiative count 20 for the round (typically right after the highest-initiative",
+  "creature's turn, before anyone else acts) -- describe what the lair does this round in",
+  "`description`. It only fires once per round; a second call the same round is refused, so",
+  "don't retry it if that happens -- wait for next_turn to actually advance the round. Any real",
+  "effect the lair action causes (damage, a saving throw, a condition) still needs its own",
+  "separate action in the same response, same compose-only pattern as cast_spell/use_resource.",
+  "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
   "but it never overrides the actual token state above, which is always the current truth."
@@ -238,6 +258,10 @@ function isValidAction(action) {
       return typeof action.target === "string";
     case "add_exhaustion":
       return typeof action.target === "string" && (action.amount === undefined || Number.isFinite(action.amount));
+    case "use_legendary_action":
+      return typeof action.target === "string" && (action.cost === undefined || (Number.isFinite(action.cost) && action.cost > 0));
+    case "trigger_lair_action":
+      return typeof action.description === "string" && action.description.trim().length > 0;
     default:
       return false;
   }
@@ -275,6 +299,9 @@ function buildPrompt(request) {
     state.activeToken
       ? `Turn order: running -- round ${state.round || 1}, ${state.activeToken}'s turn.`
       : "Turn order: not running -- use next_turn to start it once formal combat begins.",
+    state.lairActionUsedThisRound
+      ? "This round's lair action has already triggered -- wait for next_turn to advance the round before another."
+      : "This round's lair action has not triggered yet.",
     availableMaps.length
       ? `Maps available to switch to: ${availableMaps.join(", ")}.`
       : "No other prepared maps to switch to right now.",
@@ -319,7 +346,10 @@ function buildPrompt(request) {
       if (t.dead) deathStatusText = ", dead";
       else if (t.dying?.stable) deathStatusText = ", stable at 0 HP";
       else if (t.dying) deathStatusText = `, dying (${t.dying.successes} successes, ${t.dying.failures} failures)`;
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}`);
+      const legendaryActionsText = t.legendaryActions && Number.isFinite(t.legendaryActions.current) && Number.isFinite(t.legendaryActions.max)
+        ? `, legendary actions ${t.legendaryActions.current}/${t.legendaryActions.max}`
+        : "";
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}${legendaryActionsText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

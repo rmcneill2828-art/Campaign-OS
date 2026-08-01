@@ -453,6 +453,53 @@ test("applyActions logs an unresolved-name message for add_exhaustion targeting 
   assert.match(messages[0], /could not find "Nonexistent Goblin" for exhaustion/);
 });
 
+test("applyActions resolves a use_legendary_action action, defaulting to spending one point", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Dracolich", legendaryActions: { max: 3, current: 3 } }).state;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "use_legendary_action", target: "Dracolich" }
+  ]);
+
+  assert.match(messages[0], /Dracolich uses a legendary action \(2\/3 remaining\)\./);
+  assert.equal(next.tokens.find((t) => t.name === "Dracolich").legendaryActions.current, 2);
+});
+
+test("applyActions passes an explicit cost through to use_legendary_action", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Dracolich", legendaryActions: { max: 3, current: 3 } }).state;
+
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "use_legendary_action", target: "Dracolich", cost: 2 }
+  ]);
+
+  assert.match(messages[0], /uses a legendary action \(2\) \(1\/3 remaining\)\./);
+});
+
+test("applyActions logs an unresolved-name message for use_legendary_action targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "use_legendary_action", target: "Nonexistent Boss" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Boss" to use a legendary action/);
+});
+
+test("applyActions resolves a trigger_lair_action action, refusing a second one the same round", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 10 }).state;
+  state = CampaignOS.nextTurn(state);
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "trigger_lair_action", description: "the floor erupts with spikes" }
+  ]);
+  assert.match(messages[0], /Lair action: the floor erupts with spikes/);
+
+  const second = CampaignOSDMBridge.applyActions(next, [
+    { type: "trigger_lair_action", description: "something else" }
+  ]);
+  assert.match(second.messages[0], /already triggered this round/);
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

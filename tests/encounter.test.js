@@ -1392,3 +1392,139 @@ test("parseCommand resolves gaining and losing exhaustion levels by token name",
   const lost = CampaignOS.parseCommand(gainedTwo.state, "Darkhawk loses a level of exhaustion.");
   assert.equal(lost.state.tokens[0].exhaustion, 2);
 });
+
+test("addToken normalizes legendaryActions, clamping current and dropping an invalid max", () => {
+  const state = stateOnMap("Urskelde");
+  const { token } = CampaignOS.addToken(state, { name: "Dracolich", legendaryActions: { max: 3, current: 5 } });
+  assert.deepEqual(token.legendaryActions, { max: 3, current: 3 });
+
+  const { token: invalid } = CampaignOS.addToken(state, { name: "Nobody", legendaryActions: { max: 0 } });
+  assert.equal(invalid.legendaryActions, undefined);
+});
+
+test("updateToken merges a partial legendaryActions change, and null clears it entirely", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Dracolich",
+    legendaryActions: { max: 3, current: 3 }
+  });
+
+  const updated = CampaignOS.updateToken(withToken, token.id, { legendaryActions: { current: 1 } });
+  assert.deepEqual(updated.tokens[0].legendaryActions, { max: 3, current: 1 });
+
+  const cleared = CampaignOS.updateToken(updated, token.id, { legendaryActions: null });
+  assert.equal(cleared.tokens[0].legendaryActions, undefined);
+});
+
+test("useLegendaryAction spends a point and reports how many remain", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Dracolich",
+    legendaryActions: { max: 3, current: 3 }
+  });
+  const result = CampaignOS.useLegendaryAction(withToken, token.id);
+  assert.match(result.message, /Dracolich uses a legendary action \(2\/3 remaining\)\./);
+  assert.equal(result.state.tokens[0].legendaryActions.current, 2);
+});
+
+test("useLegendaryAction spends more than one point at once when asked", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Dracolich",
+    legendaryActions: { max: 3, current: 3 }
+  });
+  const result = CampaignOS.useLegendaryAction(withToken, token.id, 2);
+  assert.match(result.message, /uses a legendary action \(2\) \(1\/3 remaining\)\./);
+});
+
+test("useLegendaryAction fails without changing state once points are exhausted", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Dracolich",
+    legendaryActions: { max: 3, current: 1 }
+  });
+  const result = CampaignOS.useLegendaryAction(withToken, token.id, 2);
+  assert.match(result.message, /doesn't have 2 legendary actions left \(1\/3 remaining\)/);
+  assert.equal(result.state, withToken);
+});
+
+test("useLegendaryAction fails without changing state for a token with none tracked", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Goblin 1" });
+  const result = CampaignOS.useLegendaryAction(withToken, token.id);
+  assert.match(result.message, /Goblin 1 has no legendary actions tracked/);
+  assert.equal(result.state, withToken);
+});
+
+test("useLegendaryAction reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.useLegendaryAction(state, "nonexistent-id");
+  assert.match(result.message, /token was not found/);
+  assert.equal(result.state, state);
+});
+
+test("nextTurn refreshes legendaryActions to max only at the start of that token's own turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Dracolich", initiative: 20, legendaryActions: { max: 3, current: 3 } }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 5 }).state;
+  const dracolichId = state.tokens.find((t) => t.name === "Dracolich").id;
+
+  state = CampaignOS.nextTurn(state); // Dracolich's turn (highest initiative), round 1
+  state = CampaignOS.useLegendaryAction(state, dracolichId, 2).state;
+  assert.equal(state.tokens.find((t) => t.id === dracolichId).legendaryActions.current, 1);
+
+  state = CampaignOS.nextTurn(state); // Goblin 1's turn -- should not refresh Dracolich
+  assert.equal(state.tokens.find((t) => t.id === dracolichId).legendaryActions.current, 1, "another token's turn should not refresh it");
+
+  state = CampaignOS.nextTurn(state); // wraps back to Dracolich, round 2
+  assert.equal(state.tokens.find((t) => t.id === dracolichId).legendaryActions.current, 3, "refreshes at the start of its own turn");
+});
+
+test("triggerLairAction fires once per round and refuses a second call the same round", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 10 }).state;
+  state = CampaignOS.nextTurn(state); // round 1
+
+  const first = CampaignOS.triggerLairAction(state, "the floor erupts with spikes");
+  assert.match(first.message, /Lair action: the floor erupts with spikes/);
+
+  const second = CampaignOS.triggerLairAction(first.state, "something else");
+  assert.match(second.message, /already triggered this round/);
+});
+
+test("triggerLairAction can fire again once the round advances", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 10 }).state;
+  state = CampaignOS.nextTurn(state); // round 1
+  state = CampaignOS.triggerLairAction(state, "spikes").state;
+
+  state = CampaignOS.nextTurn(state); // wraps back to Goblin 1, round 2
+  const result = CampaignOS.triggerLairAction(state, "darkness spreads");
+  assert.match(result.message, /Lair action: darkness spreads/);
+});
+
+test("triggerLairAction defaults to a generic message when no description is given", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.triggerLairAction(state, "");
+  assert.match(result.message, /Lair action: the lair stirs\./);
+});
+
+test("parseCommand resolves using a legendary action by token name", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Dracolich", legendaryActions: { max: 3, current: 3 } }).state;
+  const result = CampaignOS.parseCommand(state, "Dracolich uses a legendary action.");
+  assert.match(result.message, /Dracolich uses a legendary action \(2\/3 remaining\)\./);
+});
+
+test("parseCommand resolves spending multiple legendary actions at once", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Dracolich", legendaryActions: { max: 3, current: 3 } }).state;
+  const result = CampaignOS.parseCommand(state, "Dracolich uses 2 legendary actions.");
+  assert.match(result.message, /uses a legendary action \(2\) \(1\/3 remaining\)\./);
+});
+
+test("parseCommand resolves a lair action command", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.parseCommand(state, "Lair action: the walls close in.");
+  assert.equal(result.message, "Lair action: the walls close in");
+});

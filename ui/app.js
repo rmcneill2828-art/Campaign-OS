@@ -7,6 +7,8 @@
   const initiativeList = document.querySelector("#initiativeList");
   const turnStatus = document.querySelector("#turnStatus");
   const nextTurnButton = document.querySelector("#nextTurnButton");
+  const lairActionForm = document.querySelector("#lairActionForm");
+  const lairActionInput = document.querySelector("#lairActionInput");
   const quickAddTokenForm = document.querySelector("#quickAddTokenForm");
   const quickAddTokenName = document.querySelector("#quickAddTokenName");
   const quickAddTokenType = document.querySelector("#quickAddTokenType");
@@ -682,6 +684,12 @@
         <button type="button" data-action="exhaustion-minus">-1</button>
         <button type="button" data-action="exhaustion-plus">+1</button>
       </p>
+      <p class="legendary-status ${token.legendaryActions ? "legendary-status-active" : ""}" title="Regains to max automatically at the start of this token's own turn. Set Max to 0 to stop tracking.">
+        Legendary Actions
+        <input type="number" min="0" max="10" value="${token.legendaryActions?.max || 0}" data-legendary-max>
+        <span>${token.legendaryActions ? `${token.legendaryActions.current}/${token.legendaryActions.max}` : ""}</span>
+        <button type="button" data-action="legendary-use">Use</button>
+      </p>
       <div class="token-portrait">
         <div class="portrait-preview">${token.image ? `<img data-portrait-image alt="">` : `<span>${escapeHtml(token.icon)}</span>`}</div>
         <label>
@@ -1060,6 +1068,19 @@
       saveEncounter();
       commandResult.textContent = result.message;
       render();
+    });
+
+    tokenSheet.querySelector('[data-action="legendary-use"]').addEventListener("click", () => {
+      const result = window.CampaignOS.useLegendaryAction(state, token.id);
+      state = result.state;
+      saveEncounter();
+      commandResult.textContent = result.message;
+      render();
+    });
+    tokenSheet.querySelector("[data-legendary-max]").addEventListener("change", (event) => {
+      const max = Number(event.target.value);
+      const change = Number.isFinite(max) && max > 0 ? { max, current: max } : null;
+      updateState(window.CampaignOS.updateToken(state, token.id, { legendaryActions: change }));
     });
 
     const hpControl = tokenSheet.querySelector(".hp-control");
@@ -2056,6 +2077,7 @@
         grid: window.CampaignOS.currentGrid(state),
         round: state.turn?.round || 0,
         activeToken: activeTokens().find((token) => token.id === state.turn?.tokenId)?.name || null,
+        lairActionUsedThisRound: state.lairActionRound === (state.turn?.round || 0),
         availableMaps: loadedMapNames().filter((name) => name !== state.mapName),
         tokens: activeTokens().map((token) => ({
           name: token.name,
@@ -2078,7 +2100,8 @@
           concentratingOn: token.concentratingOn,
           dying: token.dying,
           dead: token.dead,
-          exhaustion: token.exhaustion
+          exhaustion: token.exhaustion,
+          legendaryActions: token.legendaryActions
         }))
       },
       createdAt: new Date().toISOString()
@@ -2244,6 +2267,16 @@
       return;
     }
     updateState(window.CampaignOS.nextTurn(state));
+  });
+
+  lairActionForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const result = window.CampaignOS.triggerLairAction(state, lairActionInput.value.trim());
+    state = result.state;
+    saveEncounter();
+    commandResult.textContent = result.message;
+    lairActionInput.value = "";
+    render();
   });
 
   mapSettingsToggle.addEventListener("click", () => {

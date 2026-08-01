@@ -491,6 +491,18 @@ body[data-fog="on"] .map-tile:hover {
   color: var(--muted);
 }
 
+.lair-action-control {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lair-action-control input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 8px;
+}
+
 .token-sheet.empty {
   color: var(--muted);
 }
@@ -764,6 +776,37 @@ body[data-fog="on"] .map-tile:hover {
 
 .exhaustion-status button + button {
   margin-left: 0;
+}
+
+.legendary-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.legendary-status-active {
+  border-color: rgba(155, 135, 245, 0.5);
+  color: var(--text);
+}
+
+.legendary-status input {
+  width: 44px;
+  text-align: center;
+}
+
+.legendary-status span {
+  min-width: 2.4em;
+}
+
+.legendary-status button {
+  margin-left: auto;
+  padding: 0 8px;
 }
 
 .death-badge-dying {

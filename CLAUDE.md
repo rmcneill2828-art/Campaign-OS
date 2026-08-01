@@ -6,14 +6,15 @@ Campaign-OS imports campaign Markdown for characters, locations, and sessions; t
 remains the narrative source of truth. As of 2026-07-31 this isn't used for live play yet --
 see that repo's own CLAUDE.md for why (short version: ability scores, saves, spellcasting/spell
 slots, named class resources -- Ki, Rage, Superiority Dice, etc. -- concentration, death saves,
-rest automation, and exhaustion are all modeled now).
+rest automation, exhaustion, and legendary/lair actions are all modeled now).
 
 See README.md for the full feature list and usage. Notes specific to working on this code:
 
 ## Architecture
 - `engine/` -- pure, DOM-free logic: `encounter.js` (state, tokens, combat, movement, turn
   order, saving throws, spellcasting/spell slots, named class resources, concentration, death
-  saves, rest automation, exhaustion), `campaign.js` (markdown import/parsing), `dmBridge.js`
+  saves, rest automation, exhaustion, legendary/lair actions), `campaign.js` (markdown
+  import/parsing), `dmBridge.js`
   (translates the Claude DM bridge's actions into engine calls), `characterCreator.js` (5e math
   + markdown generation for new character sheets). Runnable and unit-tested under Node
   (`npm test`). Keep it that way: no `document`/`window` DOM access, no async IndexedDB/File
@@ -161,6 +162,32 @@ See README.md for the full feature list and usage. Notes specific to working on 
   the DM more movement than the token can actually use. Disadvantage on ability checks (level 1,
   no ability-check mechanic exists at all here) and a halved HP maximum (level 4) are
   deliberately NOT modeled -- same known-gap spirit as Troll's Regeneration/Hit Dice.
+- Legendary/lair actions: `token.legendaryActions` is a single `{max, current}` tracker (same
+  shape as one named resource, but a lone object, not a per-name map) -- sparse, absent when
+  the token has none. Unlike resources (which only refill on a rest), `nextTurn()` resets
+  `legendaryActions.current` back to `max` the instant that specific token becomes the active
+  turn, matching RAW ("regains all expended legendary actions at the start of its turn") --
+  this is the one place `nextTurn()` mutates something beyond `movementUsed`/
+  `diagonalStepsThisTurn`, so re-check that block if you touch turn advancement.
+  `useLegendaryAction()` spends `cost` (default 1) points, failing outright (same `state`
+  reference, no clone leaking through) if none are tracked or not enough remain -- watch this
+  specifically if you touch it, since an earlier draft of this function accidentally returned
+  the already-cloned `nextState` instead of the original `state` in both failure branches,
+  breaking the "same reference when nothing changed" convention every other primitive in this
+  file follows. RAW's "at the end of another creature's turn" trigger condition is, like
+  `rollDeathSave()`'s "at the start of its turn," a narrative judgment call left entirely to
+  the DM/Claude -- the engine has no notion of whose turn just ended beyond `next_turn`'s own
+  result, so don't try to auto-detect or enforce that timing here.
+  `triggerLairAction(state, description)` is a lighter-weight primitive: it just enforces the
+  RAW "once per round" constraint (`state.lairActionRound === state.turn.round` refuses a
+  second call) and logs whatever freeform `description` the DM/Claude gives it -- there's no
+  per-effect catalog, no HP/condition bookkeeping, and no synthetic "lair" pseudo-token in the
+  initiative order (this engine's turn order is real tokens only); any actual mechanical
+  effect the lair action causes still goes through separate existing actions (apply_damage,
+  saving_throw, etc.) in the same response. `lairActionRound` lives on the whole encounter
+  state, not per-map -- a deliberate simplification, since modeling a synthetic initiative-20
+  slot per map would be a much bigger turn-order restructuring than this feature's scope
+  warranted.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

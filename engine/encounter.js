@@ -208,6 +208,8 @@
     if (spellSlots) token.spellSlots = spellSlots;
     const resources = normalizeResources(draft.resources);
     if (resources) token.resources = resources;
+    const legendaryActions = normalizeLegendaryActions(draft.legendaryActions);
+    if (legendaryActions) token.legendaryActions = legendaryActions;
     token.hp = clampNumber(token.hp, 0, token.maxHp);
     nextState.tokens.push(token);
     nextState.selectedTokenId = token.id;
@@ -360,6 +362,20 @@
   function findResourceKey(token, name) {
     const normalized = String(name || "").trim().toLowerCase();
     return Object.keys(token.resources || {}).find((key) => key.toLowerCase() === normalized);
+  }
+
+  // A single {max, current} tracker, same shape as one named resource -- but unlike
+  // resources (which only refill on a rest), legendary actions refill automatically at the
+  // start of the token's own turn (see nextTurn()), matching RAW ("regains all expended
+  // legendary actions at the start of its turn"). Most tokens have none at all (sparse,
+  // absent by default).
+  function normalizeLegendaryActions(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const max = Number(raw.max);
+    if (!Number.isFinite(max) || max <= 0) return undefined;
+    const clampedMax = clampNumber(max, 1, 10);
+    const current = Number.isFinite(Number(raw.current)) ? Number(raw.current) : clampedMax;
+    return { max: clampedMax, current: clampNumber(current, 0, clampedMax) };
   }
 
   // The bonus rollSavingThrow adds to the d20: an explicit stated save bonus if the sheet
@@ -524,6 +540,51 @@
     const restoreAmount = Number.isFinite(Number(amount)) ? clampNumber(amount, 1, 99) : resource.max;
     resource.current = clampNumber(resource.current + restoreAmount, 0, resource.max);
     const message = `${token.name} regains ${key} (${resource.current}/${resource.max} remaining).`;
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // Spends `cost` (default 1) legendary action points -- fails outright with no state change
+  // if the token has none tracked, or not enough left. RAW says legendary actions are only
+  // usable "at the end of another creature's turn"; this engine has no notion of whose turn
+  // just ended beyond next_turn's own result, so -- same as rollDeathSave's "at the start of
+  // its turn" trigger -- that timing judgment is left to the DM/Claude (see
+  // dm-bridge/watch.js's guidance) rather than enforced here. Refreshing to full happens
+  // automatically at the start of the token's own turn; see nextTurn().
+  function useLegendaryAction(state, tokenId, cost) {
+    const nextState = clone(state);
+    const token = nextState.tokens.find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Legendary action failed: token was not found." };
+    if (!token.legendaryActions) return { state, message: `${token.name} has no legendary actions tracked.` };
+
+    const spend = clampNumber(cost ?? 1, 1, 10);
+    if (token.legendaryActions.current < spend) {
+      return {
+        state,
+        message: `${token.name} doesn't have ${spend} legendary action${spend > 1 ? "s" : ""} left (${token.legendaryActions.current}/${token.legendaryActions.max} remaining).`
+      };
+    }
+
+    token.legendaryActions.current -= spend;
+    const message = `${token.name} uses a legendary action${spend > 1 ? ` (${spend})` : ""} (${token.legendaryActions.current}/${token.legendaryActions.max} remaining).`;
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // Triggers the current map's lair action for this round -- RAW: on initiative count 20,
+  // once per round, so a second call in the same round is refused rather than silently
+  // stacking. `description` is freeform (what the lair actually does this round -- the DM/
+  // Claude narrates it and applies any real effect via separate actions, e.g. apply_damage or
+  // saving_throw, the same compose-only pattern cast_spell/use_resource already use). Tracked
+  // per encounter state, not per map -- a deliberate simplification; switching maps mid-fight
+  // doesn't reset it.
+  function triggerLairAction(state, description) {
+    const nextState = clone(state);
+    const round = nextState.turn?.round || 0;
+    if (nextState.lairActionRound === round) {
+      return { state: nextState, message: "The lair action has already triggered this round." };
+    }
+
+    nextState.lairActionRound = round;
+    const message = `Lair action: ${description || "the lair stirs."}`;
     return { state: addLogEntry(nextState, message), message };
   }
 
@@ -864,6 +925,17 @@
       else delete token.resources;
     }
 
+    // A single tracker (not a per-name map like resources), so null clears it entirely
+    // rather than needing a per-key delete.
+    if (changes.legendaryActions !== undefined) {
+      if (changes.legendaryActions === null) {
+        delete token.legendaryActions;
+      } else {
+        const merged = normalizeLegendaryActions({ ...(token.legendaryActions || {}), ...changes.legendaryActions });
+        if (merged) token.legendaryActions = merged;
+      }
+    }
+
     if (typeof changes.image === "string") {
       token.image = changes.image;
     }
@@ -1137,6 +1209,9 @@
     if (activeToken) {
       activeToken.movementUsed = 0;
       activeToken.diagonalStepsThisTurn = 0;
+      // RAW: a legendary creature regains all expended legendary actions at the start of
+      // its own turn.
+      if (activeToken.legendaryActions) activeToken.legendaryActions.current = activeToken.legendaryActions.max;
     }
 
     return nextState;
@@ -1294,6 +1369,23 @@
       const signedAmount = exhaustionMatch[2].toLowerCase().startsWith("lose") ? -amount : amount;
       return addExhaustion(state, token.id, signedAmount);
     }
+
+    // "<name> uses a legendary action" / "<name> uses 2 legendary actions" -- same as the
+    // token sheet's Use Legendary Action button.
+    const legendaryMatch = command.match(/^(.+?)\s+uses?\s+(?:an?|(\d+))\s+legendary\s+actions?\s*[.!?]?$/i);
+    if (legendaryMatch) {
+      const token = findTokenByName(state, legendaryMatch[1]);
+      if (!token) return { state, message: "I could not find who's using a legendary action." };
+      const cost = legendaryMatch[2] ? Number(legendaryMatch[2]) : 1;
+      return useLegendaryAction(state, token.id, cost);
+    }
+
+    // "Lair action: <what happens>" -- triggers the current map's once-per-round lair
+    // action, same as the Lair Action control.
+    const lairActionMatch = command.match(/^lair\s+action:?\s*(.+?)\s*[.!?]?$/i);
+    if (lairActionMatch) {
+      return triggerLairAction(state, lairActionMatch[1].trim());
+    }
     if (castMatch) {
       const caster = findTokenByName(state, castMatch[1]);
       if (!caster) return { state, message: "I could not find who's casting." };
@@ -1362,6 +1454,8 @@
     rollDeathSave,
     rollSavingThrow,
     savingThrowBonus,
+    triggerLairAction,
+    useLegendaryAction,
     useResource,
     setActiveMap,
     setMapGrid,

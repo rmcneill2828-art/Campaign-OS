@@ -128,6 +128,20 @@ dependencies to install for the app itself. See Tests, below, for running the te
   editor if actual play reaches that point. Editing the level directly via the token editor is
   treated as a correction (like editing HP), so it does **not** trigger the level-6 death the
   way a real narrative gain via the buttons/command/DM-bridge action does.
+- Legendary actions: any token can track a legendary-action pool (max + current, shown on its
+  sheet as **Legendary Actions N/M** with a **Use** button and a **Max** field -- set Max to 0
+  to stop tracking). Spending one (or `<name> uses a/N legendary action(s)`, or the Claude DM
+  bridge's `use_legendary_action` action, cost defaults to 1) fails outright once none are
+  left. They regain to full automatically at the start of that token's own turn (no rest or
+  manual reset needed) -- RAW reserves them for use "at the end of another creature's turn,"
+  which is a narrative judgment call for the DM/Claude to make, the same way `roll_death_save`'s
+  "at the start of its turn" trigger isn't enforced by the engine either.
+- Lair actions: a **Lair Action** control in the Initiative panel (or `Lair action: <what
+  happens>`, or the Claude DM bridge's `trigger_lair_action` action) fires the current
+  encounter's once-per-round lair action (RAW: initiative count 20) and logs whatever you
+  describe -- a second attempt in the same round is refused until `next_turn` actually
+  advances the round. Any real effect it causes (damage, a saving throw, a condition) still
+  needs its own separate action/control, the same compose-only pattern spells/resources use.
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes
@@ -204,13 +218,14 @@ The "Claude DM" panel works two ways:
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
   token on the grid, advance to the next turn, switch to a different prepared map, roll a
   saving throw, cast a spell, spend a class resource, start or drop concentration, roll a
-  death save, take a long or short rest, add/remove exhaustion), referencing tokens by name
-  and reasoning about the current encounter state -- including where everything stands on the
-  grid, whose turn it is, how much movement each token has left this turn (already reduced by
-  exhaustion, if any), each token's ability scores, spellcasting (save DC, attack bonus,
-  remaining slots per level), named resources (Rage, Wild Shape, Ki Points, etc., each with
-  its recovery type), what it's currently concentrating on, its death-save status
-  (dying/stable/dead), and its exhaustion level, when known.
+  death save, take a long or short rest, add/remove exhaustion, spend a legendary action,
+  trigger a lair action), referencing tokens by name and reasoning about the current encounter
+  state -- including where everything stands on the grid, whose turn it is, how much movement
+  each token has left this turn (already reduced by exhaustion, if any), each token's ability
+  scores, spellcasting (save DC, attack bonus, remaining slots per level), named resources
+  (Rage, Wild Shape, Ki Points, etc., each with its recovery type), what it's currently
+  concentrating on, its death-save status (dying/stable/dead), its exhaustion level, its
+  legendary-action pool, and whether this round's lair action has already fired, when known.
   `next_turn` and
   `move_token` are what actually let Claude run the turn tracker and RAW speed-limited
   movement described above -- without calling `next_turn`, turn order never starts and
@@ -246,7 +261,15 @@ The "Claude DM" panel works two ways:
   levels -- the engine automatically applies disadvantage on attacks/saves at level 3+ and the
   speed penalty at level 2+/5+ as part of `attack`/`saving_throw`/`move_token`'s own
   resolution, and level 6 kills outright, so Claude never has to set advantage/disadvantage
-  itself for that or compute the reduced speed by hand.
+  itself for that or compute the reduced speed by hand. `use_legendary_action` spends a point
+  (cost defaults to 1) from a token's own legendary-action pool and fails outright if none are
+  left -- these refill automatically at the start of that token's own turn, so Claude never
+  restores them itself, but deciding *when* it's actually "the end of another creature's turn"
+  is a judgment call Claude makes from the narration/`next_turn` sequence, the same as
+  `roll_death_save`'s timing. `trigger_lair_action` fires the current round's lair action
+  (refusing a second one the same round) and logs whatever `description` says happens -- any
+  real effect still needs its own separate action in the same response, same compose-only
+  pattern as `cast_spell`/`use_resource`.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than
