@@ -634,7 +634,7 @@ body[data-fog="on"] .map-tile:hover {
 
 .resource-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px auto auto auto;
+  grid-template-columns: minmax(0, 1fr) 64px 68px auto auto auto;
   align-items: center;
   gap: 6px;
 }
@@ -647,7 +647,8 @@ body[data-fog="on"] .map-tile:hover {
   white-space: nowrap;
 }
 
-.resource-row input {
+.resource-row input,
+.resource-row select {
   width: 100%;
   text-align: center;
 }
@@ -658,7 +659,7 @@ body[data-fog="on"] .map-tile:hover {
 
 .add-resource-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px auto;
+  grid-template-columns: minmax(0, 1fr) 64px 1fr auto;
   align-items: end;
   gap: 8px;
   margin-top: 10px;
@@ -671,7 +672,8 @@ body[data-fog="on"] .map-tile:hover {
   font-size: 0.82rem;
 }
 
-.add-resource-control input {
+.add-resource-control input,
+.add-resource-control select {
   width: 100%;
 }
 

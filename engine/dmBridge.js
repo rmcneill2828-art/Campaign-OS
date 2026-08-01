@@ -149,6 +149,18 @@
         const result = window.CampaignOS.rollDeathSave(state, target.id);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
+      case "long_rest": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to rest.`, alreadyLogged: false };
+        const result = window.CampaignOS.longRest(state, target.id);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
+      case "short_rest": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to rest.`, alreadyLogged: false };
+        const result = window.CampaignOS.shortRest(state, target.id);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
       case "switch_map": {
         const mapName = String(action.map || "").trim();
         const nextState = window.CampaignOS.setActiveMap(state, mapName);

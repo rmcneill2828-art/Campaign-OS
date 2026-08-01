@@ -329,6 +329,11 @@
   // entered by hand on the token sheet (see ui/app.js's Resources section) rather than
   // imported from markdown -- a deliberate, known gap, same spirit as Troll's Regeneration
   // not being automated in spawnMonster.
+  // `recovery` is "short" (restored by both a short and a long rest -- Second Wind, Wild
+  // Shape, Superiority Dice, Channel Divinity, etc. all work this way) or "long" (only a
+  // long rest restores it -- Rage, most everything else), defaulting to "long" since that's
+  // the safer assumption for a resource added without specifying (nothing is over-restored
+  // by a short rest it shouldn't be).
   function normalizeResources(raw) {
     if (!raw || typeof raw !== "object") return undefined;
     const resources = {};
@@ -341,7 +346,8 @@
       if (!Number.isFinite(max) || max <= 0) return;
       const clampedMax = clampNumber(max, 1, 99);
       const current = Number.isFinite(Number(entry.current)) ? Number(entry.current) : clampedMax;
-      resources[key] = { max: clampedMax, current: clampNumber(current, 0, clampedMax) };
+      const recovery = entry.recovery === "short" ? "short" : "long";
+      resources[key] = { max: clampedMax, current: clampNumber(current, 0, clampedMax), recovery };
       any = true;
     });
     return any ? resources : undefined;
@@ -513,6 +519,61 @@
     const restoreAmount = Number.isFinite(Number(amount)) ? clampNumber(amount, 1, 99) : resource.max;
     resource.current = clampNumber(resource.current + restoreAmount, 0, resource.max);
     const message = `${token.name} regains ${key} (${resource.current}/${resource.max} remaining).`;
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // A long rest (~8 hours): full HP, every spell slot back to max, every resource back to
+  // max regardless of its recovery tag. Skips only the HP/revival part for a token flagged
+  // dead -- a long rest isn't a substitute for Raise Dead/Revivify -- but still refreshes
+  // slots/resources regardless, since neither requires the token to be conscious for the
+  // rest to have happened around them. Hit Dice aren't modeled (same known simplification as
+  // Troll's Regeneration), so there's no separate Hit Dice recovery step here.
+  function longRest(state, tokenId) {
+    const nextState = clone(state);
+    const token = nextState.tokens.find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Long rest failed: token was not found." };
+
+    const messages = [`${token.name} takes a long rest.`];
+
+    if (!token.dead) {
+      token.hp = token.maxHp;
+      delete token.dying;
+      messages.push(`Fully healed (${token.hp}/${token.maxHp} HP).`);
+    }
+
+    if (token.spellSlots && Object.keys(token.spellSlots).length) {
+      Object.values(token.spellSlots).forEach((slot) => { slot.current = slot.max; });
+      messages.push("All spell slots restored.");
+    }
+
+    if (token.resources && Object.keys(token.resources).length) {
+      Object.values(token.resources).forEach((resource) => { resource.current = resource.max; });
+      messages.push("All resources restored.");
+    }
+
+    const message = messages.join(" ");
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // A short rest (~1 hour): restores every resource tagged recovery: "short" to max --
+  // Second Wind, Wild Shape, Superiority Dice, Channel Divinity, and similar. Deliberately
+  // does NOT touch HP (Hit Dice spending/recovery isn't modeled -- heal manually if the
+  // party spends Hit Dice) or spell slots (almost no class recovers those on a short rest;
+  // the one common exception, Warlock Pact Magic, isn't specially modeled here -- restore a
+  // Warlock's slots by hand via the token editor if that comes up).
+  function shortRest(state, tokenId) {
+    const nextState = clone(state);
+    const token = nextState.tokens.find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Short rest failed: token was not found." };
+
+    const shortRestNames = Object.keys(token.resources || {}).filter((name) => token.resources[name].recovery === "short");
+    if (!shortRestNames.length) {
+      const message = `${token.name} takes a short rest -- no short-rest resources to restore.`;
+      return { state: addLogEntry(nextState, message), message };
+    }
+
+    shortRestNames.forEach((name) => { token.resources[name].current = token.resources[name].max; });
+    const message = `${token.name} takes a short rest. Restored: ${shortRestNames.join(", ")}.`;
     return { state: addLogEntry(nextState, message), message };
   }
 
@@ -1131,6 +1192,15 @@
       if (!token) return { state, message: "I could not find who's rolling a death save." };
       return rollDeathSave(state, token.id);
     }
+
+    // "<name> takes a long rest" / "<name> takes a short rest" -- same as the token sheet's
+    // Long Rest/Short Rest buttons.
+    const restMatch = command.match(/^(.+?)\s+takes?\s+an?\s+(long|short)\s+rest\s*[.!?]?$/i);
+    if (restMatch) {
+      const token = findTokenByName(state, restMatch[1]);
+      if (!token) return { state, message: "I could not find who's resting." };
+      return restMatch[2].toLowerCase() === "long" ? longRest(state, token.id) : shortRest(state, token.id);
+    }
     if (castMatch) {
       const caster = findTokenByName(state, castMatch[1]);
       if (!caster) return { state, message: "I could not find who's casting." };
@@ -1186,11 +1256,13 @@
     feetPerSquare,
     gridMoveCost,
     hasRealMapData,
+    longRest,
     moveToken,
     nextTurn,
     parseCommand,
     removeToken,
     restoreResource,
+    shortRest,
     rollDeathSave,
     rollSavingThrow,
     savingThrowBonus,

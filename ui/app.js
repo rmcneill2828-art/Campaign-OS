@@ -843,6 +843,10 @@
         <button type="button" data-action="drop">Drop</button>
         <button type="button" data-action="full">Full HP</button>
       </div>
+      <div class="hp-actions">
+        <button type="button" data-action="long-rest" title="Full heal, and restores every spell slot and resource to max (skips healing a token flagged dead).">Long Rest</button>
+        <button type="button" data-action="short-rest" title="Restores only resources tagged 'Short/long rest' -- doesn't touch HP or spell slots.">Short Rest</button>
+      </div>
       <div>
         <h3 class="subheading">Conditions</h3>
         <div class="conditions"></div>
@@ -858,6 +862,13 @@
           <label>
             Max
             <input name="max" type="number" min="1" max="99" value="1">
+          </label>
+          <label>
+            Recovers
+            <select name="recovery">
+              <option value="long">Long rest</option>
+              <option value="short">Short/long rest</option>
+            </select>
           </label>
           <button type="submit">Add</button>
         </form>
@@ -1057,6 +1068,10 @@
       row.innerHTML = `
         <span>${escapeHtml(name)}</span>
         <input type="text" value="${resource.current}/${resource.max}" data-resource-input>
+        <select data-resource-recovery title="Which kind of rest restores this resource.">
+          <option value="long" ${resource.recovery === "long" ? "selected" : ""}>Long</option>
+          <option value="short" ${resource.recovery === "short" ? "selected" : ""}>Short</option>
+        </select>
         <button type="button" data-action="use">Use</button>
         <button type="button" data-action="restore">Restore</button>
         <button type="button" data-action="remove" title="Stop tracking ${escapeAttribute(name)}">&times;</button>
@@ -1078,6 +1093,10 @@
       row.querySelector('[data-action="remove"]').addEventListener("click", () => {
         updateState(window.CampaignOS.updateToken(state, token.id, { resources: { [name]: null } }));
       });
+      // Both the current/max field and the recovery selector re-send the resource's full
+      // {max, current, recovery} triple -- updateToken's resources merge replaces a
+      // resource's whole entry, so whichever one didn't change still has to be resent or
+      // it would silently reset (recovery defaults to "long" if omitted).
       row.querySelector("[data-resource-input]").addEventListener("change", (event) => {
         const raw = event.target.value.trim();
         const [currentPart, maxPart] = raw.split("/").map((part) => part.trim());
@@ -1085,7 +1104,12 @@
         const current = Number(currentPart);
         if (!Number.isFinite(max)) return;
         updateState(window.CampaignOS.updateToken(state, token.id, {
-          resources: { [name]: { max, current: Number.isFinite(current) ? current : max } }
+          resources: { [name]: { max, current: Number.isFinite(current) ? current : max, recovery: resource.recovery } }
+        }));
+      });
+      row.querySelector("[data-resource-recovery]").addEventListener("change", (event) => {
+        updateState(window.CampaignOS.updateToken(state, token.id, {
+          resources: { [name]: { max: resource.max, current: resource.current, recovery: event.target.value } }
         }));
       });
       resourcesContainer.appendChild(row);
@@ -1097,8 +1121,24 @@
       const formData = new FormData(addResourceControl);
       const name = String(formData.get("name") || "").trim();
       const max = Number(formData.get("max"));
+      const recovery = formData.get("recovery") === "short" ? "short" : "long";
       if (!name || !Number.isFinite(max) || max <= 0) return;
-      updateState(window.CampaignOS.updateToken(state, token.id, { resources: { [name]: { max, current: max } } }));
+      updateState(window.CampaignOS.updateToken(state, token.id, { resources: { [name]: { max, current: max, recovery } } }));
+    });
+
+    tokenSheet.querySelector('[data-action="long-rest"]').addEventListener("click", () => {
+      const result = window.CampaignOS.longRest(state, token.id);
+      state = result.state;
+      saveEncounter();
+      commandResult.textContent = result.message;
+      render();
+    });
+    tokenSheet.querySelector('[data-action="short-rest"]').addEventListener("click", () => {
+      const result = window.CampaignOS.shortRest(state, token.id);
+      state = result.state;
+      saveEncounter();
+      commandResult.textContent = result.message;
+      render();
     });
   }
 

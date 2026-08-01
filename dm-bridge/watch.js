@@ -60,6 +60,8 @@ const SYSTEM_PROMPT = [
   '{"type": "use_resource", "target": "<exact token name>", "resource": "<exact resource name from that token\'s list below>", "amount": <optional integer, default 1>}',
   '{"type": "drop_concentration", "target": "<exact token name>"}',
   '{"type": "roll_death_save", "target": "<exact token name>"}',
+  '{"type": "long_rest", "target": "<exact token name>"}',
+  '{"type": "short_rest", "target": "<exact token name>"}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -145,6 +147,15 @@ const SYSTEM_PROMPT = [
   "until it takes damage again), three failures kills it -- react to whichever happened using",
   "the result logged, the same as any other roll you don't see the outcome of in advance.",
   "",
+  "Use long_rest/short_rest when narration says a token (or the whole party -- issue one",
+  "action per token) rests. long_rest fully heals HP and restores every spell slot and every",
+  "resource to max, but skips the HP/revival part for a token already flagged \"dead\" (that",
+  "needs an actual revival, not a rest). short_rest restores only resources tagged as",
+  "short-rest recovery (shown per-resource below, e.g. \"Second Wind 0/1 (short)\") -- it never",
+  "touches HP or spell slots (Hit Dice spending isn't modeled, and almost nothing but Warlock",
+  "Pact Magic recovers slots on a short rest, which isn't specially handled either). Don't",
+  "invent a rest for a token that isn't part of the current scene.",
+  "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
   "but it never overrides the actual token state above, which is always the current truth."
@@ -208,6 +219,8 @@ function isValidAction(action) {
         && (action.amount === undefined || (Number.isFinite(action.amount) && action.amount > 0));
     case "drop_concentration":
     case "roll_death_save":
+    case "long_rest":
+    case "short_rest":
       return typeof action.target === "string";
     default:
       return false;
@@ -282,7 +295,7 @@ function buildPrompt(request) {
       const resourceNames = Object.keys(resources)
         .filter((name) => resources[name] && Number.isFinite(resources[name].current) && Number.isFinite(resources[name].max));
       const resourcesText = resourceNames.length
-        ? `, resources ${resourceNames.map((name) => `${name} ${resources[name].current}/${resources[name].max}`).join(", ")}`
+        ? `, resources ${resourceNames.map((name) => `${name} ${resources[name].current}/${resources[name].max} (${resources[name].recovery === "short" ? "short" : "long"})`).join(", ")}`
         : "";
       const concentrationText = t.concentratingOn?.spell ? `, concentrating on ${t.concentratingOn.spell}` : "";
       let deathStatusText = "";

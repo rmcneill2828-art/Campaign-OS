@@ -5,17 +5,17 @@ https://github.com/rmcneill2828-art/DnD (locally, commonly checked out alongside
 Campaign-OS imports campaign Markdown for characters, locations, and sessions; the DnD repo
 remains the narrative source of truth. As of 2026-07-31 this isn't used for live play yet --
 see that repo's own CLAUDE.md for why (short version: ability scores, saves, spellcasting/spell
-slots, named class resources -- Ki, Rage, Superiority Dice, etc. -- concentration, and death
-saves are all modeled now).
+slots, named class resources -- Ki, Rage, Superiority Dice, etc. -- concentration, death saves,
+and rest automation are all modeled now).
 
 See README.md for the full feature list and usage. Notes specific to working on this code:
 
 ## Architecture
 - `engine/` -- pure, DOM-free logic: `encounter.js` (state, tokens, combat, movement, turn
   order, saving throws, spellcasting/spell slots, named class resources, concentration, death
-  saves), `campaign.js` (markdown import/parsing), `dmBridge.js` (translates the Claude DM
-  bridge's actions into engine calls), `characterCreator.js` (5e math + markdown generation
-  for new character sheets). Runnable and unit-tested under Node (`npm test`). Keep it that
+  saves, rest automation), `campaign.js` (markdown import/parsing), `dmBridge.js` (translates
+  the Claude DM bridge's actions into engine calls), `characterCreator.js` (5e math + markdown
+  generation for new character sheets). Runnable and unit-tested under Node (`npm test`). Keep it that
   way: no `document`/`window` DOM access, no async IndexedDB/File System Access calls here --
   those belong in `ui/`.
 - `ui/` -- browser glue: `app.js` (rendering, event wiring), the IndexedDB-backed stores
@@ -79,16 +79,23 @@ See README.md for the full feature list and usage. Notes specific to working on 
   caster actually has left. `castSpell()` mutates a slot's `current` directly and fails outright
   (no state change) with none left at that level; level 0 is a cantrip and never touches slots.
 - A token's `resources` object is a sparse map keyed by free-text resource name (Rage, Wild
-  Shape, Ki Points, Superiority Dice, Channel Divinity, ...), each `{max, current}`, same shape
-  as a spell slot level. Unlike ability scores/saving throws/spellcasting, there is **no**
-  markdown auto-extraction for these -- the Features & Traits prose that describes them is far
-  more heterogeneous per class than the one canonical `**Spellcasting:**` bullet spellcasting
-  reads from, so reliably parsing name/count/recovery-cadence out of arbitrary text was judged
-  too fragile to risk silently mis-tracking a resource during real play. They're entered by hand
-  on the token sheet instead (see `ui/app.js`'s Resources section) -- a deliberate, known gap,
+  Shape, Ki Points, Superiority Dice, Channel Divinity, ...), each `{max, current, recovery}`
+  where `recovery` is `"short"` (restored by both a short and long rest) or `"long"` (only a
+  long rest), defaulting to `"long"` when unspecified -- same shape as a spell slot level plus
+  the recovery tag. Unlike ability scores/saving throws/spellcasting, there is **no** markdown
+  auto-extraction for these -- the Features & Traits prose that describes them is far more
+  heterogeneous per class than the one canonical `**Spellcasting:**` bullet spellcasting reads
+  from, so reliably parsing name/count/recovery-cadence out of arbitrary text was judged too
+  fragile to risk silently mis-tracking a resource during real play. They're entered by hand on
+  the token sheet instead (see `ui/app.js`'s Resources section) -- a deliberate, known gap,
   documented alongside Troll's Regeneration above. `useResource()`/`restoreResource()` look the
   resource name up case-insensitively (`findResourceKey()`) so narration/Claude saying "rage"
   still matches a stored "Rage" key, and return/mutate using the sheet's own stored casing.
+  Because `updateToken()`'s `resources` merge replaces a resource's *whole* entry per name (not
+  a deep per-field merge), any caller that edits just `current`/`max` (like the token editor's
+  combined field) must re-send the existing `recovery` alongside it, or `normalizeResources()`
+  will silently reset it back to `"long"` -- `ui/app.js`'s resource-row current/max handler and
+  its recovery `<select>` both do this correctly; follow that pattern for any new editor.
 - Concentration: a token's `concentratingOn` field is either absent or `{spell: "<name>"}`.
   Only `castSpell({concentration: true})` sets it (auto-ending any different spell the same
   caster was already concentrating on) and `dropConcentration()` clears it voluntarily.
@@ -123,6 +130,16 @@ See README.md for the full feature list and usage. Notes specific to working on 
   target to/keep it at 0, so re-read that loop's comment before touching it again. This
   applies uniformly to every token type -- a deliberate simplification of RAW, which reserves
   death saves for PCs and leaves monsters to the DM's discretion at 0 HP.
+- Rest automation: `longRest()` sets `hp = maxHp` and every `spellSlots[level].current`/
+  `resources[name].current` to their max, skipping only the HP/`dying` part for a token
+  flagged `dead` (slots/resources still refresh regardless -- neither needs consciousness to
+  "have happened" during the rest). `shortRest()` restores only resources whose `recovery` is
+  `"short"`, and deliberately never touches HP or spell slots -- Hit Dice spending/recovery
+  isn't modeled at all (same known gap as Troll's Regeneration), and the one common class that
+  recovers slots on a short rest (Warlock Pact Magic) isn't special-cased either. Both
+  self-log like `rollDeathSave()`/`useResource()`, and both operate on one token at a time --
+  resting "the whole party" means the DM/Claude issues one `long_rest`/`short_rest` action per
+  token, there's no single "rest everyone" primitive.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

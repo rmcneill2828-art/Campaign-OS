@@ -379,6 +379,48 @@ test("applyActions folds an automatic failed death save into attack's combined m
   assert.match(messages[0], /automatic failed death save/);
 });
 
+test("applyActions resolves a long_rest action", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Sael",
+    hp: 10,
+    maxHp: 88,
+    spellSlots: { 1: { max: 4, current: 0 } }
+  }).state;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "long_rest", target: "Sael" }
+  ]);
+
+  assert.match(messages[0], /Fully healed \(88\/88 HP\)\./);
+  const sael = next.tokens.find((t) => t.name === "Sael");
+  assert.equal(sael.hp, 88);
+  assert.equal(sael.spellSlots[1].current, 4);
+});
+
+test("applyActions resolves a short_rest action", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    resources: { "Second Wind": { max: 1, current: 0, recovery: "short" } }
+  }).state;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "short_rest", target: "Darkhawk" }
+  ]);
+
+  assert.match(messages[0], /Restored: Second Wind\./);
+  assert.equal(next.tokens.find((t) => t.name === "Darkhawk").resources["Second Wind"].current, 1);
+});
+
+test("applyActions logs an unresolved-name message for long_rest/short_rest targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const longResult = CampaignOSDMBridge.applyActions(state, [{ type: "long_rest", target: "Nonexistent Goblin" }]);
+  assert.match(longResult.messages[0], /could not find "Nonexistent Goblin" to rest/);
+  const shortResult = CampaignOSDMBridge.applyActions(state, [{ type: "short_rest", target: "Nonexistent Goblin" }]);
+  assert.match(shortResult.messages[0], /could not find "Nonexistent Goblin" to rest/);
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

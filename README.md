@@ -67,15 +67,16 @@ dependencies to install for the app itself. See Tests, below, for running the te
   attack roll or narration decides who's affected.
 - Class resources: any token can track named limited-use resources (Rage, Wild Shape, Ki
   Points, Superiority Dice, Channel Divinity, Bardic Inspiration, etc.), each with a current
-  and max count. Add one from the token sheet's **Resources** section (name + max, starts
-  full); a **Use** button (or the Claude DM bridge's `use_resource` action -- there's no local
-  command-line phrasing for this one yet, unlike attacks/saves/spells) spends a charge and
-  fails outright once none are left, and **Restore** tops one back up (defaults to full) for
-  whenever a rest happens. Unlike ability scores/saving throws/spellcasting, these are **not**
-  auto-imported from character sheets -- class resources vary too much in name and phrasing
-  across classes to extract reliably from freeform prose, so add them by hand once per
-  character (a one-time setup, same as any other manually-entered field before its own
-  extractor existed).
+  and max count and a **recovery type** (Long rest, or Short/long rest -- whichever kind of
+  rest actually restores it in 5e). Add one from the token sheet's **Resources** section (name
+  + max + recovery, starts full); a **Use** button (or the Claude DM bridge's `use_resource`
+  action -- there's no local command-line phrasing for this one yet, unlike attacks/saves/
+  spells) spends a charge and fails outright once none are left, and **Restore** tops one back
+  up by hand (defaults to full) for a one-off recovery outside a full rest. Unlike ability
+  scores/saving throws/spellcasting, these are **not** auto-imported from character sheets --
+  class resources vary too much in name and phrasing across classes to extract reliably from
+  freeform prose, so add them by hand once per character (a one-time setup, same as any other
+  manually-entered field before its own extractor existed).
 - Concentration: casting a spell with the **Concentration** box checked (on the token sheet's
   Cast control, or the Claude DM bridge's `cast_spell` action with `concentration: true`)
   starts concentrating on it, automatically ending whatever that caster was already
@@ -103,6 +104,15 @@ dependencies to install for the app itself. See Tests, below, for running the te
   PCs and leaves monsters to the DM's judgment at 0 HP, but this engine applies the same
   tracker to every token type; a monster the DM just wants to consider dead at 0 HP can
   simply be left alone or edited directly.
+- Rest automation: **Long Rest** and **Short Rest** buttons on the token sheet (or `<name>
+  takes a long/short rest`, or the Claude DM bridge's `long_rest`/`short_rest` actions -- one
+  per token; issue several to rest the whole party at once). Long Rest fully heals HP and
+  restores every spell slot and every resource to max regardless of its recovery type, but
+  skips the HP/revival part for a token already flagged dead (that needs an actual revival,
+  not a rest). Short Rest only restores resources tagged **Short/long rest** -- it never
+  touches HP or spell slots, since Hit Dice spending/recovery isn't modeled (heal manually if
+  the party spends Hit Dice) and almost nothing but Warlock Pact Magic recovers slots on a
+  short rest, which also isn't specially handled.
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes
@@ -179,11 +189,12 @@ The "Claude DM" panel works two ways:
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
   token on the grid, advance to the next turn, switch to a different prepared map, roll a
   saving throw, cast a spell, spend a class resource, start or drop concentration, roll a
-  death save), referencing tokens by name and reasoning about the current encounter state --
-  including where everything stands on the grid, whose turn it is, how much movement each
-  token has left this turn, each token's ability scores, spellcasting (save DC, attack bonus,
-  remaining slots per level), named resources (Rage, Wild Shape, Ki Points, etc.), what it's
-  currently concentrating on, and its death-save status (dying/stable/dead), when known.
+  death save, take a long or short rest), referencing tokens by name and reasoning about the
+  current encounter state -- including where everything stands on the grid, whose turn it is,
+  how much movement each token has left this turn, each token's ability scores, spellcasting
+  (save DC, attack bonus, remaining slots per level), named resources (Rage, Wild Shape, Ki
+  Points, etc., each with its recovery type), what it's currently concentrating on, and its
+  death-save status (dying/stable/dead), when known.
   `next_turn` and
   `move_token` are what actually let Claude run the turn tracker and RAW speed-limited
   movement described above -- without calling `next_turn`, turn order never starts and
@@ -211,7 +222,10 @@ The "Claude DM" panel works two ways:
   work the same way for damage: a token dropping to 0 HP starts them, and further damage
   taken while already down is an automatic failure folded into that same action's message --
   Claude only has to explicitly call `roll_death_save` when a dying token's turn comes up
-  (per `next_turn`), since the engine has no notion of turn order on its own.
+  (per `next_turn`), since the engine has no notion of turn order on its own. `long_rest`
+  fully heals HP and restores every spell slot/resource to max (skipping the HP/revival part
+  for a token already flagged dead); `short_rest` only restores resources tagged as
+  short-rest recovery, leaving HP and spell slots untouched.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than

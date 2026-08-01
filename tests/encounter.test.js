@@ -690,13 +690,13 @@ test("addToken normalizes named resources, clamping out-of-range values and drop
     name: "Darkhawk",
     resources: {
       Rage: { max: 4, current: 4 },
-      "Second Wind": { max: 1, current: 5 }, // current clamped down to max
+      "Second Wind": { max: 1, current: 5, recovery: "short" }, // current clamped down to max
       Invalid: { max: 0, current: 0 } // max <= 0 is dropped entirely
     }
   });
   assert.deepEqual(token.resources, {
-    Rage: { max: 4, current: 4 },
-    "Second Wind": { max: 1, current: 1 }
+    Rage: { max: 4, current: 4, recovery: "long" }, // defaults to "long" when unspecified
+    "Second Wind": { max: 1, current: 1, recovery: "short" }
   });
 });
 
@@ -704,17 +704,31 @@ test("updateToken merges a partial resource change without wiping other resource
   const state = stateOnMap("Urskelde");
   const { state: withToken, token } = CampaignOS.addToken(state, {
     name: "Darkhawk",
-    resources: { Rage: { max: 4, current: 4 }, "Second Wind": { max: 1, current: 1 } }
+    resources: { Rage: { max: 4, current: 4 }, "Second Wind": { max: 1, current: 1, recovery: "short" } }
   });
 
-  const updated = CampaignOS.updateToken(withToken, token.id, { resources: { Rage: { max: 4, current: 2 } } });
+  const updated = CampaignOS.updateToken(withToken, token.id, { resources: { Rage: { max: 4, current: 2, recovery: "long" } } });
   assert.deepEqual(updated.tokens[0].resources, {
-    Rage: { max: 4, current: 2 },
-    "Second Wind": { max: 1, current: 1 }
+    Rage: { max: 4, current: 2, recovery: "long" },
+    "Second Wind": { max: 1, current: 1, recovery: "short" }
   });
 
   const removed = CampaignOS.updateToken(updated, token.id, { resources: { "Second Wind": null } });
-  assert.deepEqual(removed.tokens[0].resources, { Rage: { max: 4, current: 2 } });
+  assert.deepEqual(removed.tokens[0].resources, { Rage: { max: 4, current: 2, recovery: "long" } });
+});
+
+test("updateToken's resources merge preserves an existing resource's recovery type when only current/max are re-sent", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    resources: { "Wild Shape": { max: 2, current: 2, recovery: "short" } }
+  });
+  // Simulates the UI's current/max edit field, which resends the resource's own recovery
+  // value alongside the edited numbers so it isn't silently reset to the "long" default.
+  const updated = CampaignOS.updateToken(withToken, token.id, {
+    resources: { "Wild Shape": { max: 2, current: 1, recovery: "short" } }
+  });
+  assert.deepEqual(updated.tokens[0].resources["Wild Shape"], { max: 2, current: 1, recovery: "short" });
 });
 
 test("updateToken clears the resources field entirely once the last resource is removed", () => {
@@ -1101,4 +1115,113 @@ test("parseCommand resolves a death-save command by token name", () => {
 
   const result = withRandom([0.45], () => CampaignOS.parseCommand(state, "Darkhawk rolls a death save."));
   assert.match(result.message, /success \(1\/3\)/);
+});
+
+test("longRest fully heals HP, restores all spell slots, and restores all resources regardless of recovery type", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    hp: 10,
+    maxHp: 88,
+    spellSlots: { 1: { max: 4, current: 0 }, 2: { max: 3, current: 1 } },
+    resources: {
+      "Wild Shape": { max: 2, current: 0, recovery: "short" },
+      Rage: { max: 4, current: 1, recovery: "long" }
+    }
+  });
+
+  const result = CampaignOS.longRest(withToken, token.id);
+  const rested = result.state.tokens[0];
+  assert.equal(rested.hp, 88);
+  assert.equal(rested.spellSlots[1].current, 4);
+  assert.equal(rested.spellSlots[2].current, 3);
+  assert.equal(rested.resources["Wild Shape"].current, 2);
+  assert.equal(rested.resources.Rage.current, 4);
+  assert.match(result.message, /Sael takes a long rest\./);
+  assert.match(result.message, /Fully healed \(88\/88 HP\)\./);
+  assert.match(result.message, /All spell slots restored\./);
+  assert.match(result.message, /All resources restored\./);
+});
+
+test("longRest skips healing/reviving a token flagged dead, but still refreshes its slots and resources", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    hp: 1,
+    maxHp: 50,
+    spellSlots: { 1: { max: 2, current: 0 } }
+  });
+  withToken = CampaignOS.applyDamage(withToken, token.id, 1).state; // down, dying
+  withToken = CampaignOS.applyDamage(withToken, token.id, 5).state; // 1 failure
+  withToken = CampaignOS.applyDamage(withToken, token.id, 5, { critical: true }).state; // 3 failures -> dead
+
+  const result = CampaignOS.longRest(withToken, token.id);
+  const rested = result.state.tokens[0];
+  assert.equal(rested.dead, true, "a long rest should not revive a token flagged dead");
+  assert.equal(rested.hp, 0);
+  assert.equal(rested.spellSlots[1].current, 2, "slots still refresh even though the token is dead");
+  assert.ok(!/Fully healed/.test(result.message));
+});
+
+test("longRest reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.longRest(state, "nonexistent-id");
+  assert.match(result.message, /token was not found/);
+  assert.equal(result.state, state);
+});
+
+test("shortRest restores only resources tagged recovery: 'short', leaving spell slots and long-only resources untouched", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    hp: 10,
+    maxHp: 88,
+    spellSlots: { 1: { max: 4, current: 0 } },
+    resources: {
+      "Wild Shape": { max: 2, current: 0, recovery: "short" },
+      Rage: { max: 4, current: 1, recovery: "long" }
+    }
+  });
+
+  const result = CampaignOS.shortRest(withToken, token.id);
+  const rested = result.state.tokens[0];
+  assert.equal(rested.hp, 10, "a short rest does not restore HP -- Hit Dice aren't modeled");
+  assert.equal(rested.spellSlots[1].current, 0, "spell slots don't recover on a short rest");
+  assert.equal(rested.resources["Wild Shape"].current, 2);
+  assert.equal(rested.resources.Rage.current, 1, "a long-only resource is untouched by a short rest");
+  assert.match(result.message, /Sael takes a short rest\. Restored: Wild Shape\./);
+});
+
+test("shortRest reports when a token has no short-rest resources to restore", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    resources: { Rage: { max: 4, current: 1, recovery: "long" } }
+  });
+  const result = CampaignOS.shortRest(withToken, token.id);
+  assert.match(result.message, /Darkhawk takes a short rest -- no short-rest resources to restore\./);
+});
+
+test("shortRest reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.shortRest(state, "nonexistent-id");
+  assert.match(result.message, /token was not found/);
+  assert.equal(result.state, state);
+});
+
+test("parseCommand resolves long-rest and short-rest commands by token name", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    hp: 10,
+    maxHp: 88,
+    resources: { "Wild Shape": { max: 2, current: 0, recovery: "short" } }
+  });
+
+  const longRested = CampaignOS.parseCommand(withToken, "Sael takes a long rest.");
+  assert.match(longRested.message, /Fully healed \(88\/88 HP\)\./);
+
+  const shortRested = CampaignOS.parseCommand(withToken, "Sael takes a short rest.");
+  assert.match(shortRested.message, /Restored: Wild Shape\./);
+  assert.equal(shortRested.state.tokens.find((t) => t.id === token.id).hp, 10, "a short rest via parseCommand should not touch HP");
 });
