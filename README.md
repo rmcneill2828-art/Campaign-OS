@@ -306,6 +306,29 @@ the default) occasionally under-use attached context on oddly-phrased or self-re
 commands -- if narration seems to ignore it, try rephrasing, or set `DM_BRIDGE_MODEL=sonnet` for
 more consistent context use.
 
+### Live Claude Code control (no subprocess)
+
+The request/response flow above is one Claude Code call *per command*, cold-started every time.
+If you're already working in this repo with Claude Code (an editor session, not the
+`dm-bridge/watch.js` subprocess), it can control the board directly instead -- reading the current
+state and pushing moves/attacks/whatever with no `claude -p` round trip and no narrow JSON-only
+system prompt, just its normal Read/Write tools and full reasoning.
+
+Once you've clicked **Connect to Claude Code** (same folder picker, same permission as above --
+no separate connect step needed), the app automatically:
+
+- Writes `dm-bridge/live-state.json` -- the full current board (map, tokens, HP, conditions,
+  spellcasting, concentration, exhaustion, everything) -- every time anything changes.
+- Polls `dm-bridge/live-actions.json` every 2 seconds for a new batch to apply -- same
+  `{"message": "...", "actions": [...]}` shape as `response.json`, using the same action
+  vocabulary documented in `dm-bridge/watch.js`'s system prompt (`attack`, `move_token`,
+  `cast_spell`, `use_resource`, `roll_death_save`, and so on).
+
+To actually drive the board this way, tell Claude Code (in your editor session) what you want to
+happen -- it reads `dm-bridge/live-state.json` for the current truth and writes
+`dm-bridge/live-actions.json` with a fresh `id` each time. See `CLAUDE.md` for the exact contract
+if you're the one writing that code path.
+
 ### Writing session results back to the campaign repo
 
 Campaign-OS only *imports* from your DnD campaign repo -- combat and narration run here don't

@@ -122,6 +122,15 @@
   let dmBridgePendingId = null;
   let dmBridgePollTimer = null;
   let dmBridgeTimeoutHandle = null;
+  // Separate from the request/response pair above: a live Claude Code session (e.g. working
+  // in this repo from an editor, not the dm-bridge/watch.js subprocess flow) reads
+  // dm-bridge/live-state.json for the current board and pushes dm-bridge/live-actions.json to
+  // control it directly -- no `claude -p` subprocess, no per-command request/response
+  // round trip. See CLAUDE.md for the file contract. lastLiveActionId tracks which batch was
+  // already applied, the same "don't reprocess a stale write" pattern watch.js uses for its
+  // own request files.
+  let liveActionsPollTimer = null;
+  let lastLiveActionId = null;
   // The actual round trip is a real `claude -p` subprocess invocation (CLI cold-start,
   // system prompt load, generation), not a direct API call -- watched one take 84s for a
   // fairly ordinary combat command, well past the 20s this used to allow. 2 minutes gives
@@ -1842,6 +1851,10 @@
     dmBridgeStatus.textContent = `Connected to "${handle.name}" -- run dm-bridge/watch.js to process commands`;
     dmBridgeStatus.classList.add("connected");
     startDMBridgePolling();
+    primeLiveActionId().then(startLiveActionsPolling);
+    writeLiveStateSnapshot().catch((err) => {
+      console.warn("[Campaign OS] Couldn't write dm-bridge/live-state.json:", err.message || err);
+    });
   }
 
   // Runs once at startup: if a folder was connected in a previous session and the
@@ -2064,6 +2077,44 @@
     commandResult.textContent = `${entry.name} attached to ${token.name}.`;
   }
 
+  // The board-state shape both the request/response flow (below) and the continuous
+  // live-state.json export (further down) send -- kept in one place so the two channels
+  // can't silently drift apart on which fields a reader can rely on.
+  function buildBridgeStateSnapshot() {
+    return {
+      mapName: state.mapName,
+      grid: window.CampaignOS.currentGrid(state),
+      round: state.turn?.round || 0,
+      activeToken: activeTokens().find((token) => token.id === state.turn?.tokenId)?.name || null,
+      lairActionUsedThisRound: state.lairActionRound === (state.turn?.round || 0),
+      availableMaps: loadedMapNames().filter((name) => name !== state.mapName),
+      tokens: activeTokens().map((token) => ({
+        name: token.name,
+        type: token.type,
+        x: token.x,
+        y: token.y,
+        hp: token.hp,
+        maxHp: token.maxHp,
+        ac: token.ac,
+        // effectiveSpeed reflects exhaustion's movement penalty (halved at level 2+, zero
+        // at level 5+) -- a mover needs the speed actually usable this turn, not the token's
+        // true, unpenalized speed.
+        speed: window.CampaignOS.effectiveSpeed(token),
+        movementLeft: Math.max(0, window.CampaignOS.effectiveSpeed(token) - (token.movementUsed || 0)),
+        conditions: token.conditions,
+        abilityScores: token.abilityScores,
+        spellcasting: token.spellcasting,
+        spellSlots: token.spellSlots,
+        resources: token.resources,
+        concentratingOn: token.concentratingOn,
+        dying: token.dying,
+        dead: token.dead,
+        exhaustion: token.exhaustion,
+        legendaryActions: token.legendaryActions
+      }))
+    };
+  }
+
   async function sendDMBridgeCommand(command) {
     const id = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const payload = {
@@ -2072,38 +2123,7 @@
       context: dmBridgeContext
         ? { title: dmBridgeContext.title, text: dmBridgeContext.text.slice(0, dmBridgeContextMaxChars) }
         : null,
-      state: {
-        mapName: state.mapName,
-        grid: window.CampaignOS.currentGrid(state),
-        round: state.turn?.round || 0,
-        activeToken: activeTokens().find((token) => token.id === state.turn?.tokenId)?.name || null,
-        lairActionUsedThisRound: state.lairActionRound === (state.turn?.round || 0),
-        availableMaps: loadedMapNames().filter((name) => name !== state.mapName),
-        tokens: activeTokens().map((token) => ({
-          name: token.name,
-          type: token.type,
-          x: token.x,
-          y: token.y,
-          hp: token.hp,
-          maxHp: token.maxHp,
-          ac: token.ac,
-          // effectiveSpeed reflects exhaustion's movement penalty (halved at level 2+, zero
-          // at level 5+) -- Claude's move_token decisions need the speed actually usable
-          // this turn, not the token's true, unpenalized speed.
-          speed: window.CampaignOS.effectiveSpeed(token),
-          movementLeft: Math.max(0, window.CampaignOS.effectiveSpeed(token) - (token.movementUsed || 0)),
-          conditions: token.conditions,
-          abilityScores: token.abilityScores,
-          spellcasting: token.spellcasting,
-          spellSlots: token.spellSlots,
-          resources: token.resources,
-          concentratingOn: token.concentratingOn,
-          dying: token.dying,
-          dead: token.dead,
-          exhaustion: token.exhaustion,
-          legendaryActions: token.legendaryActions
-        }))
-      },
+      state: buildBridgeStateSnapshot(),
       createdAt: new Date().toISOString()
     };
 
@@ -2166,6 +2186,65 @@
     recordTranscript(response.message);
     commandResult.textContent = response.message || "(The DM assistant didn't include a narration.)";
     render();
+  }
+
+  // Broadcasts the current board to dm-bridge/live-state.json whenever it changes (see
+  // saveEncounter()), so a live Claude Code session working in this repo -- not the
+  // watch.js subprocess flow -- always has an up-to-date view without polling for it.
+  // Fire-and-forget from saveEncounter()'s many call sites; a failure here shouldn't block
+  // whatever state change triggered it, just get logged.
+  async function writeLiveStateSnapshot() {
+    if (!dmBridgeDirHandle) return;
+    await writeBridgeJson("live-state.json", {
+      state: buildBridgeStateSnapshot(),
+      log: state.log || [],
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  // The other half of live-session control: dm-bridge/live-actions.json is a push channel a
+  // live Claude Code session writes to directly (same {message, actions} shape as
+  // response.json) -- no request first, no subprocess. Polls continuously once connected
+  // (unlike checkDMBridgeResponse, which only checks while a request/response round trip is
+  // actually pending), and applies a batch exactly once by tracking its id, the same
+  // stale-write guard watch.js itself uses for request files.
+  async function checkLiveActions() {
+    if (!dmBridgeDirHandle) return;
+    let payload;
+    try {
+      payload = await readBridgeJson("live-actions.json");
+    } catch (err) {
+      console.warn("[Campaign OS] Couldn't read dm-bridge/live-actions.json this poll:", err.message || err);
+      return;
+    }
+    if (!payload || !payload.id || payload.id === lastLiveActionId) return;
+    lastLiveActionId = payload.id;
+
+    const { state: withActions, messages: actionMessages } = window.CampaignOSDMBridge.applyActions(state, payload.actions || []);
+    const enriched = await applyLibraryImages(withActions);
+    state = enriched.state;
+    saveEncounter();
+    actionMessages.forEach(recordTranscript);
+    if (payload.message) recordTranscript(payload.message);
+    commandResult.textContent = payload.message || "(Claude Code updated the board.)";
+    render();
+  }
+
+  function startLiveActionsPolling() {
+    if (liveActionsPollTimer) return;
+    liveActionsPollTimer = setInterval(checkLiveActions, 2000);
+  }
+
+  // Runs once right after connecting so a live-actions.json left over from a previous
+  // session isn't replayed against however the board looks now -- same reasoning as
+  // watch.js's primeLastProcessedId for request files.
+  async function primeLiveActionId() {
+    try {
+      const existing = await readBridgeJson("live-actions.json");
+      lastLiveActionId = existing?.id || null;
+    } catch {
+      lastLiveActionId = null;
+    }
   }
 
   async function writeBridgeJson(name, obj) {
@@ -2342,6 +2421,11 @@
 
   function saveEncounter() {
     localStorage.setItem(storageKey, JSON.stringify(state));
+    if (dmBridgeDirHandle) {
+      writeLiveStateSnapshot().catch((err) => {
+        console.warn("[Campaign OS] Couldn't write dm-bridge/live-state.json:", err.message || err);
+      });
+    }
   }
 
   // Everything worth remembering for the "End Session" write-back -- combat log lines

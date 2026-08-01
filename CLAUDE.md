@@ -14,11 +14,10 @@ See README.md for the full feature list and usage. Notes specific to working on 
 - `engine/` -- pure, DOM-free logic: `encounter.js` (state, tokens, combat, movement, turn
   order, saving throws, spellcasting/spell slots, named class resources, concentration, death
   saves, rest automation, exhaustion, legendary/lair actions), `campaign.js` (markdown
-  import/parsing), `dmBridge.js`
-  (translates the Claude DM bridge's actions into engine calls), `characterCreator.js` (5e math
-  + markdown generation for new character sheets). Runnable and unit-tested under Node
-  (`npm test`). Keep it that way: no `document`/`window` DOM access, no async IndexedDB/File
-  System Access calls here -- those belong in `ui/`.
+  import/parsing), `dmBridge.js` (translates the Claude DM bridge's actions into engine calls),
+  `characterCreator.js` (5e math + markdown generation for new character sheets). Runnable and
+  unit-tested under Node (`npm test`). Keep it that way: no `document`/`window` DOM access, no
+  async IndexedDB/File System Access calls here -- those belong in `ui/`.
 - `ui/` -- browser glue: `app.js` (rendering, event wiring), the IndexedDB-backed stores
   (`imageStore.js`, `tokenLibrary.js`, `mapLibrary.js`, `dmBridgeStore.js`), and the File System
   Access folder-reference layer (`assetFolders.js` persists picked directory handles,
@@ -32,6 +31,11 @@ See README.md for the full feature list and usage. Notes specific to working on 
   `create-character-request.json`/`create-character-response.json` for writing a new character
   sheet (no Claude call at all -- the browser already computed the markdown, so this is a plain
   file write with an overwrite guard and filename sanitization via `path.basename()`).
+- `dm-bridge/live-state.json` / `dm-bridge/live-actions.json` -- a *fourth*, separate channel in
+  the same connected folder, but `watch.js` never touches these two and no subprocess is
+  involved at all. They exist for a live Claude Code session already working in this repo (an
+  editor session -- not a `claude -p` cold-start per command) to control the board directly.
+  See the "Live-session control contract" constraint below for the exact shape.
 
 ## Constraints that aren't obvious from reading the code
 - `api.anthropic.com` rejects CORS from arbitrary origins (verified against the live API) --
@@ -188,6 +192,34 @@ See README.md for the full feature list and usage. Notes specific to working on 
   state, not per-map -- a deliberate simplification, since modeling a synthetic initiative-20
   slot per map would be a much bigger turn-order restructuring than this feature's scope
   warranted.
+- Live-session control contract: if you (a live Claude Code session working in this repo, not
+  the `dm-bridge/watch.js` subprocess) are asked to control the board directly, this is the
+  channel -- no `claude -p` call, no editing `watch.js`.
+  - **Read `dm-bridge/live-state.json`** for the current truth: `{state: {mapName, grid, round,
+    activeToken, lairActionUsedThisRound, availableMaps, tokens: [...]}, log, updatedAt}`. The
+    app (`ui/app.js`'s `buildBridgeStateSnapshot()`) rewrites this file on every state change
+    while the DM bridge folder is connected -- it's always current, no request needed first.
+    Each token already has `speed`/`movementLeft` as the exhaustion-adjusted *effective* value
+    (see `effectiveSpeed()`), not the raw stored speed.
+  - **Write `dm-bridge/live-actions.json`** to act: `{"id": "<unique per write>", "message":
+    "<narration>", "actions": [ ... ]}`. The action vocabulary/shapes are exactly the ones
+    `dm-bridge/watch.js`'s `SYSTEM_PROMPT` constant documents (`attack`, `move_token`,
+    `cast_spell`, `use_resource`, `roll_death_save`, `use_legendary_action`,
+    `trigger_lair_action`, etc.) -- read that constant as the single source of truth for shapes
+    rather than guessing or duplicating it here, since it's kept in sync with `isValidAction`.
+    A fresh, never-before-seen `id` is required -- `ui/app.js`'s `checkLiveActions()` polls this
+    file every 2s and applies a batch exactly once (tracked via `lastLiveActionId`, primed on
+    connect so a stale leftover file from a previous session isn't replayed); the same `id`
+    written twice is silently ignored the second time.
+  - This only works once the app has a DM bridge folder connected (**Connect to Claude Code**
+    button) -- same folder/permission `watch.js` uses, but this channel is independent of it;
+    `watch.js` never reads or writes these two files.
+  - Verified via Playwright using an OPFS directory as a same-interface stand-in for a picked
+    folder (override `window.showDirectoryPicker` to resolve to
+    `(await navigator.storage.getDirectory()).getDirectoryHandle(...)`), the same technique the
+    Testing section below describes -- there's no automated suite entry for this (UI/File
+    System Access glue, same as the existing request/response flow), just a one-off dev-time
+    verification.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure
