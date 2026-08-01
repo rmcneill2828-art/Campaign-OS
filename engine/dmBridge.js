@@ -161,6 +161,12 @@
         const result = window.CampaignOS.shortRest(state, target.id);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
+      case "add_exhaustion": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" for exhaustion.`, alreadyLogged: false };
+        const result = window.CampaignOS.addExhaustion(state, target.id, action.amount);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
       case "switch_map": {
         const mapName = String(action.map || "").trim();
         const nextState = window.CampaignOS.setActiveMap(state, mapName);

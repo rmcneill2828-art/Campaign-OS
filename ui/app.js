@@ -637,7 +637,7 @@
       if (token.id === activeTokenId) classes.push("current-turn");
       item.className = classes.join(" ");
       const movementNote = token.id === activeTokenId
-        ? `<small>${Math.max(0, (token.speed ?? 30) - (token.movementUsed || 0))} ft left</small>`
+        ? `<small>${Math.max(0, window.CampaignOS.effectiveSpeed(token) - (token.movementUsed || 0))} ft left</small>`
         : "";
       const deathBadge = token.dead
         ? `<small class="death-badge death-badge-dead">DEAD</small>`
@@ -677,6 +677,11 @@
           <button type="button" data-action="roll-death-save">Roll Death Save</button>
         </p>
       ` : ""}
+      <p class="exhaustion-status ${token.exhaustion ? "exhaustion-status-active" : ""}" title="Level 3+ forces disadvantage on attacks/saves; level 2+ halves and level 5+ zeroes speed; level 6 kills outright.">
+        Exhaustion: ${token.exhaustion || 0}/6
+        <button type="button" data-action="exhaustion-minus">-1</button>
+        <button type="button" data-action="exhaustion-plus">+1</button>
+      </p>
       <div class="token-portrait">
         <div class="portrait-preview">${token.image ? `<img data-portrait-image alt="">` : `<span>${escapeHtml(token.icon)}</span>`}</div>
         <label>
@@ -725,7 +730,11 @@
           </label>
           <label>
             Moved (ft)
-            <input value="${token.movementUsed || 0} / ${token.speed ?? 30}" disabled>
+            <input value="${token.movementUsed || 0} / ${window.CampaignOS.effectiveSpeed(token)}" disabled title="Reflects exhaustion's speed penalty, if any -- edit Speed above to change the token's true, unpenalized speed.">
+          </label>
+          <label>
+            Exhaustion
+            <input name="exhaustion" type="number" min="0" max="6" value="${token.exhaustion || 0}">
           </label>
         </div>
         <p class="subheading">Ability Scores</p>
@@ -946,6 +955,7 @@
         attackBonus: form.get("attackBonus"),
         damageDice: form.get("damageDice"),
         speed: form.get("speed"),
+        exhaustion: form.get("exhaustion"),
         abilityScores,
         spellcasting,
         spellSlots
@@ -1036,6 +1046,21 @@
         render();
       });
     }
+
+    tokenSheet.querySelector('[data-action="exhaustion-plus"]').addEventListener("click", () => {
+      const result = window.CampaignOS.addExhaustion(state, token.id, 1);
+      state = result.state;
+      saveEncounter();
+      commandResult.textContent = result.message;
+      render();
+    });
+    tokenSheet.querySelector('[data-action="exhaustion-minus"]').addEventListener("click", () => {
+      const result = window.CampaignOS.addExhaustion(state, token.id, -1);
+      state = result.state;
+      saveEncounter();
+      commandResult.textContent = result.message;
+      render();
+    });
 
     const hpControl = tokenSheet.querySelector(".hp-control");
     const hpAmount = () => Number(new FormData(hpControl).get("amount")) || 1;
@@ -2040,8 +2065,11 @@
           hp: token.hp,
           maxHp: token.maxHp,
           ac: token.ac,
-          speed: token.speed ?? 30,
-          movementLeft: Math.max(0, (token.speed ?? 30) - (token.movementUsed || 0)),
+          // effectiveSpeed reflects exhaustion's movement penalty (halved at level 2+, zero
+          // at level 5+) -- Claude's move_token decisions need the speed actually usable
+          // this turn, not the token's true, unpenalized speed.
+          speed: window.CampaignOS.effectiveSpeed(token),
+          movementLeft: Math.max(0, window.CampaignOS.effectiveSpeed(token) - (token.movementUsed || 0)),
           conditions: token.conditions,
           abilityScores: token.abilityScores,
           spellcasting: token.spellcasting,
@@ -2049,7 +2077,8 @@
           resources: token.resources,
           concentratingOn: token.concentratingOn,
           dying: token.dying,
-          dead: token.dead
+          dead: token.dead,
+          exhaustion: token.exhaustion
         }))
       },
       createdAt: new Date().toISOString()

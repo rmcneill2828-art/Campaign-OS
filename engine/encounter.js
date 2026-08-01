@@ -379,6 +379,8 @@
   // pass/fail -- it does not apply any follow-up effect (e.g. half damage on a success);
   // narration/subsequent actions apply damage or conditions based on the reported result
   // separately, the same way a real table resolves a save before deciding the consequence.
+  // Exhaustion level 3+ forces disadvantage on the roll automatically (RAW) -- derived from
+  // the token's own state, not something a caller has to remember to pass in.
   function rollSavingThrow(state, tokenId, ability, dc) {
     const key = String(ability || "").toUpperCase().slice(0, 3);
     if (!ABILITY_KEYS.includes(key)) {
@@ -389,11 +391,14 @@
     if (!token) return { state, message: "Saving throw failed: token was not found.", success: false };
 
     const bonus = savingThrowBonus(token, key);
-    const roll = rollDie(20);
+    const exhausted = (token.exhaustion || 0) >= 3;
+    const d20Info = rollD20WithMode(exhausted ? "disadvantage" : null);
+    const roll = d20Info.roll;
     const total = roll + bonus;
     const dcNumber = Number(dc) || 0;
     const success = total >= dcNumber;
-    const message = `${token.name} rolls a ${key} save: ${roll} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dcNumber}. ${success ? "Success" : "Failure"}.`;
+    const rollLabel = d20Info.rolls.length ? `${roll} (exhaustion disadvantage: ${d20Info.rolls.join(", ")})` : `${roll}`;
+    const message = `${token.name} rolls a ${key} save: ${rollLabel} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dcNumber}. ${success ? "Success" : "Failure"}.`;
     return { state: addLogEntry(state, message), message, success, total };
   }
 
@@ -523,11 +528,12 @@
   }
 
   // A long rest (~8 hours): full HP, every spell slot back to max, every resource back to
-  // max regardless of its recovery tag. Skips only the HP/revival part for a token flagged
-  // dead -- a long rest isn't a substitute for Raise Dead/Revivify -- but still refreshes
-  // slots/resources regardless, since neither requires the token to be conscious for the
-  // rest to have happened around them. Hit Dice aren't modeled (same known simplification as
-  // Troll's Regeneration), so there's no separate Hit Dice recovery step here.
+  // max regardless of its recovery tag, and one level of exhaustion removed (RAW). Skips
+  // only the HP/revival part for a token flagged dead -- a long rest isn't a substitute for
+  // Raise Dead/Revivify -- but still refreshes slots/resources/exhaustion regardless, since
+  // none of those require the token to be conscious for the rest to have happened around
+  // them. Hit Dice aren't modeled (same known simplification as Troll's Regeneration), so
+  // there's no separate Hit Dice recovery step here.
   function longRest(state, tokenId) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
@@ -549,6 +555,12 @@
     if (token.resources && Object.keys(token.resources).length) {
       Object.values(token.resources).forEach((resource) => { resource.current = resource.max; });
       messages.push("All resources restored.");
+    }
+
+    if (token.exhaustion) {
+      token.exhaustion = clampNumber(token.exhaustion - 1, 0, 6);
+      if (token.exhaustion === 0) delete token.exhaustion;
+      messages.push(`Exhaustion reduced to ${token.exhaustion || 0}.`);
     }
 
     const message = messages.join(" ");
@@ -694,6 +706,47 @@
     return { state: addLogEntry(nextState, message), message };
   }
 
+  // Sets a token's exhaustion level directly (0-6, clamped) -- e.g. a DM ruling, or an
+  // effect that removes it outright (Greater Restoration). Reaching level 6 kills the token
+  // instantly per RAW (no save, no death-save roll), clearing any in-progress death-save
+  // tracking the same way it would for any other death. Only the automatic level-based
+  // effects this engine actually models are documented here -- disadvantage on attack rolls
+  // and saving throws at level 3+ (see attack()/rollSavingThrow()) and halved/zeroed speed at
+  // level 2+/5+ (see effectiveSpeed()) -- disadvantage on ability checks (level 1) isn't
+  // modeled since ability checks aren't a mechanic this engine has at all, and a halved HP
+  // maximum (level 4) isn't automated either (same known-gap spirit as Troll's Regeneration
+  // or Hit Dice): halve maxHp by hand via the token editor if actual play reaches that point.
+  function setExhaustion(state, tokenId, level) {
+    const nextState = clone(state);
+    const token = nextState.tokens.find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Exhaustion failed: token was not found." };
+
+    const clamped = clampNumber(level, 0, 6);
+    if (clamped > 0) token.exhaustion = clamped;
+    else delete token.exhaustion;
+
+    let message = `${token.name} is now at exhaustion level ${clamped}.`;
+    if (clamped >= 6) {
+      token.hp = 0;
+      token.dead = true;
+      delete token.dying;
+      message += ` ${token.name} dies from exhaustion.`;
+    }
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // Adds (or, with a negative amount, removes) exhaustion levels -- e.g. a forced march adds
+  // one, Greater Restoration removes one. Delegates to setExhaustion for the clamping/death
+  // handling so both paths stay consistent; default amount is 1 (gaining a single level, the
+  // common case).
+  function addExhaustion(state, tokenId, amount) {
+    const token = state.tokens.find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Exhaustion failed: token was not found." };
+    const current = token.exhaustion || 0;
+    const delta = Number.isFinite(Number(amount)) ? Number(amount) : 1;
+    return setExhaustion(state, tokenId, current + delta);
+  }
+
   // Healing that brings a token back above 0 HP ends any in-progress death-save tracking
   // (dying or already-stable) and clears a dead flag too -- if the caller chose to heal a
   // token flagged dead, that's a deliberate narrative revival (Revivify, Raise Dead, DM
@@ -760,6 +813,16 @@
 
     if (changes.speed !== undefined) {
       token.speed = clampNumber(changes.speed, 0, 999);
+    }
+
+    // A manual exhaustion edit is a direct correction (like the hp branch above), not a real
+    // game event -- it does NOT trigger the level-6 death that setExhaustion()/addExhaustion()
+    // apply for an actual narrative gain, matching how editing hp to 0 here doesn't start
+    // death saves either.
+    if (changes.exhaustion !== undefined) {
+      const level = clampNumber(changes.exhaustion, 0, 6);
+      if (level > 0) token.exhaustion = level;
+      else delete token.exhaustion;
     }
 
     if (changes.abilityScores !== undefined) {
@@ -966,6 +1029,9 @@
   // against a target that was already at 0 HP before this call -- that's a real, meaningful
   // hit against a downed creature (an automatic failed death save, see applyDamage), not a
   // dead action; only a target removed from the map entirely stops the loop outright.
+  // Exhaustion level 3+ forces disadvantage on the attacker's rolls (RAW), same as
+  // rollSavingThrow -- combined with an explicit options.advantage, they cancel out per RAW
+  // rather than exhaustion silently winning.
   function attack(state, attackerId, targetId, options = {}) {
     let nextState = clone(state);
     const activeTokens = tokensOnCurrentMap(nextState);
@@ -975,7 +1041,9 @@
       return { state, message: "Attack failed: attacker or target was not found." };
     }
 
-    const mode = options.disadvantage ? "disadvantage" : options.advantage ? "advantage" : null;
+    const hasDisadvantage = Boolean(options.disadvantage) || (attacker.exhaustion || 0) >= 3;
+    const hasAdvantage = Boolean(options.advantage);
+    const mode = hasDisadvantage && hasAdvantage ? null : hasDisadvantage ? "disadvantage" : hasAdvantage ? "advantage" : null;
     const profiles = Array.isArray(attacker.attacks) && attacker.attacks.length
       ? attacker.attacks
       : [{ name: null, attackBonus: attacker.attackBonus, damageDice: attacker.damageDice }];
@@ -1074,6 +1142,19 @@
     return nextState;
   }
 
+  // The speed actually usable this turn once exhaustion's movement penalties are applied
+  // (RAW: halved at level 2+, reduced to 0 at level 5+ -- the two thresholds don't stack
+  // further beyond that). `token.speed` itself always stays the creature's true,
+  // unpenalized speed, so the penalty can't accidentally become permanent if exhaustion is
+  // later removed.
+  function effectiveSpeed(token) {
+    const base = Number(token.speed ?? 30);
+    const level = token.exhaustion || 0;
+    if (level >= 5) return 0;
+    if (level >= 2) return Math.floor(base / 2);
+    return base;
+  }
+
   // Speed-limited move for the token whose turn is currently active (per state.turn) --
   // computes the RAW grid cost (see gridMoveCost) against that token's remaining movement
   // this turn and rejects the move (same state reference, like setTokenPosition's occupied-
@@ -1091,7 +1172,7 @@
       return { state: moved, message: `${token.name} moves to (${x}, ${y}).` };
     }
 
-    const speed = Number(token.speed ?? 30);
+    const speed = effectiveSpeed(token);
     const used = Number(token.movementUsed || 0);
     const diagonalUsed = Number(token.diagonalStepsThisTurn || 0);
     const remaining = speed - used;
@@ -1201,6 +1282,18 @@
       if (!token) return { state, message: "I could not find who's resting." };
       return restMatch[2].toLowerCase() === "long" ? longRest(state, token.id) : shortRest(state, token.id);
     }
+
+    // "<name> gains a level of exhaustion" / "<name> gains 2 levels of exhaustion" /
+    // "<name> loses a level of exhaustion" -- same roll the token sheet's +1/-1 Level
+    // buttons make.
+    const exhaustionMatch = command.match(/^(.+?)\s+(gains?|loses?)\s+(?:an?|(\d+))\s+levels?\s+of\s+exhaustion\s*[.!?]?$/i);
+    if (exhaustionMatch) {
+      const token = findTokenByName(state, exhaustionMatch[1]);
+      if (!token) return { state, message: "I could not find who's gaining or losing exhaustion." };
+      const amount = exhaustionMatch[3] ? Number(exhaustionMatch[3]) : 1;
+      const signedAmount = exhaustionMatch[2].toLowerCase().startsWith("lose") ? -amount : amount;
+      return addExhaustion(state, token.id, signedAmount);
+    }
     if (castMatch) {
       const caster = findTokenByName(state, castMatch[1]);
       if (!caster) return { state, message: "I could not find who's casting." };
@@ -1243,6 +1336,7 @@
   window.CampaignOS = {
     ABILITY_KEYS,
     abilityModifier,
+    addExhaustion,
     addLogEntry,
     applyDamage,
     applyHealing,
@@ -1253,6 +1347,7 @@
     createState,
     dropConcentration,
     currentGrid,
+    effectiveSpeed,
     feetPerSquare,
     gridMoveCost,
     hasRealMapData,
@@ -1262,6 +1357,7 @@
     parseCommand,
     removeToken,
     restoreResource,
+    setExhaustion,
     shortRest,
     rollDeathSave,
     rollSavingThrow,

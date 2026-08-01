@@ -1225,3 +1225,170 @@ test("parseCommand resolves long-rest and short-rest commands by token name", ()
   assert.match(shortRested.message, /Restored: Wild Shape\./);
   assert.equal(shortRested.state.tokens.find((t) => t.id === token.id).hp, 10, "a short rest via parseCommand should not touch HP");
 });
+
+test("setExhaustion sets a token's level and logs it, clamping to 0-6", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk" });
+  const result = CampaignOS.setExhaustion(withToken, token.id, 3);
+  assert.equal(result.state.tokens[0].exhaustion, 3);
+  assert.match(result.message, /Darkhawk is now at exhaustion level 3\./);
+
+  const clamped = CampaignOS.setExhaustion(result.state, token.id, 99);
+  assert.equal(clamped.state.tokens[0].exhaustion, 6);
+});
+
+test("setExhaustion clears the field entirely when set back to 0", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk" });
+  const raised = CampaignOS.setExhaustion(withToken, token.id, 2).state;
+  const cleared = CampaignOS.setExhaustion(raised, token.id, 0);
+  assert.equal(cleared.state.tokens[0].exhaustion, undefined);
+});
+
+test("setExhaustion kills the token instantly at level 6, with no save", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", hp: 50, maxHp: 100 });
+  const result = CampaignOS.setExhaustion(withToken, token.id, 6);
+  assert.equal(result.state.tokens[0].hp, 0);
+  assert.equal(result.state.tokens[0].dead, true);
+  assert.equal(result.state.tokens[0].dying, undefined);
+  assert.match(result.message, /Darkhawk dies from exhaustion\./);
+});
+
+test("addExhaustion increments from the token's current level", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk" });
+  const first = CampaignOS.addExhaustion(withToken, token.id, 1);
+  assert.equal(first.state.tokens[0].exhaustion, 1);
+  const second = CampaignOS.addExhaustion(first.state, token.id, 2);
+  assert.equal(second.state.tokens[0].exhaustion, 3);
+});
+
+test("addExhaustion with a negative amount removes levels, floored at 0", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk" });
+  const raised = CampaignOS.addExhaustion(withToken, token.id, 2).state;
+  const reduced = CampaignOS.addExhaustion(raised, token.id, -5);
+  assert.equal(reduced.state.tokens[0].exhaustion, undefined);
+});
+
+test("addExhaustion reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.addExhaustion(state, "nonexistent-id", 1);
+  assert.match(result.message, /token was not found/);
+  assert.equal(result.state, state);
+});
+
+test("rollSavingThrow forces disadvantage at exhaustion level 3+", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", abilityScores: { CON: 10 } });
+  withToken = CampaignOS.setExhaustion(withToken, token.id, 3).state;
+
+  // disadvantage rolls [0.9 -> 19, 0.1 -> 3], keeps the lower (3).
+  const result = withRandom([0.9, 0.1], () => CampaignOS.rollSavingThrow(withToken, token.id, "CON", 10));
+  assert.match(result.message, /exhaustion disadvantage: 19, 3/);
+  assert.equal(result.total, 3);
+});
+
+test("rollSavingThrow rolls normally below exhaustion level 3", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", abilityScores: { CON: 10 } });
+  withToken = CampaignOS.setExhaustion(withToken, token.id, 2).state;
+
+  const result = withRandom([0.45], () => CampaignOS.rollSavingThrow(withToken, token.id, "CON", 10));
+  assert.ok(!/exhaustion disadvantage/.test(result.message));
+});
+
+test("attack forces disadvantage on the attacker's rolls at exhaustion level 3+", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 5, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 10, maxHp: 10 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  state = CampaignOS.setExhaustion(state, darkhawk.id, 3).state;
+
+  const result = withRandom([0.9, 0.1], () => CampaignOS.attack(state, darkhawk.id, goblin.id));
+  assert.match(result.message, /disadvantage: 19, 3/);
+});
+
+test("attack cancels exhaustion-forced disadvantage against an explicit advantage flag", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 5, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 10, maxHp: 10 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  state = CampaignOS.setExhaustion(state, darkhawk.id, 3).state;
+
+  const result = withRandom([0.5], () => CampaignOS.attack(state, darkhawk.id, goblin.id, { advantage: true }));
+  assert.ok(
+    !/advantage:/.test(result.message) && !/disadvantage:/.test(result.message),
+    "advantage and forced disadvantage should cancel out to a normal roll"
+  );
+});
+
+test("effectiveSpeed halves speed at exhaustion level 2-4 and zeroes it at level 5+", () => {
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30 }), 30);
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30, exhaustion: 1 }), 30);
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30, exhaustion: 2 }), 15);
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30, exhaustion: 4 }), 15);
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30, exhaustion: 5 }), 0);
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30, exhaustion: 6 }), 0);
+});
+
+test("moveToken uses the exhaustion-reduced effective speed, not the token's true speed", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", speed: 30, initiative: 10 }).state;
+  const token = state.tokens[0];
+  state = CampaignOS.setExhaustion(state, token.id, 2).state;
+  state = CampaignOS.nextTurn(state);
+
+  // 3 squares straight = 15 ft, exactly the halved 15 ft speed.
+  const allowed = CampaignOS.moveToken(state, token.id, token.x + 3, token.y);
+  assert.notEqual(allowed.state, state);
+
+  // A 4th square (20 ft) should now be unaffordable.
+  const blocked = CampaignOS.moveToken(state, token.id, token.x + 4, token.y);
+  assert.equal(blocked.state, state);
+  assert.match(blocked.message, /speed 15 ft/);
+});
+
+test("longRest reduces exhaustion by one level", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 100 }).state;
+  state = CampaignOS.setExhaustion(state, state.tokens[0].id, 3).state;
+
+  const result = CampaignOS.longRest(state, state.tokens[0].id);
+  assert.equal(result.state.tokens[0].exhaustion, 2);
+  assert.match(result.message, /Exhaustion reduced to 2\./);
+});
+
+test("longRest clears the exhaustion field entirely once it's reduced to 0", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 100 }).state;
+  state = CampaignOS.setExhaustion(state, state.tokens[0].id, 1).state;
+
+  const result = CampaignOS.longRest(state, state.tokens[0].id);
+  assert.equal(result.state.tokens[0].exhaustion, undefined);
+  assert.match(result.message, /Exhaustion reduced to 0\./);
+});
+
+test("updateToken sets exhaustion directly as a manual correction, without triggering death at level 6", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", hp: 50, maxHp: 100 });
+  const updated = CampaignOS.updateToken(withToken, token.id, { exhaustion: 6 });
+  assert.equal(updated.tokens[0].exhaustion, 6);
+  assert.equal(updated.tokens[0].dead, undefined, "a manual editor edit should not trigger the exhaustion-death side effect");
+  assert.equal(updated.tokens[0].hp, 50);
+});
+
+test("parseCommand resolves gaining and losing exhaustion levels by token name", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;
+
+  const gained = CampaignOS.parseCommand(state, "Darkhawk gains a level of exhaustion.");
+  assert.equal(gained.state.tokens[0].exhaustion, 1);
+
+  const gainedTwo = CampaignOS.parseCommand(gained.state, "Darkhawk gains 2 levels of exhaustion.");
+  assert.equal(gainedTwo.state.tokens[0].exhaustion, 3);
+
+  const lost = CampaignOS.parseCommand(gainedTwo.state, "Darkhawk loses a level of exhaustion.");
+  assert.equal(lost.state.tokens[0].exhaustion, 2);
+});

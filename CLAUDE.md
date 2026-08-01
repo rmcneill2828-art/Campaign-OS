@@ -6,18 +6,18 @@ Campaign-OS imports campaign Markdown for characters, locations, and sessions; t
 remains the narrative source of truth. As of 2026-07-31 this isn't used for live play yet --
 see that repo's own CLAUDE.md for why (short version: ability scores, saves, spellcasting/spell
 slots, named class resources -- Ki, Rage, Superiority Dice, etc. -- concentration, death saves,
-and rest automation are all modeled now).
+rest automation, and exhaustion are all modeled now).
 
 See README.md for the full feature list and usage. Notes specific to working on this code:
 
 ## Architecture
 - `engine/` -- pure, DOM-free logic: `encounter.js` (state, tokens, combat, movement, turn
   order, saving throws, spellcasting/spell slots, named class resources, concentration, death
-  saves, rest automation), `campaign.js` (markdown import/parsing), `dmBridge.js` (translates
-  the Claude DM bridge's actions into engine calls), `characterCreator.js` (5e math + markdown
-  generation for new character sheets). Runnable and unit-tested under Node (`npm test`). Keep it that
-  way: no `document`/`window` DOM access, no async IndexedDB/File System Access calls here --
-  those belong in `ui/`.
+  saves, rest automation, exhaustion), `campaign.js` (markdown import/parsing), `dmBridge.js`
+  (translates the Claude DM bridge's actions into engine calls), `characterCreator.js` (5e math
+  + markdown generation for new character sheets). Runnable and unit-tested under Node
+  (`npm test`). Keep it that way: no `document`/`window` DOM access, no async IndexedDB/File
+  System Access calls here -- those belong in `ui/`.
 - `ui/` -- browser glue: `app.js` (rendering, event wiring), the IndexedDB-backed stores
   (`imageStore.js`, `tokenLibrary.js`, `mapLibrary.js`, `dmBridgeStore.js`), and the File System
   Access folder-reference layer (`assetFolders.js` persists picked directory handles,
@@ -131,15 +131,36 @@ See README.md for the full feature list and usage. Notes specific to working on 
   applies uniformly to every token type -- a deliberate simplification of RAW, which reserves
   death saves for PCs and leaves monsters to the DM's discretion at 0 HP.
 - Rest automation: `longRest()` sets `hp = maxHp` and every `spellSlots[level].current`/
-  `resources[name].current` to their max, skipping only the HP/`dying` part for a token
-  flagged `dead` (slots/resources still refresh regardless -- neither needs consciousness to
-  "have happened" during the rest). `shortRest()` restores only resources whose `recovery` is
-  `"short"`, and deliberately never touches HP or spell slots -- Hit Dice spending/recovery
-  isn't modeled at all (same known gap as Troll's Regeneration), and the one common class that
-  recovers slots on a short rest (Warlock Pact Magic) isn't special-cased either. Both
-  self-log like `rollDeathSave()`/`useResource()`, and both operate on one token at a time --
-  resting "the whole party" means the DM/Claude issues one `long_rest`/`short_rest` action per
-  token, there's no single "rest everyone" primitive.
+  `resources[name].current` to their max and reduces `exhaustion` by 1. Only the HP/`dying`
+  branch is skipped for a token flagged `dead` (a long rest isn't a substitute for a real
+  revival) -- slot/resource refresh and the exhaustion reduction still apply regardless, since
+  neither needs consciousness to "have happened" during the rest. `shortRest()` restores only
+  resources whose `recovery` is `"short"`, and deliberately
+  never touches HP, spell slots, or exhaustion -- Hit Dice spending/recovery isn't modeled at
+  all (same known gap as Troll's Regeneration), the one common class that recovers slots on a
+  short rest (Warlock Pact Magic) isn't special-cased either, and only a long rest reduces
+  exhaustion under RAW. Both self-log like `rollDeathSave()`/`useResource()`, and both operate
+  on one token at a time -- resting "the whole party" means the DM/Claude issues one
+  `long_rest`/`short_rest` action per token, there's no single "rest everyone" primitive.
+- Exhaustion: `token.exhaustion` is an integer 0-6, absent when 0 (same sparse convention as
+  everything else). `setExhaustion()`/`addExhaustion()` are the real, narrative-event entry
+  points -- reaching level 6 through either kills the token outright (`hp = 0`, `dead = true`,
+  no save, clearing any `dying`), the same instant-death `rollDeathSave()`'s three-failures
+  branch produces. `updateToken()`'s `exhaustion` change is a direct correction (like its `hp`
+  branch) and deliberately does **not** trigger that level-6 death check -- only a real gain
+  via `addExhaustion()`/the token sheet's +1 button/`add_exhaustion` does. Of the automatic RAW
+  effects, this engine only wires up the two that hook cleanly into existing mechanics:
+  `attack()`/`rollSavingThrow()` force disadvantage at level 3+ (derived from the token's own
+  state, not a caller-passed flag -- `attack()` correctly cancels it against an explicit
+  `options.advantage` per RAW rather than exhaustion silently winning), and `effectiveSpeed()`
+  halves speed at level 2+ and zeroes it at level 5+ (`token.speed` itself is never mutated, so
+  the penalty can't outlive the exhaustion that caused it). **Anywhere UI/dmBridge code reads a
+  token's speed for movement purposes must call `effectiveSpeed()`, not `token.speed` directly**
+  -- `ui/app.js`'s DM-bridge payload, initiative-list movement note, and the token editor's
+  "Moved" field all do this; a raw `token.speed ?? 30` read there would silently show Claude or
+  the DM more movement than the token can actually use. Disadvantage on ability checks (level 1,
+  no ability-check mechanic exists at all here) and a halved HP maximum (level 4) are
+  deliberately NOT modeled -- same known-gap spirit as Troll's Regeneration/Hit Dice.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

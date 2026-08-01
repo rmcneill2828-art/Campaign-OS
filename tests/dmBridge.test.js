@@ -421,6 +421,38 @@ test("applyActions logs an unresolved-name message for long_rest/short_rest targ
   assert.match(shortResult.messages[0], /could not find "Nonexistent Goblin" to rest/);
 });
 
+test("applyActions resolves an add_exhaustion action, defaulting to gaining one level", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "add_exhaustion", target: "Darkhawk" }
+  ]);
+
+  assert.match(messages[0], /Darkhawk is now at exhaustion level 1\./);
+  assert.equal(next.tokens.find((t) => t.name === "Darkhawk").exhaustion, 1);
+});
+
+test("applyActions passes a negative add_exhaustion amount through to remove levels", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;
+  state = CampaignOS.setExhaustion(state, state.tokens[0].id, 3).state;
+
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "add_exhaustion", target: "Darkhawk", amount: -2 }
+  ]);
+
+  assert.match(messages[0], /Darkhawk is now at exhaustion level 1\./);
+});
+
+test("applyActions logs an unresolved-name message for add_exhaustion targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "add_exhaustion", target: "Nonexistent Goblin" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" for exhaustion/);
+});
+
 test("findTokenByName matches case-insensitively on the current map only", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk" }).state;

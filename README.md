@@ -106,13 +106,28 @@ dependencies to install for the app itself. See Tests, below, for running the te
   simply be left alone or edited directly.
 - Rest automation: **Long Rest** and **Short Rest** buttons on the token sheet (or `<name>
   takes a long/short rest`, or the Claude DM bridge's `long_rest`/`short_rest` actions -- one
-  per token; issue several to rest the whole party at once). Long Rest fully heals HP and
-  restores every spell slot and every resource to max regardless of its recovery type, but
-  skips the HP/revival part for a token already flagged dead (that needs an actual revival,
-  not a rest). Short Rest only restores resources tagged **Short/long rest** -- it never
-  touches HP or spell slots, since Hit Dice spending/recovery isn't modeled (heal manually if
-  the party spends Hit Dice) and almost nothing but Warlock Pact Magic recovers slots on a
-  short rest, which also isn't specially handled.
+  per token; issue several to rest the whole party at once). Long Rest fully heals HP,
+  restores every spell slot and every resource to max regardless of its recovery type, and
+  removes one level of exhaustion, but skips the HP/revival part for a token already flagged
+  dead (that needs an actual revival, not a rest). Short Rest only restores resources tagged
+  **Short/long rest** -- it never touches HP, spell slots, or exhaustion, since Hit Dice
+  spending/recovery isn't modeled (heal manually if the party spends Hit Dice), almost nothing
+  but Warlock Pact Magic recovers slots on a short rest (also not specially handled), and only
+  a long rest reduces exhaustion under RAW.
+- Exhaustion: a 0-6 level tracked per token (shown on its sheet as **Exhaustion: N/6**, with
+  **+1**/**-1** buttons, or `<name> gains/loses a level of exhaustion`, or the Claude DM
+  bridge's `add_exhaustion` action -- default amount 1, negative to remove levels). The engine
+  automatically applies the RAW effects it can hook into cleanly: level 3+ forces disadvantage
+  on attack rolls and saving throws (folded into the same roll, shown as "exhaustion
+  disadvantage" -- cancels out against an explicit advantage the normal RAW way rather than
+  silently overriding it), level 2+ halves and level 5+ zeroes movement speed (the Speed field
+  stays the token's true, unpenalized value; `moveToken` and the DM bridge's movement info use
+  the reduced effective speed), and level 6 kills the token outright, no save. Disadvantage on
+  ability checks (level 1) isn't modeled -- this engine has no ability-check mechanic at all --
+  and a halved HP maximum (level 4) isn't automated either; halve `maxHp` by hand on the token
+  editor if actual play reaches that point. Editing the level directly via the token editor is
+  treated as a correction (like editing HP), so it does **not** trigger the level-6 death the
+  way a real narrative gain via the buttons/command/DM-bridge action does.
 - Combat log
 - Campaign Markdown import
 - Campaign browser for characters, locations, sessions, and notes
@@ -189,12 +204,13 @@ The "Claude DM" panel works two ways:
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
   token on the grid, advance to the next turn, switch to a different prepared map, roll a
   saving throw, cast a spell, spend a class resource, start or drop concentration, roll a
-  death save, take a long or short rest), referencing tokens by name and reasoning about the
-  current encounter state -- including where everything stands on the grid, whose turn it is,
-  how much movement each token has left this turn, each token's ability scores, spellcasting
-  (save DC, attack bonus, remaining slots per level), named resources (Rage, Wild Shape, Ki
-  Points, etc., each with its recovery type), what it's currently concentrating on, and its
-  death-save status (dying/stable/dead), when known.
+  death save, take a long or short rest, add/remove exhaustion), referencing tokens by name
+  and reasoning about the current encounter state -- including where everything stands on the
+  grid, whose turn it is, how much movement each token has left this turn (already reduced by
+  exhaustion, if any), each token's ability scores, spellcasting (save DC, attack bonus,
+  remaining slots per level), named resources (Rage, Wild Shape, Ki Points, etc., each with
+  its recovery type), what it's currently concentrating on, its death-save status
+  (dying/stable/dead), and its exhaustion level, when known.
   `next_turn` and
   `move_token` are what actually let Claude run the turn tracker and RAW speed-limited
   movement described above -- without calling `next_turn`, turn order never starts and
@@ -223,9 +239,14 @@ The "Claude DM" panel works two ways:
   taken while already down is an automatic failure folded into that same action's message --
   Claude only has to explicitly call `roll_death_save` when a dying token's turn comes up
   (per `next_turn`), since the engine has no notion of turn order on its own. `long_rest`
-  fully heals HP and restores every spell slot/resource to max (skipping the HP/revival part
-  for a token already flagged dead); `short_rest` only restores resources tagged as
-  short-rest recovery, leaving HP and spell slots untouched.
+  fully heals HP and restores every spell slot/resource to max and removes a level of
+  exhaustion (skipping the HP/revival part for a token already flagged dead); `short_rest`
+  only restores resources tagged as short-rest recovery, leaving HP, spell slots, and
+  exhaustion untouched. `add_exhaustion` adds (or, with a negative amount, removes) exhaustion
+  levels -- the engine automatically applies disadvantage on attacks/saves at level 3+ and the
+  speed penalty at level 2+/5+ as part of `attack`/`saving_throw`/`move_token`'s own
+  resolution, and level 6 kills outright, so Claude never has to set advantage/disadvantage
+  itself for that or compute the reduced speed by hand.
 
 There's no built-in way to call the Anthropic API directly from a browser -- `api.anthropic.com`'s
 CORS policy rejects requests from arbitrary origins, confirmed against the live API rather than

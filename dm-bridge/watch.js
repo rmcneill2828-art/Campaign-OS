@@ -62,6 +62,7 @@ const SYSTEM_PROMPT = [
   '{"type": "roll_death_save", "target": "<exact token name>"}',
   '{"type": "long_rest", "target": "<exact token name>"}',
   '{"type": "short_rest", "target": "<exact token name>"}',
+  '{"type": "add_exhaustion", "target": "<exact token name>", "amount": <optional integer, default 1; negative to remove levels>}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
   "with no mechanical effect (e.g. flavor text, a question, an out-of-combat description), return",
@@ -154,7 +155,20 @@ const SYSTEM_PROMPT = [
   "short-rest recovery (shown per-resource below, e.g. \"Second Wind 0/1 (short)\") -- it never",
   "touches HP or spell slots (Hit Dice spending isn't modeled, and almost nothing but Warlock",
   "Pact Magic recovers slots on a short rest, which isn't specially handled either). Don't",
-  "invent a rest for a token that isn't part of the current scene.",
+  "invent a rest for a token that isn't part of the current scene. long_rest also removes one",
+  "level of exhaustion automatically -- you don't need a separate add_exhaustion for that.",
+  "",
+  "Use add_exhaustion when narration causes a token to gain exhaustion (a forced march, extreme",
+  "cold/heat without protection, certain spells/effects) or lose it (Greater Restoration) --",
+  "amount defaults to 1, use a negative number to remove levels. Each token's line below shows",
+  "its exhaustion level when above 0. The engine automatically applies disadvantage on attack",
+  "rolls and saving throws at level 3+, and halves (level 2+) or zeroes (level 5+) movement",
+  "speed -- you don't need to set advantage/disadvantage yourself for that, it happens as part",
+  "of attack/saving_throw/move_token's own resolution. Level 6 kills the token outright, no",
+  "save. Disadvantage on ability checks (level 1) and a halved HP maximum (level 4) are NOT",
+  "modeled -- this engine has no ability-check mechanic at all, and halving/restoring maxHp",
+  "isn't automated; call those out narratively or handle them as a DM ruling instead of",
+  "expecting an action for either.",
   "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
@@ -222,6 +236,8 @@ function isValidAction(action) {
     case "long_rest":
     case "short_rest":
       return typeof action.target === "string";
+    case "add_exhaustion":
+      return typeof action.target === "string" && (action.amount === undefined || Number.isFinite(action.amount));
     default:
       return false;
   }
@@ -298,11 +314,12 @@ function buildPrompt(request) {
         ? `, resources ${resourceNames.map((name) => `${name} ${resources[name].current}/${resources[name].max} (${resources[name].recovery === "short" ? "short" : "long"})`).join(", ")}`
         : "";
       const concentrationText = t.concentratingOn?.spell ? `, concentrating on ${t.concentratingOn.spell}` : "";
+      const exhaustionText = Number.isFinite(t.exhaustion) && t.exhaustion > 0 ? `, exhaustion ${t.exhaustion}` : "";
       let deathStatusText = "";
       if (t.dead) deathStatusText = ", dead";
       else if (t.dying?.stable) deathStatusText = ", stable at 0 HP";
       else if (t.dying) deathStatusText = `, dying (${t.dying.successes} successes, ${t.dying.failures} failures)`;
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}`);
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);
