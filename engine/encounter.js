@@ -19,7 +19,7 @@
   // (when present) lists every attack a Multiattack action makes, consumed by attack()
   // below. `initiativeMod` is the monster's real Dex modifier, not a flat guess -- same
   // number as abilityScores.DEX's modifier, kept as its own field since it predates
-  // ability scores being modeled at all. None of these five have a stated saving throw
+  // ability scores being modeled at all. None of these six have a stated saving throw
   // proficiency in the SRD, so their saves fall back to a flat ability modifier (see
   // savingThrowBonus) -- no `savingThrows` override needed.
   //
@@ -27,6 +27,21 @@
   // since its last turn) is intentionally NOT automated here -- this engine has no
   // start-of-turn hook to key it off. Apply it by hand via applyHealing on the troll's turn.
   const STAT_BLOCKS = {
+    // Hell Hound (added after checking the real campaign's session log -- its one actual
+    // non-humanoid encounter, three hellhounds guarding a market entrance; everything else
+    // fought was generic human guards, already covered by `bandit`). Bite RAW deals two
+    // damage types in one hit (1d8+3 piercing plus 2d6 fire); damageDice here is a single
+    // dice notation with no damage-type modeling anywhere in this engine, so it's
+    // approximated as one combined roll (avg ~14.5, matching 1d8+3 + 2d6) rather than
+    // dropping either component. Recharge-based Fire Breath (15 ft cone, DC 12 DEX save,
+    // 6d6 fire/half) and Pack Tactics are NOT automated -- no recharge-roll or
+    // area-effect/multi-target mechanic exists in this engine at all (same known-gap spirit
+    // as Troll's Regeneration); apply Fire Breath by hand via apply_damage/saving_throw
+    // against each affected token if it comes up.
+    hellhound: {
+      hp: 45, ac: 15, attackBonus: 5, damageDice: "4d6+1", initiativeMod: 1, speed: 50,
+      abilityScores: { STR: 17, DEX: 12, CON: 14, INT: 6, WIS: 13, CHA: 6 }
+    },
     goblin: {
       hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2, speed: 30,
       abilityScores: { STR: 8, DEX: 14, CON: 10, INT: 10, WIS: 8, CHA: 8 }
@@ -1290,7 +1305,7 @@
     const normalized = command.toLowerCase();
     const countWords = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
     const countPattern = "(one|two|three|four|five|six|\\d+)";
-    const monsterPattern = "(goblin|orc|troll|bandit|wolf)s?";
+    const monsterPattern = "(goblin|orc|troll|bandit|wolf|hellhound)s?";
     const actionFirst = new RegExp(`(?:spawn|summon|emerge|appear|add).*?${countPattern}\\s+${monsterPattern}`);
     const countFirst = new RegExp(`${countPattern}\\s+${monsterPattern}.*?(?:spawn|summon|emerge|appear|add)`);
     const spawnMatch = normalized.match(actionFirst) || normalized.match(countFirst);

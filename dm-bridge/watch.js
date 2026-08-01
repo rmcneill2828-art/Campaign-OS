@@ -31,7 +31,7 @@ const endSessionResponsePath = path.join(bridgeDir, "end-session-response.json")
 // state) goes over stdin instead, which never touches shell parsing at all.
 const systemPromptPath = path.join(os.tmpdir(), "campaign-os-dm-bridge-system-prompt.txt");
 
-const MONSTER_LIST = ["goblin", "orc", "troll", "bandit", "wolf"];
+const MONSTER_LIST = ["goblin", "orc", "troll", "bandit", "wolf", "hellhound"];
 const CONDITION_LIST = [
   "Blinded", "Charmed", "Frightened", "Grappled", "Poisoned",
   "Prone", "Restrained", "Stunned", "Unconscious"
@@ -47,7 +47,7 @@ const SYSTEM_PROMPT = [
   '{"message": "<one or two sentences of narration>", "actions": [ <zero or more actions> ]}',
   "",
   "Each action is one of:",
-  '{"type": "spawn_monster", "monster": "goblin|orc|troll|bandit|wolf", "count": <integer>}',
+  '{"type": "spawn_monster", "monster": "goblin|orc|troll|bandit|wolf|hellhound", "count": <integer>}',
   '{"type": "attack", "attacker": "<exact token name>", "target": "<exact token name>", "advantage": <optional true>, "disadvantage": <optional true>}',
   '{"type": "apply_damage", "target": "<exact token name>", "amount": <integer>}',
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',

@@ -21,14 +21,19 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Flexible damage and healing
 - Expanded condition tracking
 - Remove defeated or accidental tokens
-- Dice-backed attacks, rules-as-written: SRD-accurate stat blocks for the five monsters
-  `spawn` recognizes (goblin, orc, wolf, bandit, troll), a critical hit that doubles only
-  the damage dice (not a flat modifier), advantage/disadvantage on any attack (manual
-  attack-control dropdown, `attacks Y with advantage`/`at disadvantage` phrasing, or the
-  Claude DM bridge's `advantage`/`disadvantage` action flags), and automatic Multiattack
+- Dice-backed attacks, rules-as-written: SRD-accurate stat blocks for the six monsters
+  `spawn` recognizes (goblin, orc, wolf, bandit, troll, hellhound), a critical hit that
+  doubles only the damage dice (not a flat modifier), advantage/disadvantage on any attack
+  (manual attack-control dropdown, `attacks Y with advantage`/`at disadvantage` phrasing, or
+  the Claude DM bridge's `advantage`/`disadvantage` action flags), and automatic Multiattack
   for monsters that have one (a troll's Bite + two Claws resolve as one attack action,
   each roll shown individually). Troll's Regeneration is a known, intentional gap -- there's
-  no start-of-turn hook in the engine to key it off, so apply it by hand.
+  no start-of-turn hook in the engine to key it off, so apply it by hand. A hell hound's Bite
+  is RAW two damage types in one hit (piercing plus fire) -- since damage types aren't
+  modeled anywhere in this engine, its single damageDice is a combined roll approximating
+  the same average total; its recharge-based Fire Breath (an area effect, no recharge-roll
+  or multi-target mechanic exists here either) isn't automated -- apply it by hand the same
+  way as Troll's Regeneration.
 - Turn tracker: a "Next Turn" control in the Initiative panel steps through the current
   map's initiative order, shows the round number and whose turn it is, and resets that
   token's movement budget. Speed limits only apply to whichever token the tracker currently
@@ -42,7 +47,7 @@ dependencies to install for the app itself. See Tests, below, for running the te
   the same turn. Click-to-move, the Claude DM bridge's `move_token` action, and the manual
   grid all go through the same speed check.
 - Ability scores and saving throws: every token can carry real STR/DEX/CON/INT/WIS/CHA
-  scores -- editable on the token sheet, filled in automatically for the five `spawn`ed
+  scores -- editable on the token sheet, filled in automatically for the six `spawn`ed
   monsters (real SRD ability scores, not guesses) and for any imported character/NPC sheet
   with an `## Ability Scores` table. A **Roll Save** control on the token sheet (or
   `<name> rolls a <ability> saving throw against DC <n>`, or the Claude DM bridge's

@@ -68,6 +68,20 @@ test("parseCommand spawning orcs gives them their canonical (SRD) stat block, di
   assert.equal(orc.damageDice, "1d12+3");
 });
 
+test("parseCommand spawns a real hell hound stat block, matching plural and singular phrasing", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "Three hellhounds emerge from the trees."));
+  const hellhounds = result.state.tokens.filter((t) => t.name.startsWith("Hellhound"));
+  assert.equal(hellhounds.length, 3);
+  const [hound] = hellhounds;
+  assert.equal(hound.hp, 45);
+  assert.equal(hound.ac, 15);
+  assert.equal(hound.attackBonus, 5);
+  assert.equal(hound.damageDice, "4d6+1");
+  assert.equal(hound.speed, 50);
+  assert.deepEqual(hound.abilityScores, { STR: 17, DEX: 12, CON: 14, INT: 6, WIS: 13, CHA: 6 });
+});
+
 test("parseCommand spawning a troll gives it Multiattack (Bite + two Claws), not a single generic attack", () => {
   const state = stateOnMap("Urskelde");
   const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one troll"));
