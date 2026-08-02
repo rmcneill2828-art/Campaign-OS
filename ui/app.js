@@ -2625,11 +2625,25 @@
     }
   }
 
+  // Bug (found via Playwright while verifying the Phase 5/6 UI): loadedMapNames() only ever
+  // adds a truthy map name, so state.mapName's own default -- "" for a session where no map
+  // has been named/imported yet -- is NEVER included in `names`, even though "" is a
+  // perfectly valid, common mapName for every token in that session. That made the early
+  // return never fire for the common no-map-yet case, so this ran its "the active map
+  // became invalid, resync everything" branch on EVERY render() call regardless -- forcibly
+  // resetting selectedTokenId back to activeTokens()[0] each time, meaning any token other
+  // than the first one spawned could never stay selected (any action that re-renders,
+  // i.e. nearly everything, reverted the selection before the DOM even updated). Fixed to
+  // match setActiveMap()'s own correct pattern just above: only reassign selectedTokenId if
+  // the current selection genuinely isn't valid on wherever state.mapName ends up, not
+  // unconditionally just because "" itself isn't a name loadedMapNames() ever produces.
   function reconcileActiveMap() {
     const names = loadedMapNames();
     if (names.includes(state.mapName)) return;
     state.mapName = names[0] || "";
-    state.selectedTokenId = activeTokens()[0]?.id || null;
+    if (!activeTokens().some((token) => token.id === state.selectedTokenId)) {
+      state.selectedTokenId = activeTokens()[0]?.id || null;
+    }
   }
 
   function loadedMapNames() {
