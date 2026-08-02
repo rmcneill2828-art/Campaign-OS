@@ -275,6 +275,44 @@ test("tokenDraftFromItem leaves savingThrows unset when the sheet has no Saving 
   assert.equal(draft.savingThrows, undefined);
 });
 
+test("tokenDraftFromItem reads stated skill bonuses, including multi-word skill names, from the Skills line", () => {
+  const sheet = [
+    "## Proficiencies & Skills",
+    "- **Skills:** Perception +9, Stealth +6, Animal Handling +5, Sleight of Hand +3"
+  ].join("\n");
+
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Sael", path: "characters/Sael.md", text: sheet });
+  assert.deepEqual(draft.skills, { Perception: 9, Stealth: 6, "Animal Handling": 5, "Sleight of Hand": 3 });
+});
+
+test("tokenDraftFromItem leaves skills unset when the sheet has no Skills line", () => {
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "No Skills", path: "characters/No Skills.md", text: "## Combat\n- **AC:** 15" });
+  assert.equal(draft.skills, undefined);
+});
+
+test("tokenDraftFromItem reads Hit Dice from a single-class Class & Level line", () => {
+  const sheet = "**Class & Level:** Fighter 9";
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Edmund Vale", path: "characters/Edmund Vale.md", text: sheet });
+  assert.deepEqual(draft.hitDice, { d10: { total: 9, current: 9 } });
+});
+
+test("tokenDraftFromItem reads and pools multiclass Hit Dice, ignoring the parenthetical subclass", () => {
+  const sheet = "**Class & Level:** Barbarian 11 (Path of the Totem Warrior — Bear) / Fighter 4 (Battle Master)";
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Darkhawk Blondin", path: "characters/Darkhawk Blondin.md", text: sheet });
+  assert.deepEqual(draft.hitDice, { d12: { total: 11, current: 11 }, d10: { total: 4, current: 4 } });
+});
+
+test("tokenDraftFromItem pools same-size Hit Dice from different classes into one bucket", () => {
+  const sheet = "**Class & Level:** Cleric 6 / Warlock 3";
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Sister Ysolde Marrow", path: "characters/Sister Ysolde Marrow.md", text: sheet });
+  assert.deepEqual(draft.hitDice, { d8: { total: 9, current: 9 } });
+});
+
+test("tokenDraftFromItem leaves hitDice unset when the sheet has no Class & Level line", () => {
+  const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "No Class", path: "characters/No Class.md", text: "## Combat\n- **AC:** 15" });
+  assert.equal(draft.hitDice, undefined);
+});
+
 test("tokenDraftFromItem reads spell save DC/attack bonus and max slots from the Spellcasting bullet", () => {
   const sheet = [
     "## Features & Traits",

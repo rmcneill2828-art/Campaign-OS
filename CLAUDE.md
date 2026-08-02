@@ -55,9 +55,16 @@ See README.md for the full feature list and usage. Notes specific to working on 
   the next one in that same response. This is why `saving_throw` can only resolve and log
   pass/fail -- it can't itself decide a follow-up `apply_damage`/`toggle_condition` based on the
   outcome; that has to be a separate later command once the DM (or Claude, prompted again) has
-  seen the logged result. `cast_spell` has the same limitation for save-based spells (Fireball,
-  Hold Person): it only spends the slot, it never bundles a `saving_throw` for you -- Claude has
-  to issue those as separate actions in the same response instead. `use_resource` is the same
+  seen the logged result. `cast_spell` has the same limitation for a save-based spell with no
+  damage of its own (Hold Person): it only spends the slot, it never bundles a `saving_throw`
+  for you -- Claude has to issue those as separate actions in the same response instead. A
+  save-for-half damage spell that hits multiple targets with the SAME damage (Fireball,
+  Burning Hands) is the one place this got a real fix instead of a workaround: `castAreaSpell()`
+  (the `cast_area_spell` action) resolves the whole thing atomically -- one damage roll, one
+  save per target, full/half damage decided by the engine itself -- specifically because that
+  decision doesn't require Claude to see an intermediate result the way a follow-up
+  `apply_damage`/`toggle_condition` would. See the castAreaSpell bullet below for the shape.
+  `use_resource` is the same
   again -- it only spends a charge of a named resource and never bundles whatever that
   resource actually does (an attack, healing, a saving throw). Concentration checks and
   starting/continuing death saves are the exceptions to "Claude has to do it in a later
@@ -83,6 +90,22 @@ See README.md for the full feature list and usage. Notes specific to working on 
   max-only numbers, since Current Status is the more frequently updated source for what a
   caster actually has left. `castSpell()` mutates a slot's `current` directly and fails outright
   (no state change) with none left at that level; level 0 is a cantrip and never touches slots.
+- `castAreaSpell(state, casterId, options)` -- `cast_area_spell` -- is the multi-target
+  counterpart to `castSpell()`: `options.targetIds` is an array, not a single id, and
+  `options.saveAbility`/`saveDC`/`damageDice` (plus `halfOnSave`, default `true`) describe one
+  save-for-half effect applied to every target. `spendSpellSlot()` was factored out of
+  `castSpell()` so both share identical slot-spend/failure behavior. The damage die is rolled
+  **once** for the whole area (RAW: one roll applies to everyone caught in it), then each
+  target's save is rolled individually via `rollSavingThrow()` (which self-logs, same as it
+  always has) and `applyDamage()`'d for the full amount on a failure or `Math.floor(total / 2)`
+  on a success (`0` instead if `halfOnSave: false`) -- each target's own concentration/
+  death-save bookkeeping still resolves per-call, the same way `attack()`'s Multiattack loop
+  resolves each sub-attack against one target in turn. Because each save self-logs and the
+  function's own final `addLogEntry` folds everything into one more combined entry, one
+  `cast_area_spell` action produces `targetIds.length + 1` log entries, not 1 -- more granular
+  than `castSpell`'s single entry, and intentionally so (each roll stays individually visible).
+  A save-based spell with no damage of its own (Hold Person) is NOT what this is for -- that
+  still goes through plain `castSpell` + separate `saving_throw`/`toggle_condition` actions.
 - A token's `resources` object is a sparse map keyed by free-text resource name (Rage, Wild
   Shape, Ki Points, Superiority Dice, Channel Divinity, ...), each `{max, current, recovery}`
   where `recovery` is `"short"` (restored by both a short and long rest) or `"long"` (only a
@@ -135,18 +158,39 @@ See README.md for the full feature list and usage. Notes specific to working on 
   target to/keep it at 0, so re-read that loop's comment before touching it again. This
   applies uniformly to every token type -- a deliberate simplification of RAW, which reserves
   death saves for PCs and leaves monsters to the DM's discretion at 0 HP.
-- Rest automation: `longRest()` sets `hp = maxHp` and every `spellSlots[level].current`/
-  `resources[name].current` to their max and reduces `exhaustion` by 1. Only the HP/`dying`
-  branch is skipped for a token flagged `dead` (a long rest isn't a substitute for a real
-  revival) -- slot/resource refresh and the exhaustion reduction still apply regardless, since
-  neither needs consciousness to "have happened" during the rest. `shortRest()` restores only
-  resources whose `recovery` is `"short"`, and deliberately
-  never touches HP, spell slots, or exhaustion -- Hit Dice spending/recovery isn't modeled at
-  all (same known gap as Troll's Regeneration), the one common class that recovers slots on a
-  short rest (Warlock Pact Magic) isn't special-cased either, and only a long rest reduces
-  exhaustion under RAW. Both self-log like `rollDeathSave()`/`useResource()`, and both operate
-  on one token at a time -- resting "the whole party" means the DM/Claude issues one
-  `long_rest`/`short_rest` action per token, there's no single "rest everyone" primitive.
+- Rest automation: `longRest()` sets `hp = maxHp`, every `spellSlots[level].current`/
+  `resources[name].current` to their max, restores `Math.max(1, Math.floor(pool.total / 2))`
+  (clamped to `pool.total`) to every `hitDice[dieType].current` -- PHB: "half... (minimum of
+  one die)," rounded DOWN not up, since the "minimum of one" clause is only meaningful under
+  round-down math (round-up already guarantees at least one for any total >= 1) -- and reduces
+  `exhaustion` by 1. Only the
+  HP/`dying` branch is skipped for a token flagged `dead` (a long rest isn't a substitute for a
+  real revival) -- slot/resource/Hit-Dice refresh and the exhaustion reduction still apply
+  regardless, since neither needs consciousness to "have happened" during the rest.
+  `shortRest()` restores only resources whose `recovery` is `"short"`, and deliberately never
+  touches HP, spell slots, exhaustion, or Hit Dice directly -- RAW lets a creature spend Hit
+  Dice during a short rest, but how many (if any) is a per-rest choice, so that's
+  `spendHitDie()` called explicitly (see the Hit Dice bullet below) rather than shortRest doing
+  it automatically; the one common class that recovers slots on a short rest (Warlock Pact
+  Magic) isn't special-cased either, and only a long rest reduces exhaustion under RAW. All
+  three self-log like `rollDeathSave()`/`useResource()`, and all operate on one token at a
+  time -- resting "the whole party" means the DM/Claude issues one `long_rest`/`short_rest`/
+  `spend_hit_die` action per token, there's no single "rest everyone" primitive.
+- Hit Dice: `token.hitDice` is a sparse map keyed by die type (`"d12"`, `"d10"`, ...) rather
+  than a single `{die, total, current}` -- a real high-level sheet is routinely multiclassed
+  (this campaign's own PCs: Darkhawk is Barbarian 11 / Fighter 4, i.e. 11d12 + 4d10), and 5e
+  RAW pools same-size dice from different classes together rather than tracking them per-class,
+  so `campaign.js`'s `extractHitDice` does that pooling at import time. It scans a sheet's raw
+  text directly for the `**Class & Level:**` line rather than going through `extractFields`'s
+  shared `fields` map, since that map's label pattern (`[A-Za-z ]+`) can't match a label
+  containing `&` -- same reason `extractAbilityScores` also scans raw text instead of using
+  `fields`. `spendHitDie(state, tokenId, dieType, count)` rolls `count` dice of that size plus
+  the token's CON modifier each (minimum 1 healing per die, even at a very negative CON
+  modifier) and heals the total via `applyHealing()`, decrementing `current` -- fails outright
+  (same convention as `useResource`) with no state change if fewer remain than requested or the
+  token tracks no dice of that type. Spawned monsters (`spawnMonster`) don't get a `hitDice`
+  pool -- 5e monsters don't spend Hit Dice the way PCs do, so it's only populated by character
+  import or by hand on the token sheet.
 - Exhaustion: `token.exhaustion` is an integer 0-6, absent when 0 (same sparse convention as
   everything else). `setExhaustion()`/`addExhaustion()` are the real, narrative-event entry
   points -- reaching level 6 through either kills the token outright (`hp = 0`, `dead = true`,
@@ -163,9 +207,49 @@ See README.md for the full feature list and usage. Notes specific to working on 
   token's speed for movement purposes must call `effectiveSpeed()`, not `token.speed` directly**
   -- `ui/app.js`'s DM-bridge payload, initiative-list movement note, and the token editor's
   "Moved" field all do this; a raw `token.speed ?? 30` read there would silently show Claude or
-  the DM more movement than the token can actually use. Disadvantage on ability checks (level 1,
-  no ability-check mechanic exists at all here) and a halved HP maximum (level 4) are
-  deliberately NOT modeled -- same known-gap spirit as Troll's Regeneration/Hit Dice.
+  the DM more movement than the token can actually use. Disadvantage on ability checks (level 1)
+  is now modeled by `rollAbilityCheck()` (see the Conditions/ability-checks bullet below) -- a
+  halved HP maximum (level 4) remains deliberately NOT modeled, same known-gap spirit as Troll's
+  Regeneration/Hit Dice.
+- Conditions: `conditionList` now has 11 entries (Paralyzed and Invisible were added alongside
+  this mechanical wiring) and a subset carry real RAW effects, the same "derived from the
+  token's own state, not a caller-passed flag" pattern exhaustion uses -- `ownAttackConditionPenalty()`/
+  `ownAttackConditionBonus()` (attacker's own Blinded/Restrained/Prone/Poisoned = disadvantage,
+  Invisible = advantage) and `targetGrantsAttackAdvantage()`/`targetGrantsAttackDisadvantage()`
+  (target's own Blinded/Restrained/Prone/Stunned/Paralyzed/Unconscious = advantage to the
+  attacker -- Blinded is RAW-bidirectional, on both this list and the self-penalty list above,
+  verified against the SRD's Conditions appendix -- Invisible = disadvantage to the attacker)
+  feed into `attack()`'s and `castSpell()`'s mode
+  computation alongside exhaustion and an explicit `options.advantage`/`disadvantage`, using the
+  same cancel-out-if-both logic. `forcesAutoCrit()` + `isAdjacent()` upgrade a hit (not a miss)
+  against a Paralyzed or Unconscious target into an automatic critical when the attacker is
+  within one square -- `isAdjacent` is a melee-range *proxy*, since attack profiles have no
+  melee/ranged flag, so a ranged hit from an adjacent square is treated the same as a melee one;
+  a documented simplification. `rollSavingThrow()` auto-fails (no roll at all) any STR/DEX save
+  for a Stunned, Paralyzed, or Unconscious token, and adds disadvantage to DEX saves specifically
+  for Restrained (not saves generally, matching RAW). `effectiveSpeed()` zeroes speed outright
+  for Grappled or Restrained, checked before the exhaustion branches. Charmed and Frightened are
+  deliberately left tag-only, no automated effect -- both need a tracked "source" token and line
+  of sight this engine has no notion of, same documented-gap spirit as Troll's Regeneration.
+- Ability/skill checks: `rollAbilityCheck(state, tokenId, skillOrAbility, dc)` is the
+  ability-check equivalent of `rollSavingThrow` -- same structure, same only-reports-pass/fail
+  contract, added alongside conditions above. `skillOrAbility` is either one of the 18 named 5e
+  skills (`SKILL_LIST`) or a bare ability key (STR/DEX/CON/INT/WIS/CHA) for an unnamed check
+  (forcing a door, a raw show of strength); `abilityCheckBonus()` resolves a named skill through
+  a token's sparse `skills` override map (same trust-the-stated-sheet-value pattern as
+  `savingThrows`/`spellcasting`, populated from a sheet's `**Skills:**` bullet via
+  `campaign.js`'s `extractSkills`, matched by name so multi-word skills like "Animal Handling"/
+  "Sleight of Hand" aren't position-dependent) falling back to the ability modifier, or returns
+  `null` for a name that's neither a known skill nor a valid ability (distinguishing "no bonus
+  known" (0) from "not a real skill/ability at all"). RAW: exhaustion level 1+ forces
+  disadvantage here -- a lower, separate threshold from attack rolls/saves' level 3+ -- and
+  Poisoned forces it too, the same way it does attack rolls; Blinded's "auto-fails a check that
+  requires sight" is deliberately NOT modeled, since whether a given check is sight-dependent is
+  a DM judgment call this engine can't make (same "leave it to narration" treatment Charmed/
+  Frightened get above). `SKILL_LIST`/the skills-extraction pattern is duplicated across
+  `engine/encounter.js`, `engine/campaign.js`, and `dm-bridge/watch.js` rather than shared --
+  same convention as `CONDITION_LIST`/`MONSTER_LIST` already being duplicated between the
+  browser engine and the Node watcher script (no bundler/shared-module mechanism between them).
 - Legendary/lair actions: `token.legendaryActions` is a single `{max, current}` tracker (same
   shape as one named resource, but a lone object, not a per-name map) -- sparse, absent when
   the token has none. Unlike resources (which only refill on a rest), `nextTurn()` resets
@@ -192,6 +276,57 @@ See README.md for the full feature list and usage. Notes specific to working on 
   state, not per-map -- a deliberate simplification, since modeling a synthetic initiative-20
   slot per map would be a much bigger turn-order restructuring than this feature's scope
   warranted.
+- Start-of-turn recharge/regeneration: `token.regeneration` is a single sparse `{amount}`
+  (Troll's Regeneration -- 10 HP/turn -- and the old "no start-of-turn hook to key it off"
+  known gap it was documented against are both resolved by this); `token.rechargeAbilities`
+  is a sparse map keyed by ability name, each `{rechargeMin, available}` (a hell hound's Fire
+  Breath -- recharge 5-6 -- is the other resolved known gap). Both are read and mutated by
+  `nextTurn()` itself, right alongside its existing `legendaryActions`/`movementUsed` reset for
+  the newly active token: it heals `regeneration.amount` (clamped to `maxHp - hp`, skipped
+  entirely at 0 HP or already full) and, for every `rechargeAbilities` entry with
+  `available: false`, rolls 1d6 and flips it to `available: true` on a roll `>= rechargeMin`.
+  Both messages fold into **one** combined `addLogEntry` call (only if something actually
+  happened) rather than two separate ones -- calling `addLogEntry` more than once inside
+  `nextTurn()` would silently orphan any mutation made to `activeToken` after the first call,
+  since `addLogEntry` clones its input and returns a new object, and `activeToken` is a
+  reference into the pre-clone one. Critically, **`nextTurn()`'s own return shape is
+  unchanged** (still a bare state, not `{state, message}`) despite this new self-logging --
+  there are ~20 existing call sites across `dmBridge.js`/`ui/app.js`/the test suite that treat
+  its return value as a plain state; don't "fix" this into `{state, message}` without auditing
+  every one of them first. The acid/fire exception to Troll's Regeneration, and Pack
+  Tactics/damage-type nuances generally, remain unmodeled (damage types aren't tracked at
+  all). `useRechargeAbility(state, tokenId, name)` only flips `available` to `false` -- the
+  same compose-only pattern `useResource`/`useLegendaryAction` already use -- the actual effect
+  (Fire Breath's damage/save) still needs its own separate action; `cast_area_spell` (see
+  above) is the natural fit for resolving an area breath weapon once the affected tokens are
+  known, since this engine has no cone/blast-shape geometry against the grid to figure that
+  out on its own. `spawnMonster()` copies `regeneration`/`rechargeAbilities` off a monster's
+  `STAT_BLOCKS` entry the same way it already copies `attacks` -- currently only the troll and
+  hell hound have either.
+- Action economy: `attack()` and `castSpell()` (leveled spells only -- a cantrip, level 0, is
+  exempt) enforce a minimal action economy, but **only when it's the actor's own active turn**
+  (`state.turn.tokenId === actorId`) -- the identical carve-out `moveToken()` already uses for
+  speed, so narration/setup outside formal combat, or acting on a token that isn't the active
+  turn, stays completely unrestricted. `options.actionType` (`"action"`, the default, or
+  `"bonusAction"`) picks which of two independent per-token budgets a call consumes --
+  `token.actionUsed`/`token.bonusActionUsed`, both sparse booleans reset (deleted) by
+  `nextTurn()` alongside `movementUsed` for the newly active token only. `attack()` additionally
+  tracks `token.attacksUsedThisTurn` (a count, not a boolean) against `1 + (token.extraAttacks ||
+  0)` before setting `actionUsed` -- this is RAW Extra Attack: "more attacks as part of the same
+  Attack action," not a second action, so `attack()` is the one action-consumer that can
+  legitimately be called more than once before the action is spent. A leveled `castSpell()` and
+  an action-type `attack()` share the same `actionUsed` flag, so casting a spell blocks a
+  follow-up attack the same turn and vice versa; `attacksUsedThisTurn > 0` alone (even below the
+  Extra Attack cap) is enough to block a leveled cast, since starting to attack already commits
+  the turn's action to attacking. Reactions (opportunity attacks) are explicitly **NOT**
+  modeled -- this engine has no "a token left another's reach" trigger to key one off, same
+  spirit as the lair-action/legendary-action timing judgment calls already left to the DM/
+  Claude. **`attack()`'s and `castSpell()`'s own return shapes are unchanged** by any of this
+  (still `{state, message}`); only the gate check (an early return) and the flag-set-on-success
+  logic are new. `castAreaSpell()` is deliberately **not** gated by this -- scoped out to limit
+  this phase's blast radius, since it's a newer, less common action; revisit if that gap causes
+  a real problem at the table. Given how many existing behaviors this phase touches, treat it as
+  the most likely to need a follow-up adjustment once it's actually exercised in play.
 - Live-session control contract: if you (a live Claude Code session working in this repo, not
   the `dm-bridge/watch.js` subprocess) are asked to control the board directly, this is the
   channel -- no `claude -p` call, no editing `watch.js`.

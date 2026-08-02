@@ -41,7 +41,8 @@
         }
         const result = window.CampaignOS.attack(state, attacker.id, target.id, {
           advantage: Boolean(action.advantage),
-          disadvantage: Boolean(action.disadvantage)
+          disadvantage: Boolean(action.disadvantage),
+          actionType: action.actionType === "bonusAction" ? "bonusAction" : "action"
         });
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
@@ -110,6 +111,15 @@
         const result = window.CampaignOS.rollSavingThrow(state, target.id, action.ability, action.dc);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
+      case "ability_check": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" for an ability check.`, alreadyLogged: false };
+        // rollAbilityCheck resolves target.skill against a named skill's stated override
+        // (or the ability modifier of its governing ability) or a bare ability with no
+        // named skill -- same one-roll, pass/fail-only shape as saving_throw.
+        const result = window.CampaignOS.rollAbilityCheck(state, target.id, action.skill, action.dc);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
       case "cast_spell": {
         const caster = findTokenByName(state, action.caster);
         if (!caster) return { state, message: `(DM assistant) could not find "${action.caster}" to cast a spell.`, alreadyLogged: false };
@@ -127,7 +137,34 @@
           damageDice: action.damageDice,
           concentration: Boolean(action.concentration),
           advantage: Boolean(action.advantage),
-          disadvantage: Boolean(action.disadvantage)
+          disadvantage: Boolean(action.disadvantage),
+          actionType: action.actionType === "bonusAction" ? "bonusAction" : "action"
+        });
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
+      case "cast_area_spell": {
+        const caster = findTokenByName(state, action.caster);
+        if (!caster) return { state, message: `(DM assistant) could not find "${action.caster}" to cast an area spell.`, alreadyLogged: false };
+        const targetIds = [];
+        for (const name of action.targets || []) {
+          const target = findTokenByName(state, name);
+          if (!target) return { state, message: `(DM assistant) could not find "${name}" among the area spell's targets.`, alreadyLogged: false };
+          targetIds.push(target.id);
+        }
+        // castAreaSpell resolves the whole spell in one call: spends the slot, rolls one
+        // damage total for the area, and rolls each target's own save against it -- full
+        // damage on a failure, half (or none, if halfOnSave is explicitly false) on a
+        // success -- so Claude doesn't need a separate saving_throw per target the way a
+        // single-target cast_spell does.
+        const result = window.CampaignOS.castAreaSpell(state, caster.id, {
+          level: action.level,
+          spellName: action.spell,
+          targetIds,
+          saveAbility: action.saveAbility,
+          saveDC: action.saveDC,
+          damageDice: action.damageDice,
+          halfOnSave: action.halfOnSave === undefined ? true : Boolean(action.halfOnSave),
+          concentration: Boolean(action.concentration)
         });
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
@@ -135,6 +172,12 @@
         const target = findTokenByName(state, action.target);
         if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to use a resource.`, alreadyLogged: false };
         const result = window.CampaignOS.useResource(state, target.id, action.resource, action.amount);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
+      case "spend_hit_die": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to spend Hit Dice.`, alreadyLogged: false };
+        const result = window.CampaignOS.spendHitDie(state, target.id, action.die, action.count);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
       case "drop_concentration": {
@@ -171,6 +214,12 @@
         const target = findTokenByName(state, action.target);
         if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to use a legendary action.`, alreadyLogged: false };
         const result = window.CampaignOS.useLegendaryAction(state, target.id, action.cost);
+        return { state: result.state, message: result.message, alreadyLogged: true };
+      }
+      case "use_recharge_ability": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to use a recharge ability.`, alreadyLogged: false };
+        const result = window.CampaignOS.useRechargeAbility(state, target.id, action.ability);
         return { state: result.state, message: result.message, alreadyLogged: true };
       }
       case "trigger_lair_action": {

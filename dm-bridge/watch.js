@@ -31,10 +31,21 @@ const endSessionResponsePath = path.join(bridgeDir, "end-session-response.json")
 // state) goes over stdin instead, which never touches shell parsing at all.
 const systemPromptPath = path.join(os.tmpdir(), "campaign-os-dm-bridge-system-prompt.txt");
 
-const MONSTER_LIST = ["goblin", "orc", "troll", "bandit", "wolf", "hellhound"];
+const MONSTER_LIST = [
+  "goblin", "orc", "troll", "bandit", "wolf", "hellhound",
+  "skeleton", "zombie", "ghoul", "ogre", "owlbear", "worg", "giant spider", "cultist", "guard", "priest"
+];
 const CONDITION_LIST = [
-  "Blinded", "Charmed", "Frightened", "Grappled", "Poisoned",
+  "Blinded", "Charmed", "Frightened", "Grappled", "Invisible", "Paralyzed", "Poisoned",
   "Prone", "Restrained", "Stunned", "Unconscious"
+];
+// The canonical 18 5e skills -- duplicated from engine/encounter.js's own copy, same
+// convention as MONSTER_LIST/CONDITION_LIST being duplicated between this Node script and
+// the browser-side engine file.
+const SKILL_LIST = [
+  "Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception", "History",
+  "Insight", "Intimidation", "Investigation", "Medicine", "Nature", "Perception",
+  "Performance", "Persuasion", "Religion", "Sleight of Hand", "Stealth", "Survival"
 ];
 
 const SYSTEM_PROMPT = [
@@ -47,8 +58,8 @@ const SYSTEM_PROMPT = [
   '{"message": "<one or two sentences of narration>", "actions": [ <zero or more actions> ]}',
   "",
   "Each action is one of:",
-  '{"type": "spawn_monster", "monster": "goblin|orc|troll|bandit|wolf|hellhound", "count": <integer>}',
-  '{"type": "attack", "attacker": "<exact token name>", "target": "<exact token name>", "advantage": <optional true>, "disadvantage": <optional true>}',
+  `{"type": "spawn_monster", "monster": "${MONSTER_LIST.join("|")}", "count": <integer>}`,
+  '{"type": "attack", "attacker": "<exact token name>", "target": "<exact token name>", "advantage": <optional true>, "disadvantage": <optional true>, "actionType": "<optional \'action\' (default) or \'bonusAction\'>"}',
   '{"type": "apply_damage", "target": "<exact token name>", "amount": <integer>}',
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',
   `{"type": "toggle_condition", "target": "<exact token name>", "condition": "${CONDITION_LIST.join("|")}"}`,
@@ -56,14 +67,18 @@ const SYSTEM_PROMPT = [
   '{"type": "next_turn"}',
   '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
   '{"type": "saving_throw", "target": "<exact token name>", "ability": "STR|DEX|CON|INT|WIS|CHA", "dc": <integer>}',
-  '{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "concentration": <optional true, only for a spell that requires concentration>, "advantage": <optional true>, "disadvantage": <optional true>}',
+  `{"type": "ability_check", "target": "<exact token name>", "skill": "${SKILL_LIST.join("|")}|STR|DEX|CON|INT|WIS|CHA", "dc": <integer>}`,
+  '{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "concentration": <optional true, only for a spell that requires concentration>, "advantage": <optional true>, "disadvantage": <optional true>, "actionType": "<optional \'action\' (default) or \'bonusAction\', only enforced for a leveled spell>"}',
+  '{"type": "cast_area_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <1-9, area spells are never cantrips>, "targets": ["<exact token name>", "..."], "saveAbility": "STR|DEX|CON|INT|WIS|CHA", "saveDC": <integer>, "damageDice": "<dice like 8d6>", "halfOnSave": <optional false to negate entirely on a success instead of half -- defaults to true>, "concentration": <optional true>}',
   '{"type": "use_resource", "target": "<exact token name>", "resource": "<exact resource name from that token\'s list below>", "amount": <optional integer, default 1>}',
+  '{"type": "spend_hit_die", "target": "<exact token name>", "die": "<exact Hit Dice type from that token\'s list below, e.g. d10>", "count": <optional integer, default 1>}',
   '{"type": "drop_concentration", "target": "<exact token name>"}',
   '{"type": "roll_death_save", "target": "<exact token name>"}',
   '{"type": "long_rest", "target": "<exact token name>"}',
   '{"type": "short_rest", "target": "<exact token name>"}',
   '{"type": "add_exhaustion", "target": "<exact token name>", "amount": <optional integer, default 1; negative to remove levels>}',
   '{"type": "use_legendary_action", "target": "<exact token name>", "cost": <optional integer, default 1>}',
+  '{"type": "use_recharge_ability", "target": "<exact token name>", "ability": "<exact recharge ability name from that token\'s list below, e.g. Fire Breath>"}',
   '{"type": "trigger_lair_action", "description": "<what the lair does this round>"}',
   "",
   "Only reference token names that appear in the provided state. If the command is pure narration",
@@ -74,12 +89,38 @@ const SYSTEM_PROMPT = [
   "retreating, circling around -- using the grid size and each token's current (x, y) given below to",
   "pick a destination that's actually plausible, and stay within the grid bounds.",
   "",
-  "Set advantage/disadvantage on an attack when 5e rules-as-written call for it -- Reckless Attack,",
-  "Pack Tactics with an ally adjacent to the target, attacking a prone/blinded/restrained target in",
-  "melee, the attacker being blinded or the target hidden, etc. Don't set both; RAW they cancel out,",
-  "so just omit both flags instead. A single attack action already resolves a monster's full",
+  "Set advantage/disadvantage on an attack when 5e rules-as-written call for it and it ISN'T",
+  "already one of the conditions listed below -- Reckless Attack, Pack Tactics with an ally",
+  "adjacent to the target, a hidden attacker, etc. Don't set both; RAW they cancel out, so just",
+  "omit both flags instead. A single attack action already resolves a monster's full",
   "Multiattack (e.g. a troll's Bite + two Claws) automatically -- issue one attack action per turn,",
   "not one per individual attack in its stat block.",
+  "",
+  "attack and cast_spell (leveled spells only -- cantrips are exempt) now enforce a basic",
+  "action economy, but ONLY once a token's own turn is actually running (next_turn has been",
+  "called and it's this token's active turn) -- outside that, or for any other token, nothing",
+  "is restricted, same as movement. Each consumes the token's action for the turn; a second",
+  "action-consuming attack/cast_spell the same turn fails outright UNLESS the attacker has",
+  "Extra Attack (its line below shows \"extra attacks: N\"), which lets attack() itself be",
+  "called 1 + N times before the action is spent -- issue one attack action per swing for a",
+  "Fighter/Barbarian with Extra Attack, not a single call. Set actionType: \"bonusAction\" for a",
+  "genuine bonus-action use (an off-hand attack, Misty Step, Healing Word) -- it has its own",
+  "separate one-per-turn budget from the action. Reactions (opportunity attacks) are NOT",
+  "modeled at all -- this engine has no \"leaves reach\" trigger to key one off.",
+  "",
+  "Conditions now carry real mechanical weight, applied automatically by the engine -- you set",
+  "them with toggle_condition, but you do NOT need to also set advantage/disadvantage for these:",
+  "an attacker who is Blinded, Restrained, Prone, or Poisoned rolls its own attacks at",
+  "disadvantage; an attacker who is Invisible rolls at advantage. Attacking a target that is",
+  "Blinded, Restrained, Prone, Stunned, Paralyzed, or Unconscious is automatically at advantage",
+  "(Blinded is bidirectional -- disadvantage on its own attacks AND advantage to whoever attacks",
+  "it); attacking an Invisible target is automatically at disadvantage. A hit against a Paralyzed or",
+  "Unconscious target from an adjacent attacker is automatically a critical hit even without a",
+  "natural 20. Stunned, Paralyzed, and Unconscious automatically fail any STR or DEX saving_throw",
+  "with no roll; Restrained imposes disadvantage on DEX saves specifically. Grappled and",
+  "Restrained both reduce a token's speed to 0 for move_token. Charmed and Frightened are tracked",
+  "but have no automated effect -- their RAW consequences (can't attack the charmer, disadvantage",
+  "while the fear source is visible) need to be handled narratively/by hand.",
   "",
   "Call next_turn whenever narration signals moving on to the next creature's turn or a new round",
   "in formal combat (the DM says \"next turn\"/\"moving on\", or you've fully resolved one token's",
@@ -104,6 +145,13 @@ const SYSTEM_PROMPT = [
   "-style effects, issue the saving_throw action alone this turn and let the DM's next command",
   "(after seeing the logged result) tell you the actual damage/condition to apply.",
   "",
+  "Use ability_check for a non-save roll -- Perception to notice something, Stealth to sneak,",
+  "Persuasion to talk someone down, Athletics to force a door, etc. Set skill to one of the 18",
+  "named skills, or a bare ability (STR/DEX/CON/INT/WIS/CHA) for an unnamed check with no",
+  "specific skill. Same one-shot-batch limitation as saving_throw: it only resolves and logs",
+  "pass/fail, so a follow-up consequence (finding the hidden door, the guard believing the lie)",
+  "is a separate later action/narration once you've seen the result.",
+  "",
   "Use cast_spell whenever a token casts a spell. Set level to 0 for a cantrip -- it never",
   "consumes a slot; otherwise use the spell's real level, which consumes one of that caster's",
   "slots at that level automatically (each token's line below shows its slots when known). If",
@@ -112,10 +160,23 @@ const SYSTEM_PROMPT = [
   "target/damageDice for a spell that makes an attack roll (Fire Bolt, Guiding Bolt, etc.) --",
   "the engine rolls to hit using the caster's own stated spell attack bonus, shown below when",
   "known, same as saving_throw uses the target's own stated modifier. A spell that instead",
-  "calls for a saving throw (Fireball, Hold Person) has no target/damageDice here -- issue",
-  "cast_spell alone to spend the slot, then a separate saving_throw action per target this",
-  "same response using the caster's stated spell save DC (also shown below). A spell with",
-  "neither an attack roll nor a save (buffs, utility) just needs cast_spell by itself.",
+  "calls for a saving throw with NO damage of its own (Hold Person, Hideous Laughter -- an",
+  "effect, not damage) has no target/damageDice here -- issue cast_spell alone to spend the",
+  "slot, then a separate saving_throw action per target this same response using the caster's",
+  "stated spell save DC (also shown below), and a toggle_condition once you've seen the",
+  "result. A spell with neither an attack roll nor a save (buffs, utility) just needs",
+  "cast_spell by itself.",
+  "",
+  "Use cast_area_spell instead of cast_spell for a spell that deals the SAME damage to",
+  "multiple targets with a save for half (Fireball, Burning Hands, Lightning Bolt, etc.) --",
+  "list every affected token in targets, set saveAbility/saveDC to the spell's own save, and",
+  "damageDice to the spell's damage. This resolves the whole thing in one action: one damage",
+  "roll for the area, one save per target (full damage on a failure, half -- rounded down --",
+  "on a success), each logged individually. Set halfOnSave to false only for the rare effect",
+  "that negates entirely on a success instead of halving. Do NOT use cast_spell + separate",
+  "saving_throw actions for this case -- you'd have to decide the damage before seeing any",
+  "target's save result, which the one-shot-batch limitation below doesn't allow; cast_area_spell",
+  "sidesteps that by resolving the half/full decision inside the engine itself.",
   "",
   "Use use_resource whenever a token spends a limited class resource -- Rage, Wild Shape, Ki",
   "Points, Superiority Dice, Channel Divinity, Bardic Inspiration, etc. -- shown in that",
@@ -125,6 +186,14 @@ const SYSTEM_PROMPT = [
   "action in this same response. If a token has no resources listed at all, or doesn't list the",
   "one narration calls for, don't invent one -- narrate around it instead rather than guessing",
   "at a name or count that isn't actually shown.",
+  "",
+  "Use spend_hit_die when a token spends Hit Dice to heal (during a short rest, or any other",
+  "time 5e RAW lets a creature do this) -- shown in that token's own \"hit dice\" list below",
+  "(e.g. \"d10 3/4\"), keyed by die type since a multiclassed token can track more than one.",
+  "Set die to the exact type shown, count to how many to spend (default 1). This rolls that",
+  "many dice plus the token's CON modifier per die and heals the total automatically -- you",
+  "don't compute the healing yourself. If a token has none of that die type left, or none",
+  "tracked at all, don't invent it -- narrate around it instead.",
   "",
   "Set concentration: true on cast_spell only for a spell that actually requires concentration",
   "(you know which spells do from 5e rules -- most buffs/debuffs and many ongoing-damage spells",
@@ -151,14 +220,17 @@ const SYSTEM_PROMPT = [
   "the result logged, the same as any other roll you don't see the outcome of in advance.",
   "",
   "Use long_rest/short_rest when narration says a token (or the whole party -- issue one",
-  "action per token) rests. long_rest fully heals HP and restores every spell slot and every",
-  "resource to max, but skips the HP/revival part for a token already flagged \"dead\" (that",
+  "action per token) rests. long_rest fully heals HP, restores every spell slot and every",
+  "resource to max, restores half (rounded down, minimum one) of every Hit Dice pool, and removes one level",
+  "of exhaustion -- but skips the HP/revival part for a token already flagged \"dead\" (that",
   "needs an actual revival, not a rest). short_rest restores only resources tagged as",
   "short-rest recovery (shown per-resource below, e.g. \"Second Wind 0/1 (short)\") -- it never",
-  "touches HP or spell slots (Hit Dice spending isn't modeled, and almost nothing but Warlock",
-  "Pact Magic recovers slots on a short rest, which isn't specially handled either). Don't",
-  "invent a rest for a token that isn't part of the current scene. long_rest also removes one",
-  "level of exhaustion automatically -- you don't need a separate add_exhaustion for that.",
+  "touches HP, spell slots (almost nothing but Warlock Pact Magic recovers those on a short",
+  "rest, which isn't specially handled either), or Hit Dice automatically; if narration says a",
+  "character spends Hit Dice during the short rest, issue a separate spend_hit_die action for",
+  "that -- how many (if any) to spend is the player's choice each time, not automatic. Don't",
+  "invent a rest for a token that isn't part of the current scene. long_rest doesn't need a",
+  "separate add_exhaustion for its exhaustion reduction either.",
   "",
   "Use add_exhaustion when narration causes a token to gain exhaustion (a forced march, extreme",
   "cold/heat without protection, certain spells/effects) or lose it (Greater Restoration) --",
@@ -181,6 +253,17 @@ const SYSTEM_PROMPT = [
   "restore them yourself. This engine has no notion of whose turn just ended beyond next_turn's",
   "own result, so the timing judgment (\"is this actually the end of someone else's turn?\") is",
   "yours to make from the narration/next_turn sequence, the same as roll_death_save's timing.",
+  "",
+  "Some monsters automatically heal or recharge an ability at the start of their own turn --",
+  "next_turn handles both on its own (logged as its own line, alongside next_turn's usual",
+  "\"Round N -- X's turn\" line): a token with regeneration heals automatically (no action",
+  "needed from you), and a token with recharge abilities (its line below shows e.g. \"Fire",
+  "Breath (not available)\") rolls to recharge each one still spent. Use use_recharge_ability",
+  "only to SPEND one that's currently available -- set ability to its exact name from that",
+  "token's list. Like use_resource/use_legendary_action, it only spends it; the actual effect",
+  "(Fire Breath's damage/save) still needs its own separate action in this same response --",
+  "cast_area_spell is the natural fit for an area breath weapon. Don't invent a recharge",
+  "ability for a token that doesn't list one.",
   "",
   "Use trigger_lair_action when the scene is in a legendary creature's lair and narration",
   "reaches initiative count 20 for the round (typically right after the highest-initiative",
@@ -226,7 +309,8 @@ function isValidAction(action) {
     case "attack":
       return typeof action.attacker === "string" && typeof action.target === "string"
         && (action.advantage === undefined || typeof action.advantage === "boolean")
-        && (action.disadvantage === undefined || typeof action.disadvantage === "boolean");
+        && (action.disadvantage === undefined || typeof action.disadvantage === "boolean")
+        && (action.actionType === undefined || action.actionType === "action" || action.actionType === "bonusAction");
     case "apply_damage":
     case "apply_healing":
       return typeof action.target === "string" && Number.isFinite(action.amount);
@@ -240,6 +324,8 @@ function isValidAction(action) {
       return typeof action.map === "string" && action.map.trim().length > 0;
     case "saving_throw":
       return typeof action.target === "string" && typeof action.ability === "string" && Number.isFinite(action.dc);
+    case "ability_check":
+      return typeof action.target === "string" && typeof action.skill === "string" && Number.isFinite(action.dc);
     case "cast_spell":
       return typeof action.caster === "string" && typeof action.spell === "string"
         && Number.isFinite(action.level) && action.level >= 0 && action.level <= 9
@@ -247,10 +333,23 @@ function isValidAction(action) {
         && (action.damageDice === undefined || typeof action.damageDice === "string")
         && (action.concentration === undefined || typeof action.concentration === "boolean")
         && (action.advantage === undefined || typeof action.advantage === "boolean")
-        && (action.disadvantage === undefined || typeof action.disadvantage === "boolean");
+        && (action.disadvantage === undefined || typeof action.disadvantage === "boolean")
+        && (action.actionType === undefined || action.actionType === "action" || action.actionType === "bonusAction");
+    case "cast_area_spell":
+      return typeof action.caster === "string" && typeof action.spell === "string"
+        && Number.isFinite(action.level) && action.level >= 1 && action.level <= 9
+        && Array.isArray(action.targets) && action.targets.length > 0
+        && action.targets.every((name) => typeof name === "string")
+        && typeof action.saveAbility === "string" && Number.isFinite(action.saveDC)
+        && typeof action.damageDice === "string"
+        && (action.halfOnSave === undefined || typeof action.halfOnSave === "boolean")
+        && (action.concentration === undefined || typeof action.concentration === "boolean");
     case "use_resource":
       return typeof action.target === "string" && typeof action.resource === "string"
         && (action.amount === undefined || (Number.isFinite(action.amount) && action.amount > 0));
+    case "spend_hit_die":
+      return typeof action.target === "string" && typeof action.die === "string"
+        && (action.count === undefined || (Number.isFinite(action.count) && action.count > 0));
     case "drop_concentration":
     case "roll_death_save":
     case "long_rest":
@@ -260,6 +359,8 @@ function isValidAction(action) {
       return typeof action.target === "string" && (action.amount === undefined || Number.isFinite(action.amount));
     case "use_legendary_action":
       return typeof action.target === "string" && (action.cost === undefined || (Number.isFinite(action.cost) && action.cost > 0));
+    case "use_recharge_ability":
+      return typeof action.target === "string" && typeof action.ability === "string";
     case "trigger_lair_action":
       return typeof action.description === "string" && action.description.trim().length > 0;
     default:

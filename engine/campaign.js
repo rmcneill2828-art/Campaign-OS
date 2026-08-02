@@ -5,6 +5,24 @@
     intelligence: "INT", wisdom: "WIS", charisma: "CHA"
   };
 
+  // The canonical 18 5e skill names -- duplicated from engine/encounter.js's own copy, same
+  // convention as ABILITY_KEYS/ABILITY_NAME_TO_KEY already being duplicated here rather than
+  // shared (no bundler/shared-module mechanism across these plain browser/Node scripts).
+  const SKILL_NAMES = [
+    "Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception", "History",
+    "Insight", "Intimidation", "Investigation", "Medicine", "Nature", "Perception",
+    "Performance", "Persuasion", "Religion", "Sleight of Hand", "Stealth", "Survival"
+  ];
+
+  // Hit die by class -- duplicated from characterCreator.js's own copy, same convention as
+  // SKILL_NAMES/ABILITY_KEYS above (no shared-module mechanism between these files).
+  const HIT_DIE_BY_CLASS = {
+    Barbarian: 12,
+    Fighter: 10, Paladin: 10, Ranger: 10,
+    Bard: 8, Cleric: 8, Druid: 8, Monk: 8, Rogue: 8, Warlock: 8,
+    Sorcerer: 6, Wizard: 6
+  };
+
   const categoryRules = [
     { id: "characters", label: "Characters", patterns: [/character/i, /player/i, /npc/i, /characters?[\\/]/i, /npcs?[\\/]/i] },
     { id: "locations", label: "Locations", patterns: [/location/i, /place/i, /settlement/i, /locations?[\\/]/i, /maps?[\\/]/i] },
@@ -298,6 +316,12 @@
     const savingThrows = extractSavingThrows(fields["saving throws"]);
     if (savingThrows) draft.savingThrows = savingThrows;
 
+    const skills = extractSkills(fields["skills"]);
+    if (skills) draft.skills = skills;
+
+    const hitDice = extractHitDice(item.text || "");
+    if (hitDice) draft.hitDice = hitDice;
+
     const spellcastingInfo = extractSpellcasting(fields);
     if (spellcastingInfo.spellcasting) draft.spellcasting = spellcastingInfo.spellcasting;
     if (spellcastingInfo.spellSlots) draft.spellSlots = spellcastingInfo.spellSlots;
@@ -358,6 +382,61 @@
       match = pattern.exec(savingThrowsText);
     }
     return Object.keys(saves).length ? saves : null;
+  }
+
+  // Reads a "Skills:" line's stated bonuses directly (e.g. "Perception +9, Stealth +6,
+  // Persuasion +5") -- same trust-the-literal-sheet-value approach extractSavingThrows
+  // already takes; feats/expertise/proficiency are baked into a real sheet's number, not
+  // recomputed here. Sparse: only the skills actually stated come back. Matched by name
+  // (not position), so a multi-word skill like "Animal Handling" or "Sleight of Hand" is
+  // found regardless of where it falls in the comma-separated line.
+  function extractSkills(skillsText) {
+    if (!skillsText) return null;
+    const skills = {};
+    SKILL_NAMES.forEach((name) => {
+      const pattern = new RegExp(`${name.replace(/ /g, "\\s+")}\\s*([+-]\\s*\\d+)`, "i");
+      const match = skillsText.match(pattern);
+      if (match) {
+        const bonus = Number(match[1].replace(/\s+/g, ""));
+        if (Number.isFinite(bonus)) skills[name] = bonus;
+      }
+    });
+    return Object.keys(skills).length ? skills : null;
+  }
+
+  // Reads Hit Dice from a sheet's "Class & Level" line, e.g. "Barbarian 11 (Path of the
+  // Totem Warrior -- Bear) / Fighter 4 (Battle Master)" -- this campaign's own PCs are
+  // routinely multiclassed, so the line can have several "/"-separated segments, each
+  // "ClassName Level" optionally followed by a parenthetical subclass this function ignores.
+  // Scans raw `text` directly with its own regex rather than going through extractFields's
+  // shared `fields` map -- that map's label pattern only accepts letters/spaces
+  // (`[A-Za-z ]+`), so a label containing "&" (this one, "Class & Level") never matches it;
+  // same reason extractAbilityScores below also scans raw text instead of using `fields`.
+  // Same-size dice from different classes pool together (5e RAW: a Barbarian/Fighter has
+  // 11d12 + 4d10, not two separate d10 buckets if a third class also used d10) -- returns a
+  // sparse map keyed by die type ("d12", "d10", ...), each `{total, current: total}` (a
+  // fresh import assumes no Hit Dice spent yet; `## Current Status` doesn't carry a
+  // Hit-Dice-remaining line the way spell slots do, so there's no overlay source for
+  // current here the way extractSpellcasting has one). An unrecognized class name is
+  // skipped rather than guessing a die size.
+  function extractHitDice(text) {
+    if (!text) return null;
+    const lineMatch = text.match(/^\s*(?:[-*]\s*)?\*{0,2}class\s*&\s*level\*{0,2}\s*[:|-]\s*(.+?)\s*$/im);
+    if (!lineMatch) return null;
+
+    const hitDice = {};
+    lineMatch[1].split("/").forEach((segment) => {
+      const match = segment.match(/([A-Za-z]+)\s+(\d+)/);
+      if (!match) return;
+      const className = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
+      const level = Number(match[2]);
+      const die = HIT_DIE_BY_CLASS[className];
+      if (!die || !Number.isFinite(level) || level <= 0) return;
+      const key = `d${die}`;
+      hitDice[key] = { total: (hitDice[key]?.total || 0) + level };
+    });
+    Object.keys(hitDice).forEach((key) => { hitDice[key].current = hitDice[key].total; });
+    return Object.keys(hitDice).length ? hitDice : null;
   }
 
   // Reads spell save DC / spell attack bonus and per-level slot counts out of this

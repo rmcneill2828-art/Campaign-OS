@@ -1,11 +1,43 @@
 (function () {
   const ABILITY_KEYS = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
 
+  // The canonical 18 5e skills and their governing ability -- duplicated here rather than
+  // shared with characterCreator.js's own copy, same convention as CONDITION_LIST/
+  // MONSTER_LIST being duplicated between this file and dm-bridge/watch.js (no bundler, no
+  // shared-module mechanism across these plain browser/Node scripts).
+  const SKILL_LIST = [
+    { name: "Acrobatics", ability: "DEX" },
+    { name: "Animal Handling", ability: "WIS" },
+    { name: "Arcana", ability: "INT" },
+    { name: "Athletics", ability: "STR" },
+    { name: "Deception", ability: "CHA" },
+    { name: "History", ability: "INT" },
+    { name: "Insight", ability: "WIS" },
+    { name: "Intimidation", ability: "CHA" },
+    { name: "Investigation", ability: "INT" },
+    { name: "Medicine", ability: "WIS" },
+    { name: "Nature", ability: "INT" },
+    { name: "Perception", ability: "WIS" },
+    { name: "Performance", ability: "CHA" },
+    { name: "Persuasion", ability: "CHA" },
+    { name: "Religion", ability: "INT" },
+    { name: "Sleight of Hand", ability: "DEX" },
+    { name: "Stealth", ability: "DEX" },
+    { name: "Survival", ability: "WIS" }
+  ];
+
+  function findSkill(name) {
+    const normalized = String(name || "").trim().toLowerCase();
+    return SKILL_LIST.find((skill) => skill.name.toLowerCase() === normalized);
+  }
+
   const conditionList = [
     "Blinded",
     "Charmed",
     "Frightened",
     "Grappled",
+    "Invisible",
+    "Paralyzed",
     "Poisoned",
     "Prone",
     "Restrained",
@@ -13,19 +45,70 @@
     "Unconscious"
   ];
 
+  // RAW mechanical hooks for a subset of the conditions above -- attack()/rollSavingThrow()/
+  // effectiveSpeed() read these the same way they already read token.exhaustion. Charmed and
+  // Frightened are deliberately left descriptive-only (tag only, no automated effect): their
+  // real effects depend on a tracked "source" token and line of sight, which this engine has
+  // no notion of -- same documented-gap spirit as Troll's Regeneration/Hit Dice elsewhere in
+  // this file, not an oversight.
+  function hasCondition(token, name) {
+    return Array.isArray(token.conditions) && token.conditions.includes(name);
+  }
+
+  // Disadvantage/advantage a token's OWN conditions impose on its own attack roll (combines
+  // with an explicit options.advantage/disadvantage and exhaustion-3+ using attack()'s
+  // existing "any number of each still counts as one, both present cancels to a flat roll"
+  // logic -- these two just add more sources on each side of that same cancellation).
+  function ownAttackConditionPenalty(token) {
+    return hasCondition(token, "Blinded") || hasCondition(token, "Restrained")
+      || hasCondition(token, "Prone") || hasCondition(token, "Poisoned");
+  }
+  function ownAttackConditionBonus(token) {
+    return hasCondition(token, "Invisible");
+  }
+
+  // Advantage/disadvantage that attacking `target` gets purely from the target's own
+  // conditions. Blinded is RAW-bidirectional -- "Attack rolls against the creature have
+  // advantage, and the creature's attack rolls have disadvantage" -- so it belongs on BOTH
+  // this function and ownAttackConditionPenalty above, not just the latter (an earlier
+  // version of this file only modeled the self-penalty half; verified against the SRD's
+  // Conditions appendix).
+  function targetGrantsAttackAdvantage(target) {
+    return hasCondition(target, "Restrained") || hasCondition(target, "Prone")
+      || hasCondition(target, "Stunned") || hasCondition(target, "Paralyzed")
+      || hasCondition(target, "Unconscious") || hasCondition(target, "Blinded");
+  }
+  function targetGrantsAttackDisadvantage(target) {
+    return hasCondition(target, "Invisible");
+  }
+
+  // RAW: any hit against a Paralyzed or Unconscious target from an attacker within 5 ft is an
+  // automatic critical hit, not just advantage on the roll to get there. `isAdjacent` is a
+  // one-square (5 ft) proxy for "melee range" -- this engine has no melee/ranged distinction
+  // on attack profiles, so a ranged attack from an adjacent square is treated the same as a
+  // melee one; a documented simplification, not a RAW-accurate melee check.
+  function isAdjacent(a, b) {
+    return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y)) <= 1;
+  }
+  function forcesAutoCrit(target) {
+    return hasCondition(target, "Paralyzed") || hasCondition(target, "Unconscious");
+  }
+
   // SRD 5.1 stat blocks for the monsters `parseCommand`'s spawn phrasing recognizes
   // (see monsterPattern below). attackBonus/damageDice reflect the monster's primary
   // attack for single-attack resolution and the token sheet's editable fields; `attacks`
   // (when present) lists every attack a Multiattack action makes, consumed by attack()
   // below. `initiativeMod` is the monster's real Dex modifier, not a flat guess -- same
   // number as abilityScores.DEX's modifier, kept as its own field since it predates
-  // ability scores being modeled at all. None of these six have a stated saving throw
+  // ability scores being modeled at all. None of these have a stated saving throw
   // proficiency in the SRD, so their saves fall back to a flat ability modifier (see
-  // savingThrowBonus) -- no `savingThrows` override needed.
-  //
-  // Troll's Regeneration (10 HP at the start of its turn unless it took acid/fire damage
-  // since its last turn) is intentionally NOT automated here -- this engine has no
-  // start-of-turn hook to key it off. Apply it by hand via applyHealing on the troll's turn.
+  // savingThrowBonus) -- no `savingThrows` override needed. None carry spellcasting either
+  // (Priest/Mage-style SRD casters would need it, but every monster below is a
+  // straightforward melee attacker, matching the original six). `regeneration`/
+  // `rechargeAbilities` (see nextTurn()) are set on the two monsters that have them --
+  // Pack Tactics is still NOT automated below (it needs to know whether an ally is
+  // adjacent to the same target, which attack() has no notion of); set advantage by hand
+  // when that condition is actually met.
   const STAT_BLOCKS = {
     // Hell Hound (added after checking the real campaign's session log -- its one actual
     // non-humanoid encounter, three hellhounds guarding a market entrance; everything else
@@ -33,14 +116,17 @@
     // damage types in one hit (1d8+3 piercing plus 2d6 fire); damageDice here is a single
     // dice notation with no damage-type modeling anywhere in this engine, so it's
     // approximated as one combined roll (avg ~14.5, matching 1d8+3 + 2d6) rather than
-    // dropping either component. Recharge-based Fire Breath (15 ft cone, DC 12 DEX save,
-    // 6d6 fire/half) and Pack Tactics are NOT automated -- no recharge-roll or
-    // area-effect/multi-target mechanic exists in this engine at all (same known-gap spirit
-    // as Troll's Regeneration); apply Fire Breath by hand via apply_damage/saving_throw
-    // against each affected token if it comes up.
+    // dropping either component. Fire Breath (15 ft cone, DC 12 DEX save, 6d6 fire/half) now
+    // has a real path end to end: rechargeAbilities tracks whether it's available (roll a
+    // d6 >= 5 at the start of the hell hound's turn, per nextTurn()), use_recharge_ability
+    // spends it, and cast_area_spell (or the equivalent local command) resolves the actual
+    // damage/save against whichever tokens are caught in it -- Claude/the DM still decides
+    // which tokens that is, since this engine has no area-of-effect geometry (no cone/blast
+    // shape against the grid), just the dice-and-save resolution once targets are named.
     hellhound: {
       hp: 45, ac: 15, attackBonus: 5, damageDice: "4d6+1", initiativeMod: 1, speed: 50,
-      abilityScores: { STR: 17, DEX: 12, CON: 14, INT: 6, WIS: 13, CHA: 6 }
+      abilityScores: { STR: 17, DEX: 12, CON: 14, INT: 6, WIS: 13, CHA: 6 },
+      rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: true } }
     },
     goblin: {
       hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2, speed: 30,
@@ -58,6 +144,10 @@
       hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30,
       abilityScores: { STR: 11, DEX: 12, CON: 12, INT: 10, WIS: 10, CHA: 10 }
     },
+    // Regeneration (10 HP at the start of its turn "unless it took acid or fire damage
+    // since its last turn") is handled by nextTurn() -- the acid/fire exception isn't
+    // modeled, since damage types aren't tracked anywhere in this engine; skip issuing the
+    // heal by hand (via the token editor) on a turn where that exception should apply.
     troll: {
       hp: 84,
       ac: 15,
@@ -68,11 +158,76 @@
       initiativeMod: 1,
       speed: 30,
       abilityScores: { STR: 18, DEX: 13, CON: 20, INT: 7, WIS: 9, CHA: 7 },
+      regeneration: { amount: 10 },
       attacks: [
         { name: "Bite", attackBonus: 7, damageDice: "1d6+4" },
         { name: "Claw", attackBonus: 7, damageDice: "2d6+4" },
         { name: "Claw", attackBonus: 7, damageDice: "2d6+4" }
       ]
+    },
+    // Skeleton's Vulnerability to bludgeoning damage isn't modeled -- damage types aren't
+    // tracked anywhere in this engine (same known gap as the hell hound's combined-type Bite).
+    skeleton: {
+      hp: 13, ac: 13, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2, speed: 30,
+      abilityScores: { STR: 10, DEX: 14, CON: 15, INT: 6, WIS: 8, CHA: 5 }
+    },
+    // Undead Fortitude (a failed CON save lets it drop to 1 HP instead of 0, unless the
+    // killing damage was radiant or a critical hit) isn't automated -- damage types aren't
+    // tracked and applyDamage has no notion of "this specific hit" to key a save off of
+    // separately from the death-save machinery it already runs; apply it by hand.
+    zombie: {
+      hp: 22, ac: 8, attackBonus: 3, damageDice: "1d6+1", initiativeMod: -2, speed: 20,
+      abilityScores: { STR: 13, DEX: 6, CON: 16, INT: 3, WIS: 6, CHA: 5 }
+    },
+    // Ghoul's Claws (the second Multiattack hit) also inflict paralysis on a failed CON
+    // save (elves immune) -- not automated, since there's no per-attack rider mechanic here;
+    // issue a separate saving_throw + toggle_condition("Paralyzed") by hand if it hits.
+    ghoul: {
+      hp: 22, ac: 12, attackBonus: 2, damageDice: "2d6+2", initiativeMod: 2, speed: 30,
+      abilityScores: { STR: 13, DEX: 15, CON: 10, INT: 7, WIS: 10, CHA: 6 },
+      attacks: [
+        { name: "Bite", attackBonus: 2, damageDice: "2d6+2" },
+        { name: "Claws", attackBonus: 4, damageDice: "2d4+2" }
+      ]
+    },
+    ogre: {
+      hp: 59, ac: 11, attackBonus: 6, damageDice: "2d8+4", initiativeMod: -1, speed: 40,
+      abilityScores: { STR: 19, DEX: 8, CON: 16, INT: 5, WIS: 7, CHA: 7 }
+    },
+    owlbear: {
+      hp: 59, ac: 13, attackBonus: 7, damageDice: "1d10+5", initiativeMod: 1, speed: 40,
+      abilityScores: { STR: 20, DEX: 12, CON: 17, INT: 3, WIS: 12, CHA: 7 },
+      attacks: [
+        { name: "Beak", attackBonus: 7, damageDice: "1d10+5" },
+        { name: "Claws", attackBonus: 7, damageDice: "2d8+5" }
+      ]
+    },
+    worg: {
+      hp: 26, ac: 13, attackBonus: 5, damageDice: "2d6+3", initiativeMod: 1, speed: 50,
+      abilityScores: { STR: 16, DEX: 13, CON: 13, INT: 7, WIS: 11, CHA: 8 }
+    },
+    // Bite RAW deals two damage types in one hit (1d8+3 piercing plus 2d8 poison) plus a
+    // DC 11 CON save or poisoned -- same combined-single-roll approximation the hell hound's
+    // Bite above uses (damage types aren't modeled), and the poisoned-on-hit rider isn't
+    // automated for the same reason ghoul's paralysis rider isn't.
+    "giant spider": {
+      hp: 26, ac: 14, attackBonus: 5, damageDice: "3d8+4", initiativeMod: 3, speed: 30,
+      abilityScores: { STR: 14, DEX: 16, CON: 12, INT: 2, WIS: 11, CHA: 4 }
+    },
+    cultist: {
+      hp: 9, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30,
+      abilityScores: { STR: 11, DEX: 12, CON: 10, INT: 10, WIS: 11, CHA: 10 }
+    },
+    guard: {
+      hp: 11, ac: 16, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30,
+      abilityScores: { STR: 13, DEX: 12, CON: 12, INT: 10, WIS: 11, CHA: 10 }
+    },
+    // The SRD Priest also has Channel Divinity/Spiritual Weapon-style spellcasting -- not
+    // modeled here, same "melee stat line only" simplification noted where STAT_BLOCKS is
+    // introduced above; only its Mace attack is represented.
+    priest: {
+      hp: 27, ac: 13, attackBonus: 2, damageDice: "1d6", initiativeMod: 0, speed: 30,
+      abilityScores: { STR: 10, DEX: 10, CON: 12, INT: 13, WIS: 16, CHA: 13 }
     }
   };
   // Safety net for a monster name that reaches spawnMonster without a STAT_BLOCKS entry
@@ -181,6 +336,12 @@
         abilityScores: { ...stats.abilityScores }
       };
       if (stats.attacks) token.attacks = stats.attacks;
+      if (stats.regeneration) token.regeneration = { ...stats.regeneration };
+      if (stats.rechargeAbilities) {
+        token.rechargeAbilities = Object.fromEntries(
+          Object.entries(stats.rechargeAbilities).map(([name, ability]) => [name, { ...ability }])
+        );
+      }
       nextState.tokens.push(token);
       spawned.push(token);
     }
@@ -217,14 +378,28 @@
     if (abilityScores) token.abilityScores = abilityScores;
     const savingThrows = normalizeSavingThrows(draft.savingThrows);
     if (savingThrows) token.savingThrows = savingThrows;
+    const skills = normalizeSkills(draft.skills);
+    if (skills) token.skills = skills;
     const spellcasting = normalizeSpellcasting(draft.spellcasting);
     if (spellcasting) token.spellcasting = spellcasting;
     const spellSlots = normalizeSpellSlots(draft.spellSlots);
     if (spellSlots) token.spellSlots = spellSlots;
     const resources = normalizeResources(draft.resources);
     if (resources) token.resources = resources;
+    const hitDice = normalizeHitDice(draft.hitDice);
+    if (hitDice) token.hitDice = hitDice;
     const legendaryActions = normalizeLegendaryActions(draft.legendaryActions);
     if (legendaryActions) token.legendaryActions = legendaryActions;
+    const rechargeAbilities = normalizeRechargeAbilities(draft.rechargeAbilities);
+    if (rechargeAbilities) token.rechargeAbilities = rechargeAbilities;
+    if (draft.regeneration && Number.isFinite(Number(draft.regeneration.amount)) && Number(draft.regeneration.amount) > 0) {
+      token.regeneration = { amount: clampNumber(draft.regeneration.amount, 1, 999) };
+    }
+    // How many additional attacks attack() allows in one action-consuming call before the
+    // action is spent (RAW Extra Attack) -- sparse, absent/0 for anything without it.
+    if (Number.isFinite(Number(draft.extraAttacks)) && Number(draft.extraAttacks) > 0) {
+      token.extraAttacks = clampNumber(draft.extraAttacks, 1, 10);
+    }
     token.hp = clampNumber(token.hp, 0, token.maxHp);
     nextState.tokens.push(token);
     nextState.selectedTokenId = token.id;
@@ -291,6 +466,26 @@
       }
     });
     return any ? saves : undefined;
+  }
+
+  // A stated skill bonus (parsed from a character sheet's "Skills:" line, e.g.
+  // "Perception +9, Stealth +6") is stored as-is rather than recomputed from ability
+  // modifier + proficiency (+ expertise) -- same rationale as normalizeSavingThrows: real
+  // sheets bake in bumps a flat formula can't reproduce. Sparse: only the skills actually
+  // stated are recorded, everything else falls back to the raw ability modifier (see
+  // abilityCheckBonus).
+  function normalizeSkills(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const skills = {};
+    let any = false;
+    SKILL_LIST.forEach(({ name }) => {
+      const value = Number(raw[name]);
+      if (Number.isFinite(value)) {
+        skills[name] = Math.round(value);
+        any = true;
+      }
+    });
+    return any ? skills : undefined;
   }
 
   function abilityModifier(score) {
@@ -370,6 +565,31 @@
     return any ? resources : undefined;
   }
 
+  // A token's Hit Dice, sparse by die type (e.g. "d12", "d10") rather than a single
+  // {die, total, current} -- a real high-level sheet is routinely multiclassed (this
+  // campaign's own PCs are: "Barbarian 11 / Fighter 4" has 11d12 + 4d10, not one die type),
+  // and 5e RAW already pools same-size dice from different classes together rather than
+  // tracking them per-class. `campaign.js`'s `extractHitDice` builds this from a sheet's
+  // "Class & Level" line; `total`/`current` follow the same {max→total, current} shape as
+  // every other sparse pool in this file.
+  function normalizeHitDice(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const hitDice = {};
+    let any = false;
+    Object.keys(raw).forEach((dieKey) => {
+      const key = String(dieKey || "").trim().toLowerCase();
+      const entry = raw[dieKey];
+      if (!/^d\d+$/.test(key) || !entry || typeof entry !== "object") return;
+      const total = Number(entry.total);
+      if (!Number.isFinite(total) || total <= 0) return;
+      const clampedTotal = clampNumber(total, 1, 99);
+      const current = Number.isFinite(Number(entry.current)) ? Number(entry.current) : clampedTotal;
+      hitDice[key] = { total: clampedTotal, current: clampNumber(current, 0, clampedTotal) };
+      any = true;
+    });
+    return any ? hitDice : undefined;
+  }
+
   // Resource names are free text (not a fixed enum like abilities/save keys), so lookups
   // match case-insensitively -- narration or Claude saying "rage" should still find a
   // token's stored "Rage" entry -- and return the actual stored key so callers can report
@@ -377,6 +597,35 @@
   function findResourceKey(token, name) {
     const normalized = String(name || "").trim().toLowerCase();
     return Object.keys(token.resources || {}).find((key) => key.toLowerCase() === normalized);
+  }
+
+  // A recharge-based monster ability (Fire Breath, etc.) -- sparse map keyed by ability
+  // name, each `{rechargeMin, available}`. `rechargeMin` is the lowest d6 roll (1-6) that
+  // recharges it at the start of the token's own turn (see nextTurn()); `available`
+  // defaults to true (a fresh monster's recharge abilities start ready) and flips false once
+  // spent via useRechargeAbility(). Unlike resources (which only refill on a rest) or
+  // legendary actions (which refill every turn unconditionally), this is a per-turn dice
+  // roll that might not succeed -- matching RAW's "recharge 5-6" wording exactly rather than
+  // guaranteeing availability.
+  function normalizeRechargeAbilities(raw) {
+    if (!raw || typeof raw !== "object") return undefined;
+    const abilities = {};
+    let any = false;
+    Object.keys(raw).forEach((name) => {
+      const key = String(name || "").trim();
+      const entry = raw[name];
+      if (!key || !entry || typeof entry !== "object" || !Number.isFinite(Number(entry.rechargeMin))) return;
+      const rechargeMin = clampNumber(entry.rechargeMin, 1, 6);
+      const available = entry.available === undefined ? true : Boolean(entry.available);
+      abilities[key] = { rechargeMin, available };
+      any = true;
+    });
+    return any ? abilities : undefined;
+  }
+
+  function findRechargeAbilityKey(token, name) {
+    const normalized = String(name || "").trim().toLowerCase();
+    return Object.keys(token.rechargeAbilities || {}).find((key) => key.toLowerCase() === normalized);
   }
 
   // A single {max, current} tracker, same shape as one named resource -- but unlike
@@ -405,13 +654,39 @@
     return Number.isFinite(score) ? abilityModifier(score) : 0;
   }
 
+  // The bonus rollAbilityCheck adds to the d20. `skillOrAbility` can be a named skill
+  // (e.g. "Perception") -- resolved through the token's stated skills override, falling
+  // back to the ability modifier of that skill's governing ability -- or a bare ability
+  // (e.g. "STR", for an unnamed check like forcing a door), resolved the same way
+  // savingThrowBonus resolves a save with no stated override. Returns null for a name that
+  // matches neither a known skill nor a valid ability, so callers can distinguish "no bonus
+  // known" (0) from "not a real skill/ability at all".
+  function abilityCheckBonus(token, skillOrAbility) {
+    const skill = findSkill(skillOrAbility);
+    if (skill) {
+      const stated = token.skills?.[skill.name];
+      if (Number.isFinite(stated)) return stated;
+      const score = token.abilityScores?.[skill.ability];
+      return Number.isFinite(score) ? abilityModifier(score) : 0;
+    }
+    const key = String(skillOrAbility || "").toUpperCase().slice(0, 3);
+    if (ABILITY_KEYS.includes(key)) {
+      const score = token.abilityScores?.[key];
+      return Number.isFinite(score) ? abilityModifier(score) : 0;
+    }
+    return null;
+  }
+
   // Rolls a saving throw for `tokenId` against `dc`, using its real ability modifier (or
   // stated save bonus, see savingThrowBonus above) rather than a flat guess. Only reports
   // pass/fail -- it does not apply any follow-up effect (e.g. half damage on a success);
   // narration/subsequent actions apply damage or conditions based on the reported result
   // separately, the same way a real table resolves a save before deciding the consequence.
   // Exhaustion level 3+ forces disadvantage on the roll automatically (RAW) -- derived from
-  // the token's own state, not something a caller has to remember to pass in.
+  // the token's own state, not something a caller has to remember to pass in. Stunned,
+  // Paralyzed, and Unconscious automatically fail any STR/DEX save with no roll at all (RAW:
+  // these conditions cause a STR/DEX save failure outright); Restrained imposes disadvantage
+  // specifically on DEX saves (not saves generally) -- see hasCondition and friends above.
   function rollSavingThrow(state, tokenId, ability, dc) {
     const key = String(ability || "").toUpperCase().slice(0, 3);
     if (!ABILITY_KEYS.includes(key)) {
@@ -421,16 +696,77 @@
     const token = tokensOnCurrentMap(state).find((item) => item.id === tokenId);
     if (!token) return { state, message: "Saving throw failed: token was not found.", success: false };
 
+    const dcNumber = Number(dc) || 0;
+    const autoFails = (key === "STR" || key === "DEX")
+      && (hasCondition(token, "Stunned") || hasCondition(token, "Paralyzed") || hasCondition(token, "Unconscious"));
+    if (autoFails) {
+      const message = `${token.name} automatically fails the ${key} save vs DC ${dcNumber} (incapacitated).`;
+      return { state: addLogEntry(state, message), message, success: false, total: null };
+    }
+
     const bonus = savingThrowBonus(token, key);
     const exhausted = (token.exhaustion || 0) >= 3;
-    const d20Info = rollD20WithMode(exhausted ? "disadvantage" : null);
+    const restrainedDex = key === "DEX" && hasCondition(token, "Restrained");
+    const d20Info = rollD20WithMode(exhausted || restrainedDex ? "disadvantage" : null);
     const roll = d20Info.roll;
     const total = roll + bonus;
-    const dcNumber = Number(dc) || 0;
     const success = total >= dcNumber;
-    const rollLabel = d20Info.rolls.length ? `${roll} (exhaustion disadvantage: ${d20Info.rolls.join(", ")})` : `${roll}`;
+    const disadvantageReason = exhausted && restrainedDex ? "exhaustion + restrained disadvantage"
+      : exhausted ? "exhaustion disadvantage" : restrainedDex ? "restrained disadvantage" : null;
+    const rollLabel = d20Info.rolls.length ? `${roll} (${disadvantageReason}: ${d20Info.rolls.join(", ")})` : `${roll}`;
     const message = `${token.name} rolls a ${key} save: ${rollLabel} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dcNumber}. ${success ? "Success" : "Failure"}.`;
     return { state: addLogEntry(state, message), message, success, total };
+  }
+
+  // Rolls an ability/skill check for `tokenId` against `dc` -- Perception, Stealth,
+  // Persuasion, etc. (see SKILL_LIST), or a bare ability (STR/DEX/...) for an unnamed check
+  // like forcing open a door. Mirrors rollSavingThrow's structure: only reports pass/fail,
+  // no follow-up effect. RAW: exhaustion level 1+ imposes disadvantage on ability checks --
+  // a different, lower threshold than attack rolls/saves' level 3+ (see the Exhaustion
+  // bullet in CLAUDE.md) -- and Poisoned imposes disadvantage on ability checks the same way
+  // it does attack rolls. Blinded's "auto-fails a check that requires sight" isn't modeled:
+  // whether a given check is sight-dependent is a DM judgment call this engine can't make,
+  // the same "leave it to narration" treatment Charmed/Frightened get.
+  function rollAbilityCheck(state, tokenId, skillOrAbility, dc) {
+    const token = tokensOnCurrentMap(state).find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Ability check failed: token was not found.", success: false };
+
+    const bonus = abilityCheckBonus(token, skillOrAbility);
+    if (bonus === null) {
+      return { state, message: `Ability check failed: "${skillOrAbility}" is not a valid skill or ability.`, success: false };
+    }
+
+    const dcNumber = Number(dc) || 0;
+    const skill = findSkill(skillOrAbility);
+    const label = skill ? skill.name : String(skillOrAbility || "").toUpperCase().slice(0, 3);
+    const exhausted = (token.exhaustion || 0) >= 1;
+    const poisoned = hasCondition(token, "Poisoned");
+    const d20Info = rollD20WithMode(exhausted || poisoned ? "disadvantage" : null);
+    const roll = d20Info.roll;
+    const total = roll + bonus;
+    const success = total >= dcNumber;
+    const disadvantageReason = exhausted && poisoned ? "exhaustion + poisoned disadvantage"
+      : exhausted ? "exhaustion disadvantage" : poisoned ? "poisoned disadvantage" : null;
+    const rollLabel = d20Info.rolls.length ? `${roll} (${disadvantageReason}: ${d20Info.rolls.join(", ")})` : `${roll}`;
+    const message = `${token.name} rolls a ${label} check: ${rollLabel} ${bonus >= 0 ? "+" : ""}${bonus} = ${total} vs DC ${dcNumber}. ${success ? "Success" : "Failure"}.`;
+    return { state: addLogEntry(state, message), message, success, total };
+  }
+
+  // Spends one of `caster`'s spell slots at `level` (0 = cantrip, never consumes one),
+  // mutating `caster` in place -- a live reference into a cloned state's tokens array, the
+  // same in-place-mutation convention every primitive in this file follows -- and returning
+  // a status message. `ok: false` (no mutation) if the caster has none of that level left.
+  // Shared by castSpell and castAreaSpell so both fail/report identically.
+  function spendSpellSlot(caster, level, spellName) {
+    if (level > 0) {
+      const slot = caster.spellSlots?.[level];
+      if (!slot || slot.current <= 0) {
+        return { ok: false, message: `${caster.name} has no ${ordinal(level)}-level spell slots remaining.` };
+      }
+      slot.current -= 1;
+      return { ok: true, message: `${caster.name} casts ${spellName} using a ${ordinal(level)}-level spell slot (${slot.current} remaining).` };
+    }
+    return { ok: true, message: `${caster.name} casts ${spellName}.` };
   }
 
   // Casts a spell for `casterId`: consumes one of the caster's spell slots at `level`
@@ -442,7 +778,9 @@
   // weapon damageDice. A save-based spell (Fireball, Hold Person) has no attack roll to
   // make here; cast it alone to spend the slot, then issue separate rollSavingThrow calls
   // per target using the caster's spellcasting.saveDC, the same one-shot-batch pattern
-  // saving_throw already uses for traps/effects (see dm-bridge/watch.js's guidance).
+  // saving_throw already uses for traps/effects (see dm-bridge/watch.js's guidance) --
+  // OR, when every target takes the same save-for-half damage, use castAreaSpell below
+  // instead, which resolves all of that in one call.
   function castSpell(state, casterId, options = {}) {
     let nextState = clone(state);
     const caster = tokensOnCurrentMap(nextState).find((token) => token.id === casterId);
@@ -452,15 +790,26 @@
     const spellName = options.spellName || "a spell";
     const messages = [];
 
-    if (level > 0) {
-      const slot = caster.spellSlots?.[level];
-      if (!slot || slot.current <= 0) {
-        return { state, message: `${caster.name} has no ${ordinal(level)}-level spell slots remaining.` };
+    // Action economy: only enforced for a leveled spell (a cantrip is exempted, same
+    // simplification the plan behind this scoped it to -- most cantrips are also
+    // action-consuming under RAW, but distinguishing which ones would need per-spell data
+    // this engine doesn't have) on the caster's own active turn, same carve-out attack() uses.
+    const isActiveTurn = Boolean(state.turn && state.turn.tokenId === casterId);
+    const actionType = options.actionType === "bonusAction" ? "bonusAction" : "action";
+    if (isActiveTurn && level > 0) {
+      if (actionType === "bonusAction") {
+        if (caster.bonusActionUsed) return { state, message: `${caster.name} has already used a bonus action this turn.` };
+      } else if (caster.actionUsed || (caster.attacksUsedThisTurn || 0) > 0) {
+        return { state, message: `${caster.name} has already used their action this turn.` };
       }
-      slot.current -= 1;
-      messages.push(`${caster.name} casts ${spellName} using a ${ordinal(level)}-level spell slot (${slot.current} remaining).`);
-    } else {
-      messages.push(`${caster.name} casts ${spellName}.`);
+    }
+
+    const slotResult = spendSpellSlot(caster, level, spellName);
+    if (!slotResult.ok) return { state, message: slotResult.message };
+    messages.push(slotResult.message);
+    if (isActiveTurn && level > 0) {
+      if (actionType === "bonusAction") caster.bonusActionUsed = true;
+      else caster.actionUsed = true;
     }
 
     // A concentration spell always replaces whatever the caster was already concentrating
@@ -478,8 +827,15 @@
       if (target) {
         const bonus = caster.spellcasting?.attackBonus;
         if (Number.isFinite(bonus)) {
-          const mode = options.disadvantage ? "disadvantage" : options.advantage ? "advantage" : null;
-          const result = resolveOneAttack(caster, target, bonus, options.damageDice, mode, spellName);
+          // Same exhaustion/condition-driven mode computation attack() uses -- a spell
+          // attack roll is still an attack roll under RAW, so it isn't exempt from either.
+          const conditionDisadvantage = ownAttackConditionPenalty(caster) || targetGrantsAttackDisadvantage(target);
+          const conditionAdvantage = ownAttackConditionBonus(caster) || targetGrantsAttackAdvantage(target);
+          const hasDisadvantage = Boolean(options.disadvantage) || (caster.exhaustion || 0) >= 3 || conditionDisadvantage;
+          const hasAdvantage = Boolean(options.advantage) || conditionAdvantage;
+          const mode = hasDisadvantage && hasAdvantage ? null : hasDisadvantage ? "disadvantage" : hasAdvantage ? "advantage" : null;
+          const forceCrit = forcesAutoCrit(target) && isAdjacent(caster, target);
+          const result = resolveOneAttack(caster, target, bonus, options.damageDice, mode, spellName, forceCrit);
           messages.push(result.message);
           if (result.damageTotal > 0) {
             const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical });
@@ -491,6 +847,85 @@
         }
       }
     }
+
+    const message = messages.join(" ");
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // Casts an area-of-effect / multi-target spell (Fireball, Hold Person's damage-dealing
+  // cousins, etc.) that hits every token in `options.targetIds` with the same saving throw
+  // and damage in one call -- the "half on success, full on failure" resolution castSpell
+  // plus a separate saving_throw per target can't do together in one action, because the
+  // one-shot-batch dm-bridge (see CLAUDE.md) never lets Claude see a save's result before
+  // deciding the next action in that same response. Folding the whole resolution into one
+  // deterministic engine call sidesteps that entirely -- the half/full decision is computed
+  // here from the roll itself, not chosen by Claude after the fact, the same reasoning
+  // applyDamage() already uses to resolve a concentration check synchronously with no round
+  // trip. `options`: { spellName, level, targetIds: [...], saveAbility, saveDC, damageDice,
+  // halfOnSave (default true), concentration }. Damage is rolled ONCE for the whole area
+  // (RAW: one damage roll applies to everyone caught in it, not a separate roll per target)
+  // and applied per target via applyDamage, so each target's own concentration/death-save
+  // bookkeeping still resolves individually -- same as attack()'s Multiattack loop resolving
+  // each sub-attack against one target in turn. Each target's saveResult self-logs via
+  // rollSavingThrow (so the individual rolls stay visible in the log), and the final
+  // returned message/log entry folds everything -- slot spend, each save, each damage --
+  // into one self-contained summary. A save with no damage roll at all (Hold Person -- an
+  // effect, not damage) isn't this primitive's job: cast alone via castSpell to spend the
+  // slot, then a separate saving_throw + toggle_condition per target, same as before this
+  // existed.
+  function castAreaSpell(state, casterId, options = {}) {
+    let nextState = clone(state);
+    const caster = tokensOnCurrentMap(nextState).find((token) => token.id === casterId);
+    if (!caster) return { state, message: "Spellcasting failed: caster was not found." };
+
+    const saveAbility = String(options.saveAbility || "").toUpperCase().slice(0, 3);
+    if (!ABILITY_KEYS.includes(saveAbility)) {
+      return { state, message: `Area spell failed: "${options.saveAbility}" is not a valid ability.` };
+    }
+    const targetIds = Array.isArray(options.targetIds) ? options.targetIds : [];
+    if (!targetIds.length) {
+      return { state, message: "Area spell failed: no targets given." };
+    }
+
+    const level = clampNumber(options.level ?? 0, 0, 9);
+    const spellName = options.spellName || "a spell";
+    const messages = [];
+
+    const slotResult = spendSpellSlot(caster, level, spellName);
+    if (!slotResult.ok) return { state, message: slotResult.message };
+    messages.push(slotResult.message);
+
+    if (options.concentration) {
+      if (caster.concentratingOn && caster.concentratingOn.spell !== spellName) {
+        messages.push(`${caster.name}'s concentration on ${caster.concentratingOn.spell} ends.`);
+      }
+      caster.concentratingOn = { spell: spellName };
+    }
+
+    const saveDC = Number(options.saveDC) || 0;
+    const halfOnSave = options.halfOnSave !== false;
+    const damage = rollDice(options.damageDice || "1d6");
+
+    targetIds.forEach((targetId) => {
+      const target = tokensOnCurrentMap(nextState).find((token) => token.id === targetId);
+      if (!target) {
+        messages.push("(could not find one of the area spell's targets.)");
+        return;
+      }
+
+      const saveResult = rollSavingThrow(nextState, target.id, saveAbility, saveDC);
+      nextState = saveResult.state;
+      messages.push(saveResult.message);
+
+      const amount = saveResult.success ? (halfOnSave ? Math.floor(damage.total / 2) : 0) : damage.total;
+      if (amount > 0) {
+        const damageResult = applyDamage(nextState, target.id, amount);
+        nextState = damageResult.state;
+        messages.push(`${target.name} takes ${amount} damage (${damage.notation}).${damageResult.message ? ` ${damageResult.message}` : ""}`);
+      } else {
+        messages.push(`${target.name} takes no damage.`);
+      }
+    });
 
     const message = messages.join(" ");
     return { state: addLogEntry(nextState, message), message };
@@ -558,6 +993,68 @@
     return { state: addLogEntry(nextState, message), message };
   }
 
+  // Spends `count` (default 1) Hit Dice of a given die type (e.g. "d10") -- rolls that many
+  // dice plus the token's CON modifier per die (RAW: minimum 1 total, even if the modifier
+  // is negative enough to zero it out) and heals the total via applyHealing, decrementing
+  // `current`. Fails outright (no state change, same convention as useResource) if the token
+  // has no dice of that type tracked or fewer remain than requested. This is the one place
+  // Hit Dice actually get spent -- longRest() restores half back (rounded up), but nothing
+  // spends them automatically during a short rest, since a real table decides how many (if
+  // any) to spend rather than the engine assuming all of them.
+  function spendHitDie(state, tokenId, dieType, count) {
+    let nextState = clone(state);
+    const token = tokensOnCurrentMap(nextState).find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Hit Dice spend failed: token was not found." };
+
+    const key = String(dieType || "").trim().toLowerCase();
+    const pool = token.hitDice?.[key];
+    if (!pool) return { state, message: `${token.name} has no ${key || "?"} Hit Dice tracked.` };
+
+    const spend = clampNumber(count ?? 1, 1, 99);
+    if (pool.current < spend) {
+      return { state, message: `${token.name} doesn't have ${spend} ${key} Hit Dice left (${pool.current}/${pool.total} remaining).` };
+    }
+
+    const sides = Number(key.slice(1));
+    const conMod = Number.isFinite(token.abilityScores?.CON) ? abilityModifier(token.abilityScores.CON) : 0;
+    let healed = 0;
+    for (let i = 0; i < spend; i += 1) {
+      healed += Math.max(1, rollDie(sides) + conMod);
+    }
+
+    pool.current -= spend;
+    const healResult = applyHealing(nextState, token.id, healed);
+    nextState = healResult;
+    const healedToken = tokensOnCurrentMap(nextState).find((item) => item.id === token.id);
+    const message = `${token.name} spends ${spend} ${key} Hit Dice, healing ${healed} (${healedToken.hp}/${healedToken.maxHp} HP) -- ${pool.current}/${pool.total} ${key} Hit Dice remaining.`;
+    return { state: addLogEntry(nextState, message), message };
+  }
+
+  // Spends a named recharge-based ability (Fire Breath, etc.) -- fails outright with no
+  // state change if the token has no such ability tracked or it's already been spent this
+  // encounter and hasn't recharged yet. Unlike useResource/useLegendaryAction, this only
+  // flips `available` to false; it never bundles the ability's actual effect (damage, a
+  // saving throw), which still needs its own separate action, the same compose-only pattern
+  // cast_spell/use_resource already use. It recharges back on a d6 roll (>= rechargeMin) at
+  // the start of the token's own next turn -- see nextTurn().
+  function useRechargeAbility(state, tokenId, name) {
+    const nextState = clone(state);
+    const token = nextState.tokens.find((item) => item.id === tokenId);
+    if (!token) return { state, message: "Recharge ability use failed: token was not found." };
+
+    const key = findRechargeAbilityKey(token, name);
+    if (!key) return { state, message: `${token.name} has no "${name}" recharge ability tracked.` };
+
+    const ability = token.rechargeAbilities[key];
+    if (!ability.available) {
+      return { state, message: `${token.name}'s ${key} hasn't recharged yet.` };
+    }
+
+    ability.available = false;
+    const message = `${token.name} uses ${key}.`;
+    return { state: addLogEntry(nextState, message), message };
+  }
+
   // Spends `cost` (default 1) legendary action points -- fails outright with no state change
   // if the token has none tracked, or not enough left. RAW says legendary actions are only
   // usable "at the end of another creature's turn"; this engine has no notion of whose turn
@@ -604,12 +1101,11 @@
   }
 
   // A long rest (~8 hours): full HP, every spell slot back to max, every resource back to
-  // max regardless of its recovery tag, and one level of exhaustion removed (RAW). Skips
-  // only the HP/revival part for a token flagged dead -- a long rest isn't a substitute for
-  // Raise Dead/Revivify -- but still refreshes slots/resources/exhaustion regardless, since
-  // none of those require the token to be conscious for the rest to have happened around
-  // them. Hit Dice aren't modeled (same known simplification as Troll's Regeneration), so
-  // there's no separate Hit Dice recovery step here.
+  // max regardless of its recovery tag, half (rounded up) of each Hit Dice pool restored,
+  // and one level of exhaustion removed (RAW). Skips only the HP/revival part for a token
+  // flagged dead -- a long rest isn't a substitute for Raise Dead/Revivify -- but still
+  // refreshes slots/resources/Hit Dice/exhaustion regardless, since none of those require
+  // the token to be conscious for the rest to have happened around them.
   function longRest(state, tokenId) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
@@ -633,6 +1129,21 @@
       messages.push("All resources restored.");
     }
 
+    // RAW (PHB "Long Rest"): a long rest restores UP TO half of a creature's total Hit Dice,
+    // rounded DOWN, with a minimum of one die restored -- not all of them, unlike spell
+    // slots/resources above, which fully refill. Rounds down, not up: the rule's own
+    // "(minimum of one die)" clause only has a reason to exist under round-down math --
+    // rounding up already guarantees at least one for any total >= 1, so a separate minimum
+    // would be redundant text. The PHB's own worked example (8 total -> 4 restored) is exact
+    // and doesn't distinguish the two, but this file's own tests (11 total -> 5, not 6) do.
+    if (token.hitDice && Object.keys(token.hitDice).length) {
+      Object.values(token.hitDice).forEach((pool) => {
+        const restored = Math.max(1, Math.floor(pool.total / 2));
+        pool.current = clampNumber(pool.current + restored, 0, pool.total);
+      });
+      messages.push("Half of all Hit Dice restored.");
+    }
+
     if (token.exhaustion) {
       token.exhaustion = clampNumber(token.exhaustion - 1, 0, 6);
       if (token.exhaustion === 0) delete token.exhaustion;
@@ -645,10 +1156,13 @@
 
   // A short rest (~1 hour): restores every resource tagged recovery: "short" to max --
   // Second Wind, Wild Shape, Superiority Dice, Channel Divinity, and similar. Deliberately
-  // does NOT touch HP (Hit Dice spending/recovery isn't modeled -- heal manually if the
-  // party spends Hit Dice) or spell slots (almost no class recovers those on a short rest;
-  // the one common exception, Warlock Pact Magic, isn't specially modeled here -- restore a
-  // Warlock's slots by hand via the token editor if that comes up).
+  // does NOT touch HP or Hit Dice directly -- RAW lets a creature spend Hit Dice during a
+  // short rest, but how many (if any) is the player's choice each time, not an automatic
+  // full/half refill like the pools above, so that's `spendHitDie()` called explicitly
+  // rather than something shortRest does on its own -- nor spell slots (almost no class
+  // recovers those on a short rest; the one common exception, Warlock Pact Magic, isn't
+  // specially modeled here -- restore a Warlock's slots by hand via the token editor if
+  // that comes up).
   function shortRest(state, tokenId) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
@@ -911,6 +1425,11 @@
       if (merged) token.savingThrows = merged;
     }
 
+    if (changes.skills !== undefined) {
+      const merged = normalizeSkills({ ...(token.skills || {}), ...changes.skills });
+      if (merged) token.skills = merged;
+    }
+
     if (changes.spellcasting !== undefined) {
       const merged = normalizeSpellcasting({ ...(token.spellcasting || {}), ...changes.spellcasting });
       if (merged) token.spellcasting = merged;
@@ -940,6 +1459,18 @@
       else delete token.resources;
     }
 
+    // Hit Dice merge per die-type, same null-deletes-the-entry convention as resources above.
+    if (changes.hitDice !== undefined) {
+      const merged = { ...(token.hitDice || {}) };
+      Object.keys(changes.hitDice).forEach((dieKey) => {
+        if (changes.hitDice[dieKey] === null) delete merged[dieKey];
+        else merged[dieKey] = changes.hitDice[dieKey];
+      });
+      const normalized = normalizeHitDice(merged);
+      if (normalized) token.hitDice = normalized;
+      else delete token.hitDice;
+    }
+
     // A single tracker (not a per-name map like resources), so null clears it entirely
     // rather than needing a per-key delete.
     if (changes.legendaryActions !== undefined) {
@@ -948,6 +1479,37 @@
       } else {
         const merged = normalizeLegendaryActions({ ...(token.legendaryActions || {}), ...changes.legendaryActions });
         if (merged) token.legendaryActions = merged;
+      }
+    }
+
+    // Recharge abilities merge per-name, same null-deletes-the-entry convention as
+    // resources/hitDice above.
+    if (changes.rechargeAbilities !== undefined) {
+      const merged = { ...(token.rechargeAbilities || {}) };
+      Object.keys(changes.rechargeAbilities).forEach((name) => {
+        if (changes.rechargeAbilities[name] === null) delete merged[name];
+        else merged[name] = changes.rechargeAbilities[name];
+      });
+      const normalized = normalizeRechargeAbilities(merged);
+      if (normalized) token.rechargeAbilities = normalized;
+      else delete token.rechargeAbilities;
+    }
+
+    // A single {amount} tracker, same null-clears-it-entirely convention as
+    // legendaryActions above.
+    if (changes.regeneration !== undefined) {
+      if (changes.regeneration === null || !Number.isFinite(Number(changes.regeneration.amount)) || Number(changes.regeneration.amount) <= 0) {
+        delete token.regeneration;
+      } else {
+        token.regeneration = { amount: clampNumber(changes.regeneration.amount, 1, 999) };
+      }
+    }
+
+    if (changes.extraAttacks !== undefined) {
+      if (changes.extraAttacks === null || !Number.isFinite(Number(changes.extraAttacks)) || Number(changes.extraAttacks) <= 0) {
+        delete token.extraAttacks;
+      } else {
+        token.extraAttacks = clampNumber(changes.extraAttacks, 1, 10);
       }
     }
 
@@ -1075,14 +1637,18 @@
   // Resolves a single attack roll + damage roll against one target. `label` (an attack
   // name like "Claw") is only included in the message when set -- single-attack callers
   // leave it null so the message format matches a plain "<attacker> attacks <target>" line.
-  function resolveOneAttack(attacker, target, attackBonus, damageDice, mode, label) {
+  // `forceCrit` (Paralyzed/Unconscious target within 5 ft, see forcesAutoCrit/isAdjacent)
+  // upgrades a hit that already beat AC into a critical even on a non-natural-20 roll -- it
+  // never turns a miss into a hit; a natural 1 still misses regardless per RAW.
+  function resolveOneAttack(attacker, target, attackBonus, damageDice, mode, label, forceCrit) {
     const d20Info = rollD20WithMode(mode);
     const d20 = d20Info.roll;
     const bonus = Number(attackBonus || 0);
     const total = d20 + bonus;
     const targetAc = Number(target.ac || 10);
-    const isCritical = d20 === 20;
-    const isMiss = d20 === 1 || (!isCritical && total < targetAc);
+    const naturalCrit = d20 === 20;
+    const isMiss = d20 === 1 || (!naturalCrit && total < targetAc);
+    const isCritical = !isMiss && (naturalCrit || Boolean(forceCrit));
     const rollLabel = d20Info.rolls.length
       ? `${d20} (${mode}: ${d20Info.rolls.join(", ")})`
       : `${d20}`;
@@ -1118,7 +1684,11 @@
   // dead action; only a target removed from the map entirely stops the loop outright.
   // Exhaustion level 3+ forces disadvantage on the attacker's rolls (RAW), same as
   // rollSavingThrow -- combined with an explicit options.advantage, they cancel out per RAW
-  // rather than exhaustion silently winning.
+  // rather than exhaustion silently winning. Conditions add more sources on each side of that
+  // same cancellation: the attacker's own Blinded/Restrained/Prone/Poisoned or the target's
+  // Invisible impose disadvantage; the attacker's own Invisible or the target's
+  // Restrained/Prone/Stunned/Paralyzed/Unconscious grant advantage (see ownAttackCondition*/
+  // targetGrantsAttack* above).
   function attack(state, attackerId, targetId, options = {}) {
     let nextState = clone(state);
     const activeTokens = tokensOnCurrentMap(nextState);
@@ -1128,8 +1698,32 @@
       return { state, message: "Attack failed: attacker or target was not found." };
     }
 
-    const hasDisadvantage = Boolean(options.disadvantage) || (attacker.exhaustion || 0) >= 3;
-    const hasAdvantage = Boolean(options.advantage);
+    // Action economy is only enforced on the attacker's own active turn -- same
+    // "unrestricted outside your own turn" carve-out moveToken already uses for speed, so
+    // narration/setup outside formal combat stays free. options.actionType defaults to
+    // "action"; a Fighter/Barbarian's Extra Attack (token.extraAttacks, sparse, default 0)
+    // lets `attack()` itself be called 1 + extraAttacks times before the action is spent --
+    // this is the one action-consumer that can legitimately fire more than once, since RAW's
+    // Extra Attack is "more attacks as part of the same Attack action," not a second action.
+    const isActiveTurn = Boolean(state.turn && state.turn.tokenId === attackerId);
+    const actionType = options.actionType === "bonusAction" ? "bonusAction" : "action";
+    if (isActiveTurn) {
+      if (actionType === "bonusAction") {
+        if (attacker.bonusActionUsed) {
+          return { state, message: `${attacker.name} has already used a bonus action this turn.` };
+        }
+      } else {
+        const attacksAllowed = 1 + (attacker.extraAttacks || 0);
+        if (attacker.actionUsed || (attacker.attacksUsedThisTurn || 0) >= attacksAllowed) {
+          return { state, message: `${attacker.name} has already used their action this turn.` };
+        }
+      }
+    }
+
+    const conditionDisadvantage = ownAttackConditionPenalty(attacker) || targetGrantsAttackDisadvantage(target);
+    const conditionAdvantage = ownAttackConditionBonus(attacker) || targetGrantsAttackAdvantage(target);
+    const hasDisadvantage = Boolean(options.disadvantage) || (attacker.exhaustion || 0) >= 3 || conditionDisadvantage;
+    const hasAdvantage = Boolean(options.advantage) || conditionAdvantage;
     const mode = hasDisadvantage && hasAdvantage ? null : hasDisadvantage ? "disadvantage" : hasAdvantage ? "advantage" : null;
     const profiles = Array.isArray(attacker.attacks) && attacker.attacks.length
       ? attacker.attacks
@@ -1141,7 +1735,8 @@
       const liveTarget = tokensOnCurrentMap(nextState).find((token) => token.id === target.id);
       if (!liveTarget) break;
 
-      const result = resolveOneAttack(attacker, liveTarget, profile.attackBonus, profile.damageDice, mode, useLabel ? profile.name : null);
+      const forceCrit = forcesAutoCrit(liveTarget) && isAdjacent(attacker, liveTarget);
+      const result = resolveOneAttack(attacker, liveTarget, profile.attackBonus, profile.damageDice, mode, useLabel ? profile.name : null, forceCrit);
       messages.push(result.message);
       if (result.damageTotal > 0) {
         const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical });
@@ -1151,6 +1746,20 @@
 
       const updatedTarget = tokensOnCurrentMap(nextState).find((token) => token.id === target.id);
       if (!updatedTarget || updatedTarget.hp <= 0) break;
+    }
+
+    if (isActiveTurn) {
+      const finalAttacker = nextState.tokens.find((token) => token.id === attackerId);
+      if (finalAttacker) {
+        if (actionType === "bonusAction") {
+          finalAttacker.bonusActionUsed = true;
+        } else {
+          finalAttacker.attacksUsedThisTurn = (finalAttacker.attacksUsedThisTurn || 0) + 1;
+          if (finalAttacker.attacksUsedThisTurn >= 1 + (finalAttacker.extraAttacks || 0)) {
+            finalAttacker.actionUsed = true;
+          }
+        }
+      }
     }
 
     const message = messages.join(" ");
@@ -1221,15 +1830,53 @@
     nextState.turn = { tokenId: activeTokenId, round: nextRound };
 
     const activeToken = nextState.tokens.find((token) => token.id === activeTokenId);
+    // Accumulated into one combined log entry (added once, below) rather than several --
+    // same "one entry per action" convention attack()'s Multiattack loop uses, and it avoids
+    // activeToken going stale: addLogEntry clones its input, so calling it more than once
+    // here would silently orphan any mutation made to activeToken after the first call.
+    const messages = [];
     if (activeToken) {
       activeToken.movementUsed = 0;
       activeToken.diagonalStepsThisTurn = 0;
+      // Action economy resets for the newly active token, same "lives on the token, reset
+      // here" convention as movementUsed above (not on state.turn) -- attack()/castSpell()
+      // only read these when it's this token's own active turn, so there's nothing to
+      // reset for anyone else.
+      delete activeToken.actionUsed;
+      delete activeToken.bonusActionUsed;
+      delete activeToken.attacksUsedThisTurn;
       // RAW: a legendary creature regains all expended legendary actions at the start of
       // its own turn.
       if (activeToken.legendaryActions) activeToken.legendaryActions.current = activeToken.legendaryActions.max;
+
+      // RAW: some creatures (Troll's Regeneration) heal automatically at the start of their
+      // own turn -- damage-type exceptions ("unless it took acid or fire damage since its
+      // last turn") aren't modeled, since damage types aren't tracked anywhere in this
+      // engine; skip issuing the heal by hand (via updateToken/the HP panel) when that
+      // matters narratively.
+      if (activeToken.regeneration && activeToken.hp > 0 && activeToken.hp < activeToken.maxHp) {
+        const healed = Math.min(activeToken.regeneration.amount, activeToken.maxHp - activeToken.hp);
+        activeToken.hp += healed;
+        messages.push(`${activeToken.name} regenerates ${healed} HP (${activeToken.hp}/${activeToken.maxHp}).`);
+      }
+
+      // RAW: a recharge-based ability (Fire Breath, etc.) rolls a d6 at the start of the
+      // token's own turn and becomes available again on a roll >= its rechargeMin -- only
+      // abilities already spent (available: false) roll at all.
+      if (activeToken.rechargeAbilities) {
+        Object.keys(activeToken.rechargeAbilities).forEach((name) => {
+          const ability = activeToken.rechargeAbilities[name];
+          if (ability.available) return;
+          const roll = rollDie(6);
+          if (roll >= ability.rechargeMin) {
+            ability.available = true;
+            messages.push(`${activeToken.name}'s ${name} recharges! (rolled ${roll})`);
+          }
+        });
+      }
     }
 
-    return nextState;
+    return messages.length ? addLogEntry(nextState, messages.join(" ")) : nextState;
   }
 
   // The speed actually usable this turn once exhaustion's movement penalties are applied
@@ -1238,6 +1885,7 @@
   // unpenalized speed, so the penalty can't accidentally become permanent if exhaustion is
   // later removed.
   function effectiveSpeed(token) {
+    if (hasCondition(token, "Grappled") || hasCondition(token, "Restrained")) return 0;
     const base = Number(token.speed ?? 30);
     const level = token.exhaustion || 0;
     if (level >= 5) return 0;
@@ -1305,7 +1953,7 @@
     const normalized = command.toLowerCase();
     const countWords = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
     const countPattern = "(one|two|three|four|five|six|\\d+)";
-    const monsterPattern = "(goblin|orc|troll|bandit|wolf|hellhound)s?";
+    const monsterPattern = "(goblin|orc|troll|bandit|wolf|hellhound|skeleton|zombie|ghoul|ogre|owlbear|worg|giant spider|cultist|guard|priest)s?";
     const actionFirst = new RegExp(`(?:spawn|summon|emerge|appear|add).*?${countPattern}\\s+${monsterPattern}`);
     const countFirst = new RegExp(`${countPattern}\\s+${monsterPattern}.*?(?:spawn|summon|emerge|appear|add)`);
     const spawnMatch = normalized.match(actionFirst) || normalized.match(countFirst);
@@ -1334,6 +1982,20 @@
       return rollSavingThrow(state, token.id, saveMatch[2], Number(saveMatch[3]));
     }
 
+    // "<name> rolls/makes a <skill or ability> check against DC <n>" -- e.g. "Sael rolls a
+    // Perception check against DC 15" or "Darkhawk makes a Strength check against DC 20"
+    // for an unnamed check. `<skill or ability>` is free text since several skill names are
+    // multi-word ("Animal Handling", "Sleight of Hand") -- rollAbilityCheck itself validates
+    // it against SKILL_LIST/ABILITY_KEYS and fails outright if it matches neither.
+    const checkMatch = command.match(
+      /^(.+?)\s+(?:makes?|rolls?)\s+an?\s+([a-z ]+?)\s+check\s+(?:against|vs\.?)?\s*dc\s*(\d+)/i
+    );
+    if (checkMatch) {
+      const token = findTokenByName(state, checkMatch[1]);
+      if (!token) return { state, message: "I could not find who's making the check." };
+      return rollAbilityCheck(state, token.id, checkMatch[2].trim(), Number(checkMatch[3]));
+    }
+
     // "<caster> casts <spell> [at <target>] (cantrip|Nth level[, concentration]) [for <damage
     // dice>]" -- the level/cantrip parenthetical is required so this can't misfire on
     // ordinary narration that happens to contain the word "casts". "at <target>" + "for
@@ -1344,6 +2006,37 @@
     const castMatch = command.match(
       /^(.+?)\s+casts?\s+(.+?)(?:\s+at\s+(.+?))?\s*\((cantrip|[1-9](?:st|nd|rd|th))(?:\s+level)?(,\s*concentration)?\)(?:\s+for\s+(\d*d\d+(?:\s*[+-]\s*\d+)?))?\s*[.!?]?$/i
     );
+
+    // "<caster> casts <spell> on <target1>, <target2>, ... (Nth level, <ability> save DC
+    // <n>) for <damage dice>" -- an area/multi-target spell (Fireball, etc.) resolved
+    // atomically via castAreaSpell: one damage roll, one save per target, half damage on a
+    // success (see castAreaSpell's own comment for why this needs to be one call, not a
+    // cast_spell + N separate saving_throw commands). Checked BEFORE castMatch above,
+    // since castMatch's more permissive "at <target>" is optional and would otherwise
+    // swallow "<spell> on <targets> (...)" whole into its own spellName group.
+    const areaCastMatch = command.match(
+      /^(.+?)\s+casts?\s+(.+?)\s+on\s+(.+?)\s*\((cantrip|[1-9](?:st|nd|rd|th))(?:\s+level)?,\s*(strength|dexterity|constitution|intelligence|wisdom|charisma|str|dex|con|int|wis|cha)\s+sav(?:e|ing throw)\s+dc\s*(\d+)\)\s+for\s+(\d*d\d+(?:\s*[+-]\s*\d+)?)\s*[.!?]?$/i
+    );
+    if (areaCastMatch) {
+      const caster = findTokenByName(state, areaCastMatch[1]);
+      if (!caster) return { state, message: "I could not find who's casting." };
+      const targetNames = areaCastMatch[3].split(/\s*,\s*|\s+and\s+/i).map((name) => name.trim()).filter(Boolean);
+      const targetIds = [];
+      for (const name of targetNames) {
+        const token = findTokenByName(state, name);
+        if (!token) return { state, message: `I could not find "${name}" among the spell's targets.` };
+        targetIds.push(token.id);
+      }
+      const level = areaCastMatch[4].toLowerCase() === "cantrip" ? 0 : Number(areaCastMatch[4].match(/\d/)[0]);
+      return castAreaSpell(state, caster.id, {
+        spellName: areaCastMatch[2].trim(),
+        level,
+        targetIds,
+        saveAbility: areaCastMatch[5],
+        saveDC: Number(areaCastMatch[6]),
+        damageDice: areaCastMatch[7].replace(/\s+/g, "")
+      });
+    }
 
     // "<caster> stops concentrating" / "<caster> drops concentration" -- voluntarily ends
     // whatever that token is concentrating on, same as the token sheet's Drop Concentration
@@ -1383,6 +2076,24 @@
       const amount = exhaustionMatch[3] ? Number(exhaustionMatch[3]) : 1;
       const signedAmount = exhaustionMatch[2].toLowerCase().startsWith("lose") ? -amount : amount;
       return addExhaustion(state, token.id, signedAmount);
+    }
+
+    // "<name> spends a hit die" / "<name> spends 2 d10 hit dice" -- same roll the token
+    // sheet's Spend Hit Die control makes. The die type defaults to whichever single type
+    // the token has if only one is tracked (most non-multiclass PCs); a multiclassed token
+    // with more than one die type tracked must name which one ("d10 hit dice") explicitly.
+    const hitDiceMatch = command.match(/^(.+?)\s+spends?\s+(?:an?|(\d+))\s+(d\d+\s+)?hit\s+(?:die|dice)\s*[.!?]?$/i);
+    if (hitDiceMatch) {
+      const token = findTokenByName(state, hitDiceMatch[1]);
+      if (!token) return { state, message: "I could not find who's spending Hit Dice." };
+      const count = hitDiceMatch[2] ? Number(hitDiceMatch[2]) : 1;
+      const dieTypes = Object.keys(token.hitDice || {});
+      const dieType = hitDiceMatch[3] ? hitDiceMatch[3].trim().toLowerCase() : dieTypes[0];
+      if (!dieType) return { state, message: `${token.name} has no Hit Dice tracked.` };
+      if (!hitDiceMatch[3] && dieTypes.length > 1) {
+        return { state, message: `${token.name} tracks more than one Hit Dice type (${dieTypes.join(", ")}) -- say which one, e.g. "spends 2 ${dieTypes[0]} hit dice".` };
+      }
+      return spendHitDie(state, token.id, dieType, count);
     }
 
     // "<name> uses a legendary action" / "<name> uses 2 legendary actions" -- same as the
@@ -1442,6 +2153,8 @@
 
   window.CampaignOS = {
     ABILITY_KEYS,
+    SKILL_LIST,
+    abilityCheckBonus,
     abilityModifier,
     addExhaustion,
     addLogEntry,
@@ -1449,6 +2162,7 @@
     applyHealing,
     attack,
     addToken,
+    castAreaSpell,
     castSpell,
     conditionList,
     createState,
@@ -1457,6 +2171,7 @@
     effectiveSpeed,
     feetPerSquare,
     gridMoveCost,
+    hasCondition,
     hasRealMapData,
     longRest,
     moveToken,
@@ -1464,13 +2179,16 @@
     parseCommand,
     removeToken,
     restoreResource,
+    rollAbilityCheck,
     setExhaustion,
+    spendHitDie,
     shortRest,
     rollDeathSave,
     rollSavingThrow,
     savingThrowBonus,
     triggerLairAction,
     useLegendaryAction,
+    useRechargeAbility,
     useResource,
     setActiveMap,
     setMapGrid,

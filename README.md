@@ -19,21 +19,40 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Initiative tracker
 - Editable token sheet
 - Flexible damage and healing
-- Expanded condition tracking
+- Conditions with real mechanical effects: Blinded, Restrained, Prone, and Poisoned impose
+  disadvantage on that token's own attack rolls; Invisible grants it advantage instead. Attacking
+  a Blinded, Restrained, Prone, Stunned, Paralyzed, or Unconscious target is automatically at
+  advantage (Blinded is bidirectional under RAW -- both a penalty on its own attacks and a bonus
+  to whoever attacks it); attacking an Invisible target is automatically at disadvantage -- these combine with an
+  explicit advantage/disadvantage flag and exhaustion's own disadvantage using the same RAW
+  cancel-out rule. A hit against a Paralyzed or Unconscious target from an adjacent attacker is
+  automatically a critical hit. Stunned, Paralyzed, and Unconscious auto-fail any STR/DEX saving
+  throw with no roll; Restrained adds disadvantage to DEX saves specifically. Grappled and
+  Restrained both zero a token's speed. Charmed and Frightened remain tag-only (no automated
+  effect) -- their real RAW consequences need a tracked "source" token this engine doesn't model,
+  so handle those by hand the same way as Troll's Regeneration.
 - Remove defeated or accidental tokens
-- Dice-backed attacks, rules-as-written: SRD-accurate stat blocks for the six monsters
-  `spawn` recognizes (goblin, orc, wolf, bandit, troll, hellhound), a critical hit that
+- Dice-backed attacks, rules-as-written: SRD-accurate stat blocks for the 16 monsters
+  `spawn` recognizes (goblin, orc, wolf, bandit, troll, hellhound, skeleton, zombie, ghoul,
+  ogre, owlbear, worg, giant spider, cultist, guard, priest), a critical hit that
   doubles only the damage dice (not a flat modifier), advantage/disadvantage on any attack
   (manual attack-control dropdown, `attacks Y with advantage`/`at disadvantage` phrasing, or
   the Claude DM bridge's `advantage`/`disadvantage` action flags), and automatic Multiattack
   for monsters that have one (a troll's Bite + two Claws resolve as one attack action,
-  each roll shown individually). Troll's Regeneration is a known, intentional gap -- there's
-  no start-of-turn hook in the engine to key it off, so apply it by hand. A hell hound's Bite
+  each roll shown individually). Troll's Regeneration now heals it automatically at the
+  start of its own turn (see Start-of-turn recharge/regeneration below). A hell hound's Bite
   is RAW two damage types in one hit (piercing plus fire) -- since damage types aren't
   modeled anywhere in this engine, its single damageDice is a combined roll approximating
-  the same average total; its recharge-based Fire Breath (an area effect, no recharge-roll
-  or multi-target mechanic exists here either) isn't automated -- apply it by hand the same
-  way as Troll's Regeneration.
+  the same average total; its recharge-based Fire Breath now has a real path too: it
+  recharges automatically (see below), and the actual 15 ft cone/6d6-fire-half-on-DEX-save
+  effect is resolved via `cast_area_spell` once you decide which tokens are caught in it (this
+  engine has no cone/blast geometry of its own to figure that out for you). A few of the
+  newer monsters have similar riders left to the DM's hand for the same reason damage types
+  aren't modeled: a Ghoul's Claws can paralyze, a Giant Spider's Bite can
+  poison (and, like the hell hound, combines two damage types into one approximated roll), a
+  Zombie's Undead Fortitude can keep it up at 1 HP, and a Skeleton's vulnerability to
+  bludgeoning damage isn't modeled -- none of these have a per-attack-rider or damage-type
+  mechanic to hook into yet.
 - Turn tracker: a "Next Turn" control in the Initiative panel steps through the current
   map's initiative order, shows the round number and whose turn it is, and resets that
   token's movement budget. Speed limits only apply to whichever token the tracker currently
@@ -46,6 +65,18 @@ dependencies to install for the app itself. See Tests, below, for running the te
   flat cost per diagonal square), with the alternation carrying across separate moves within
   the same turn. Click-to-move, the Claude DM bridge's `move_token` action, and the manual
   grid all go through the same speed check.
+- Action economy: once the turn tracker is actually running and it's a token's own active
+  turn, an attack or a leveled spell cast (cantrips are exempt) consumes that token's action
+  for the turn -- a second one fails outright, the same "only restricted on your own turn"
+  rule Speed above already follows (repositioning another token, or acting before turn order
+  starts, is never restricted). An **Extra Attacks** field on the token sheet (RAW Extra
+  Attack) lets an attack be made that many additional times before the action is spent -- issue
+  one attack per swing, not one call covering all of them, for a Fighter/Barbarian with it. Set
+  `actionType: "bonusAction"` (the Claude DM bridge's `attack`/`cast_spell` actions) for a
+  genuine bonus-action use (an off-hand attack, Misty Step, Healing Word) -- it has its own
+  separate one-per-turn budget, independent of the action. Reactions (opportunity attacks)
+  aren't modeled at all -- this engine has no "left another token's reach" trigger to key one
+  off.
 - Ability scores and saving throws: every token can carry real STR/DEX/CON/INT/WIS/CHA
   scores -- editable on the token sheet, filled in automatically for the six `spawn`ed
   monsters (real SRD ability scores, not guesses) and for any imported character/NPC sheet
@@ -58,6 +89,16 @@ dependencies to install for the app itself. See Tests, below, for running the te
   and reports pass/fail; it doesn't apply a follow-up effect (e.g. half damage on success)
   automatically -- decide that from the reported result the same way Troll's Regeneration
   above is handled by hand.
+- Ability/skill checks: any of the 18 named 5e skills (Perception, Stealth, Persuasion, etc.)
+  or a bare ability (for an unnamed check, like forcing a door) can be rolled with a **Roll
+  Check** control on the token sheet (or `<name> rolls a <skill> check against DC <n>`, or the
+  Claude DM bridge's `ability_check` action) -- a d20 + the token's real ability modifier, or a
+  sheet's literal stated skill bonus instead when there is one (`**Skills:** Perception +9,
+  Stealth +6...`, imported the same trust-the-sheet-value way saving throws are). Exhaustion
+  imposes disadvantage starting at level 1 here (a lower threshold than attack rolls/saves'
+  level 3+), and Poisoned imposes it too, same as it does on attacks. Like a saving throw, this
+  only resolves and reports pass/fail -- decide any follow-up (the door budges, the guard
+  believes the lie) from the result yourself.
 - Spellcasting: every token can carry a spell save DC, spell attack bonus, and per-level
   (1st-9th) spell slots -- editable on the token sheet, filled in automatically for any
   imported character sheet with a `**Spellcasting:**` bullet (DC/attack bonus/max slots) and,
@@ -67,9 +108,15 @@ dependencies to install for the app itself. See Tests, below, for running the te
   the caster's slots at that level (a cantrip, level 0, never consumes one) and fails outright
   with no other effect if none are left. Giving it a target and damage dice also rolls a spell
   attack against that target using the caster's stated spell attack bonus -- for a save-based
-  spell (Fireball, Hold Person) instead, cast it alone to spend the slot, then issue a separate
-  `Roll Save`/`saving_throw` per target using the caster's stated spell save DC, once the
-  attack roll or narration decides who's affected.
+  spell with no damage of its own (Hold Person) instead, cast it alone to spend the slot, then
+  issue a separate `Roll Save`/`saving_throw` per target using the caster's stated spell save
+  DC, once the attack roll or narration decides who's affected. For a spell that deals the
+  SAME damage to multiple targets with a save for half (Fireball, Burning Hands), use
+  `<caster> casts <spell> on <target1>, <target2>, ... (Nth level, <ability> save DC <n>) for
+  <damage dice>` or the Claude DM bridge's `cast_area_spell` action instead -- it resolves the
+  whole thing in one shot: one damage roll for the area, one save per target, full damage on a
+  failure or half (rounded down) on a success, each self-contained with no manual follow-up
+  needed.
 - Class resources: any token can track named limited-use resources (Rage, Wild Shape, Ki
   Points, Superiority Dice, Channel Divinity, Bardic Inspiration, etc.), each with a current
   and max count and a **recovery type** (Long rest, or Short/long rest -- whichever kind of
@@ -109,16 +156,26 @@ dependencies to install for the app itself. See Tests, below, for running the te
   PCs and leaves monsters to the DM's judgment at 0 HP, but this engine applies the same
   tracker to every token type; a monster the DM just wants to consider dead at 0 HP can
   simply be left alone or edited directly.
+- Hit Dice: characters get a Hit Dice pool per die size on import (a **Class & Level** line
+  like "Barbarian 11 / Fighter 4" becomes 11 d12 + 4 d10 -- same-size dice from different
+  classes pool together, matching RAW), editable and addable on the token sheet's **Hit
+  Dice** section. A **Spend 1** button per die type (or `<name> spends a/N hit die(s)`, or the
+  Claude DM bridge's `spend_hit_die` action) rolls that many dice plus the token's CON
+  modifier each (minimum 1 healing per die) and heals the total, failing outright once none
+  of that type are left. Spawned monsters don't get a Hit Dice pool -- only characters
+  actually spend them during play.
 - Rest automation: **Long Rest** and **Short Rest** buttons on the token sheet (or `<name>
   takes a long/short rest`, or the Claude DM bridge's `long_rest`/`short_rest` actions -- one
   per token; issue several to rest the whole party at once). Long Rest fully heals HP,
-  restores every spell slot and every resource to max regardless of its recovery type, and
-  removes one level of exhaustion, but skips the HP/revival part for a token already flagged
-  dead (that needs an actual revival, not a rest). Short Rest only restores resources tagged
-  **Short/long rest** -- it never touches HP, spell slots, or exhaustion, since Hit Dice
-  spending/recovery isn't modeled (heal manually if the party spends Hit Dice), almost nothing
-  but Warlock Pact Magic recovers slots on a short rest (also not specially handled), and only
-  a long rest reduces exhaustion under RAW.
+  restores every spell slot and every resource to max regardless of its recovery type,
+  restores half (rounded down, minimum one) of every Hit Dice pool, and removes one level of exhaustion, but
+  skips the HP/revival part for a token already flagged dead (that needs an actual revival,
+  not a rest). Short Rest only restores resources tagged **Short/long rest** -- it never
+  touches HP, spell slots, or Hit Dice directly (RAW lets a character spend Hit Dice during a
+  short rest, but how many is a choice each time, not an automatic refill -- use the Spend
+  Hit Die control/`spend_hit_die` action for that), almost nothing but Warlock Pact Magic
+  recovers slots on a short rest (also not specially handled), and only a long rest reduces
+  exhaustion under RAW.
 - Exhaustion: a 0-6 level tracked per token (shown on its sheet as **Exhaustion: N/6**, with
   **+1**/**-1** buttons, or `<name> gains/loses a level of exhaustion`, or the Claude DM
   bridge's `add_exhaustion` action -- default amount 1, negative to remove levels). The engine
@@ -141,6 +198,17 @@ dependencies to install for the app itself. See Tests, below, for running the te
   manual reset needed) -- RAW reserves them for use "at the end of another creature's turn,"
   which is a narrative judgment call for the DM/Claude to make, the same way `roll_death_save`'s
   "at the start of its turn" trigger isn't enforced by the engine either.
+- Start-of-turn recharge/regeneration: any token can carry a **Regeneration** amount (heals
+  automatically at the start of its own turn, capped at max HP -- a troll's 10 HP/turn is set
+  automatically on spawn) and/or named **Recharge Abilities** (a d6 roll at the start of its
+  own turn, becoming available again at or above a stated threshold -- a hell hound's Fire
+  Breath, recharge 5-6, is set automatically on spawn), both editable/addable on the token
+  sheet and shown in `next_turn`'s own log entry when they trigger. A **Use** button per
+  recharge ability (or the Claude DM bridge's `use_recharge_ability` action) spends it, failing
+  outright if it hasn't recharged yet -- like resources/legendary actions, this only spends the
+  ability; the actual effect (Fire Breath's damage and save) still needs its own action, with
+  `cast_area_spell` the natural fit for an area breath weapon once you've decided which tokens
+  are caught in it.
 - Lair actions: a **Lair Action** control in the Initiative panel (or `Lair action: <what
   happens>`, or the Claude DM bridge's `trigger_lair_action` action) fires the current
   encounter's once-per-round lair action (RAW: initiative count 20) and logs whatever you
@@ -222,9 +290,12 @@ The "Claude DM" panel works two ways:
 - **Connected:** commands are handled by a real Claude Code call, which can narrate freely
   and decide on structured actions (spawn, attack, damage, heal, toggle a condition, move a
   token on the grid, advance to the next turn, switch to a different prepared map, roll a
-  saving throw, cast a spell, spend a class resource, start or drop concentration, roll a
-  death save, take a long or short rest, add/remove exhaustion, spend a legendary action,
-  trigger a lair action), referencing tokens by name and reasoning about the current encounter
+  saving throw, roll an ability/skill check, cast a spell (single-target or, for a
+  save-for-half area effect, a one-shot multi-target cast), spend a class resource, spend Hit
+  Dice, start or drop concentration, roll a death save, take a long or short rest, add/remove
+  exhaustion, spend a legendary action, spend a recharge ability, trigger a lair action),
+  referencing tokens by name and reasoning about the current encounter, including a basic
+  action economy once turn order is actually running (see below)
   state -- including where everything stands on the grid, whose turn it is, how much movement
   each token has left this turn (already reduced by exhaustion, if any), each token's ability
   scores, spellcasting (save DC, attack bonus, remaining slots per level), named resources
@@ -241,11 +312,20 @@ The "Claude DM" panel works two ways:
   and applies the target's real modifier -- and only reports pass/fail; since Claude decides
   a whole response's actions before seeing any of their results, it can't conditionally apply
   a follow-up effect (e.g. half damage on a success) in that same response, so that has to be
-  a separate command once the result is visible in the log. `cast_spell` consumes the caster's
+  a separate command once the result is visible in the log. `ability_check` works the same way
+  for a non-save roll -- Perception, Stealth, Persuasion, or a bare ability for an unnamed
+  check -- resolving against a named skill's stated bonus (or the governing ability's modifier)
+  and only reporting pass/fail, same one-shot-batch limitation as `saving_throw`. `cast_spell` consumes the caster's
   slot at the given level (0 for a cantrip) and, only when a target is given, rolls a spell
-  attack against it -- a save-based spell instead needs a separate `saving_throw` per target
-  in the same response, using the caster's own stated spell save DC, for the same
-  one-shot-batch reason `saving_throw` can't chain into a follow-up effect on its own.
+  attack against it -- a save-based spell with no damage of its own instead needs a separate
+  `saving_throw` per target in the same response, using the caster's own stated spell save DC,
+  for the same one-shot-batch reason `saving_throw` can't chain into a follow-up effect on its
+  own. `cast_area_spell` is the exception that actually solves this rather than working around
+  it: for a spell that deals the SAME damage to every target with a save for half (Fireball,
+  Burning Hands), it resolves the whole thing in one action -- one damage roll for the area,
+  one save per target, full damage on a failure or half (rounded down, or none at all if
+  `halfOnSave: false`) on a success -- computed inside the engine itself, so Claude never needs
+  to see an intermediate roll before deciding the outcome.
   `use_resource` spends a charge of a named resource shown in that token's own list and fails
   outright if none are left or the name doesn't match one it actually has -- like the other
   compose-only actions above, it never bundles the resource's actual effect (an attack,

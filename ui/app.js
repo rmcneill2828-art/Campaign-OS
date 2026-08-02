@@ -699,6 +699,11 @@
         <span>${token.legendaryActions ? `${token.legendaryActions.current}/${token.legendaryActions.max}` : ""}</span>
         <button type="button" data-action="legendary-use">Use</button>
       </p>
+      <p class="regeneration-status ${token.regeneration ? "regeneration-status-active" : ""}" title="Heals this amount automatically at the start of this token's own turn (see Next Turn). Set to 0 to stop tracking.">
+        Regeneration
+        <input type="number" min="0" max="999" value="${token.regeneration?.amount || 0}" data-regeneration-amount>
+        HP/turn
+      </p>
       <div class="token-portrait">
         <div class="portrait-preview">${token.image ? `<img data-portrait-image alt="">` : `<span>${escapeHtml(token.icon)}</span>`}</div>
         <label>
@@ -738,6 +743,10 @@
           <label>
             Damage
             <input name="damageDice" type="text" value="${escapeAttribute(token.damageDice || "1d4")}">
+          </label>
+          <label title="RAW Extra Attack -- lets attack() be called this many extra times in one action before it's spent, for a Fighter/Barbarian-style attacker.">
+            Extra Attacks
+            <input name="extraAttacks" type="number" min="0" max="10" value="${token.extraAttacks || 0}">
           </label>
         </div>
         <div class="stat-grid">
@@ -854,6 +863,25 @@
         </label>
         <button type="submit">Roll Save</button>
       </form>
+      <form class="check-control" title="Rolls a d20 + this token's real skill/ability modifier (or a stated skill bonus from their sheet) against the DC.">
+        <label>
+          Check
+          <select name="skill">
+            ${window.CampaignOS.SKILL_LIST.map((skill) => `<option value="${escapeHtml(skill.name)}">${escapeHtml(skill.name)}</option>`).join("")}
+            <option value="STR">STR (unnamed)</option>
+            <option value="DEX">DEX (unnamed)</option>
+            <option value="CON">CON (unnamed)</option>
+            <option value="INT">INT (unnamed)</option>
+            <option value="WIS">WIS (unnamed)</option>
+            <option value="CHA">CHA (unnamed)</option>
+          </select>
+        </label>
+        <label>
+          DC
+          <input name="dc" type="number" min="1" max="30" value="10">
+        </label>
+        <button type="submit">Roll Check</button>
+      </form>
       <form class="hp-control">
         <label>
           Hit Damage
@@ -878,6 +906,26 @@
         <div class="conditions"></div>
       </div>
       <div>
+        <h3 class="subheading">Hit Dice</h3>
+        <div class="hit-dice"></div>
+        <form class="add-hit-dice-control" title="Track a Hit Dice pool -- one per die size, from class levels (a multiclassed token can have more than one).">
+          <label>
+            Die
+            <select name="die">
+              <option value="d6">d6</option>
+              <option value="d8">d8</option>
+              <option value="d10">d10</option>
+              <option value="d12">d12</option>
+            </select>
+          </label>
+          <label>
+            Total
+            <input name="total" type="number" min="1" max="99" value="1">
+          </label>
+          <button type="submit">Add</button>
+        </form>
+      </div>
+      <div>
         <h3 class="subheading">Resources</h3>
         <div class="resources"></div>
         <form class="add-resource-control" title="Track a limited class resource -- Rage, Wild Shape, Ki Points, Superiority Dice, Channel Divinity, etc.">
@@ -894,6 +942,25 @@
             <select name="recovery">
               <option value="long">Long rest</option>
               <option value="short">Short/long rest</option>
+            </select>
+          </label>
+          <button type="submit">Add</button>
+        </form>
+      </div>
+      <div>
+        <h3 class="subheading">Recharge Abilities</h3>
+        <div class="recharge-abilities"></div>
+        <form class="add-recharge-control" title="Track a recharge-based ability (Fire Breath, etc.) -- rolls a d6 at the start of this token's own turn once spent, becoming available again on a roll at or above Recharge.">
+          <label>
+            Name
+            <input name="name" type="text" placeholder="e.g. Fire Breath">
+          </label>
+          <label>
+            Recharge
+            <select name="rechargeMin">
+              <option value="4">4-6</option>
+              <option value="5" selected>5-6</option>
+              <option value="6">6</option>
             </select>
           </label>
           <button type="submit">Add</button>
@@ -971,6 +1038,7 @@
         ac: form.get("ac"),
         attackBonus: form.get("attackBonus"),
         damageDice: form.get("damageDice"),
+        extraAttacks: form.get("extraAttacks"),
         speed: form.get("speed"),
         exhaustion: form.get("exhaustion"),
         abilityScores,
@@ -1009,6 +1077,17 @@
       event.preventDefault();
       const formData = new FormData(saveControl);
       const result = window.CampaignOS.rollSavingThrow(state, token.id, formData.get("ability"), Number(formData.get("dc")));
+      state = result.state;
+      saveEncounter();
+      commandResult.textContent = result.message;
+      render();
+    });
+
+    const checkControl = tokenSheet.querySelector(".check-control");
+    checkControl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const formData = new FormData(checkControl);
+      const result = window.CampaignOS.rollAbilityCheck(state, token.id, formData.get("skill"), Number(formData.get("dc")));
       state = result.state;
       saveEncounter();
       commandResult.textContent = result.message;
@@ -1116,6 +1195,49 @@
       conditions.appendChild(label);
     });
 
+    const hitDiceContainer = tokenSheet.querySelector(".hit-dice");
+    Object.entries(token.hitDice || {}).forEach(([dieType, pool]) => {
+      const row = document.createElement("div");
+      row.className = "resource-row";
+      row.innerHTML = `
+        <span>${escapeHtml(dieType)}</span>
+        <input type="text" value="${pool.current}/${pool.total}" data-hit-dice-input>
+        <button type="button" data-action="spend">Spend 1</button>
+        <button type="button" data-action="remove" title="Stop tracking ${escapeAttribute(dieType)} Hit Dice">&times;</button>
+      `;
+      row.querySelector('[data-action="spend"]').addEventListener("click", () => {
+        const result = window.CampaignOS.spendHitDie(state, token.id, dieType, 1);
+        state = result.state;
+        saveEncounter();
+        commandResult.textContent = result.message;
+        render();
+      });
+      row.querySelector('[data-action="remove"]').addEventListener("click", () => {
+        updateState(window.CampaignOS.updateToken(state, token.id, { hitDice: { [dieType]: null } }));
+      });
+      row.querySelector("[data-hit-dice-input]").addEventListener("change", (event) => {
+        const raw = event.target.value.trim();
+        const [currentPart, totalPart] = raw.split("/").map((part) => part.trim());
+        const total = Number(totalPart ?? currentPart);
+        const current = Number(currentPart);
+        if (!Number.isFinite(total)) return;
+        updateState(window.CampaignOS.updateToken(state, token.id, {
+          hitDice: { [dieType]: { total, current: Number.isFinite(current) ? current : total } }
+        }));
+      });
+      hitDiceContainer.appendChild(row);
+    });
+
+    const addHitDiceControl = tokenSheet.querySelector(".add-hit-dice-control");
+    addHitDiceControl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const formData = new FormData(addHitDiceControl);
+      const dieType = String(formData.get("die") || "").trim().toLowerCase();
+      const total = Number(formData.get("total"));
+      if (!dieType || !Number.isFinite(total) || total <= 0) return;
+      updateState(window.CampaignOS.updateToken(state, token.id, { hitDice: { [dieType]: { total, current: total } } }));
+    });
+
     const resourcesContainer = tokenSheet.querySelector(".resources");
     Object.entries(token.resources || {}).forEach(([name, resource]) => {
       const row = document.createElement("div");
@@ -1179,6 +1301,44 @@
       const recovery = formData.get("recovery") === "short" ? "short" : "long";
       if (!name || !Number.isFinite(max) || max <= 0) return;
       updateState(window.CampaignOS.updateToken(state, token.id, { resources: { [name]: { max, current: max, recovery } } }));
+    });
+
+    const rechargeContainer = tokenSheet.querySelector(".recharge-abilities");
+    Object.entries(token.rechargeAbilities || {}).forEach(([name, ability]) => {
+      const row = document.createElement("div");
+      row.className = "resource-row";
+      row.innerHTML = `
+        <span>${escapeHtml(name)}</span>
+        <span>${ability.available ? "Available" : `Not available (${ability.rechargeMin}-6)`}</span>
+        <button type="button" data-action="use" ${ability.available ? "" : "disabled"}>Use</button>
+        <button type="button" data-action="remove" title="Stop tracking ${escapeAttribute(name)}">&times;</button>
+      `;
+      row.querySelector('[data-action="use"]').addEventListener("click", () => {
+        const result = window.CampaignOS.useRechargeAbility(state, token.id, name);
+        state = result.state;
+        saveEncounter();
+        commandResult.textContent = result.message;
+        render();
+      });
+      row.querySelector('[data-action="remove"]').addEventListener("click", () => {
+        updateState(window.CampaignOS.updateToken(state, token.id, { rechargeAbilities: { [name]: null } }));
+      });
+      rechargeContainer.appendChild(row);
+    });
+
+    const addRechargeControl = tokenSheet.querySelector(".add-recharge-control");
+    addRechargeControl.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const formData = new FormData(addRechargeControl);
+      const name = String(formData.get("name") || "").trim();
+      const rechargeMin = Number(formData.get("rechargeMin"));
+      if (!name || !Number.isFinite(rechargeMin)) return;
+      updateState(window.CampaignOS.updateToken(state, token.id, { rechargeAbilities: { [name]: { rechargeMin, available: true } } }));
+    });
+
+    tokenSheet.querySelector("[data-regeneration-amount]").addEventListener("change", (event) => {
+      const amount = Number(event.target.value);
+      updateState(window.CampaignOS.updateToken(state, token.id, { regeneration: Number.isFinite(amount) && amount > 0 ? { amount } : null }));
     });
 
     tokenSheet.querySelector('[data-action="long-rest"]').addEventListener("click", () => {
@@ -2106,11 +2266,17 @@
         spellcasting: token.spellcasting,
         spellSlots: token.spellSlots,
         resources: token.resources,
+        hitDice: token.hitDice,
         concentratingOn: token.concentratingOn,
         dying: token.dying,
         dead: token.dead,
         exhaustion: token.exhaustion,
-        legendaryActions: token.legendaryActions
+        legendaryActions: token.legendaryActions,
+        regeneration: token.regeneration,
+        rechargeAbilities: token.rechargeAbilities,
+        extraAttacks: token.extraAttacks,
+        actionUsed: Boolean(token.actionUsed),
+        bonusActionUsed: Boolean(token.bonusActionUsed)
       }))
     };
   }

@@ -92,6 +92,34 @@ test("parseCommand spawning a troll gives it Multiattack (Bite + two Claws), not
   assert.deepEqual(troll.attacks.map((a) => a.name), ["Bite", "Claw", "Claw"]);
 });
 
+test("parseCommand spawns a real skeleton stat block", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one skeleton"));
+  const [skeleton] = result.state.tokens;
+  assert.equal(skeleton.hp, 13);
+  assert.equal(skeleton.ac, 13);
+  assert.equal(skeleton.attackBonus, 4);
+  assert.equal(skeleton.damageDice, "1d6+2");
+});
+
+test("parseCommand spawns a real giant spider stat block, matching the multi-word monster name", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "Two giant spiders emerge from the ceiling."));
+  const spiders = result.state.tokens.filter((t) => t.name.startsWith("Giant spider"));
+  assert.equal(spiders.length, 2);
+  assert.equal(spiders[0].hp, 26);
+  assert.equal(spiders[0].ac, 14);
+  assert.deepEqual(spiders[0].abilityScores, { STR: 14, DEX: 16, CON: 12, INT: 2, WIS: 11, CHA: 4 });
+});
+
+test("parseCommand spawning a ghoul gives it Multiattack (Bite + Claws)", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one ghoul"));
+  const [ghoul] = result.state.tokens;
+  assert.equal(ghoul.hp, 22);
+  assert.deepEqual(ghoul.attacks.map((a) => a.name), ["Bite", "Claws"]);
+});
+
 test("addToken clamps HP/AC/attackBonus into their valid ranges and defaults missing fields", () => {
   const state = stateOnMap("Urskelde");
   const { token } = CampaignOS.addToken(state, { name: "Test Hero", hp: 9001, maxHp: 20 });
@@ -532,6 +560,63 @@ test("rollSavingThrow reports the token as not found without changing state", ()
   assert.deepEqual(result.state, state);
 });
 
+test("rollAbilityCheck rolls a named skill using the governing ability's modifier when no stated skill bonus exists", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael", abilityScores: { WIS: 16 } });
+  const result = withRandom([9 / 20], () => CampaignOS.rollAbilityCheck(withToken, token.id, "Perception", 12));
+  assert.match(result.message, /Sael rolls a Perception check: 10 \+3 = 13 vs DC 12\. Success\./);
+  assert.equal(result.success, true);
+});
+
+test("rollAbilityCheck prefers a stated skill bonus over the recomputed ability modifier", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Feats Over Time",
+    abilityScores: { DEX: 10 },
+    skills: { Stealth: 9 }
+  });
+  const result = withRandom([0], () => CampaignOS.rollAbilityCheck(withToken, token.id, "stealth", 10));
+  assert.match(result.message, /rolls a Stealth check: 1 \+9 = 10 vs DC 10\. Success\./);
+});
+
+test("rollAbilityCheck supports a bare ability with no named skill", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", abilityScores: { STR: 20 } });
+  const result = withRandom([0.45], () => CampaignOS.rollAbilityCheck(withToken, token.id, "STR", 10));
+  assert.match(result.message, /Darkhawk rolls a STR check: 10 \+5 = 15 vs DC 10\. Success\./);
+});
+
+test("rollAbilityCheck fails outright for a name that isn't a known skill or ability", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Ysolde" });
+  const result = CampaignOS.rollAbilityCheck(withToken, token.id, "Luck", 10);
+  assert.match(result.message, /not a valid skill or ability/);
+  assert.equal(result.success, false);
+});
+
+test("rollAbilityCheck forces disadvantage at exhaustion level 1+ (a lower threshold than attacks/saves)", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", abilityScores: { WIS: 10 } });
+  withToken = CampaignOS.setExhaustion(withToken, token.id, 1).state;
+  const result = withRandom([0.9, 0.1], () => CampaignOS.rollAbilityCheck(withToken, token.id, "Perception", 10));
+  assert.match(result.message, /exhaustion disadvantage: 19, 3/);
+});
+
+test("rollAbilityCheck forces disadvantage for a Poisoned token", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", abilityScores: { WIS: 10 } });
+  withToken = CampaignOS.toggleCondition(withToken, token.id, "Poisoned");
+  const result = withRandom([0.9, 0.1], () => CampaignOS.rollAbilityCheck(withToken, token.id, "Perception", 10));
+  assert.match(result.message, /poisoned disadvantage: 19, 3/);
+});
+
+test("rollAbilityCheck reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.rollAbilityCheck(state, "nonexistent-id", "Perception", 10);
+  assert.match(result.message, /token was not found/);
+  assert.deepEqual(result.state, state);
+});
+
 test("addToken normalizes ability scores -- clamping out-of-range values and leaving unset abilities absent", () => {
   const state = stateOnMap("Urskelde");
   const { token } = CampaignOS.addToken(state, { name: "Odd Scores", abilityScores: { STR: 99, DEX: -5, CON: 14 } });
@@ -571,6 +656,22 @@ test("parseCommand resolves a saving throw command by token name", () => {
   // Goblin's WIS is 8 (-1 mod): roll 10 - 1 = 9, vs DC 10 -> failure.
   assert.equal(result.success, false);
   assert.match(result.message, /Goblin 1 rolls a WIS save: 10 -1 = 9 vs DC 10\. Failure\./);
+});
+
+test("parseCommand resolves an ability check command by token name", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", abilityScores: { WIS: 16 } }).state;
+  const result = withRandom([9 / 20], () => CampaignOS.parseCommand(state, "Sael rolls a Perception check against DC 12"));
+  assert.equal(result.success, true);
+  assert.match(result.message, /Sael rolls a Perception check: 10 \+3 = 13 vs DC 12\. Success\./);
+});
+
+test("parseCommand resolves an ability check command with a multi-word skill name", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", abilityScores: { WIS: 16 } }).state;
+  const result = withRandom([9 / 20], () => CampaignOS.parseCommand(state, "Sael makes an Animal Handling check against DC 12"));
+  assert.equal(result.success, true);
+  assert.match(result.message, /Sael rolls a Animal Handling check/);
 });
 
 test("addToken normalizes spell slots and spellcasting, clamping out-of-range values", () => {
@@ -689,6 +790,31 @@ test("parseCommand resolves a cast-spell command, consuming a slot and rolling a
   ));
   assert.match(result.message, /using a 1st-level spell slot/);
   assert.match(result.message, /Ysolde's Guiding Bolt attacks Goblin 1/);
+});
+
+test("parseCommand resolves an area-cast command against multiple named targets", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", spellSlots: { 3: { max: 2, current: 2 } } }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", abilityScores: { DEX: 10 }, hp: 20, maxHp: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 2", abilityScores: { DEX: 10 }, hp: 20, maxHp: 20 }).state;
+
+  const randoms = [...Array(8).fill(0), 0.9, 0.1];
+  const result = withRandom(randoms, () => CampaignOS.parseCommand(
+    state,
+    "Sael casts Fireball on Goblin 1, Goblin 2 (3rd level, DEX save DC 15) for 8d6."
+  ));
+
+  assert.match(result.message, /Sael casts Fireball using a 3rd-level spell slot \(1 remaining\)\./);
+  assert.match(result.message, /Goblin 1 takes 4 damage/);
+  assert.match(result.message, /Goblin 2 takes 8 damage/);
+});
+
+test("parseCommand reports an unresolved target name in an area-cast command", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", spellSlots: { 3: { max: 2, current: 2 } } }).state;
+
+  const result = CampaignOS.parseCommand(state, "Sael casts Fireball on Nonexistent Goblin (3rd level, DEX save DC 15) for 8d6.");
+  assert.match(result.message, /could not find "Nonexistent Goblin" among the spell's targets/);
 });
 
 test("parseCommand resolves a cantrip cast with no target", () => {
@@ -838,6 +964,117 @@ test("castSpell without the concentration flag leaves any existing concentration
   const first = CampaignOS.castSpell(withToken, token.id, { level: 0, spellName: "Guidance", concentration: true });
   const second = CampaignOS.castSpell(first.state, token.id, { level: 0, spellName: "Fire Bolt" });
   assert.deepEqual(second.state.tokens[0].concentratingOn, { spell: "Guidance" });
+});
+
+test("castAreaSpell rolls damage once and applies full damage on a failed save, half (rounded down) on a success", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", spellSlots: { 3: { max: 2, current: 2 } } }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", abilityScores: { DEX: 10 }, hp: 20, maxHp: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 2", abilityScores: { DEX: 10 }, hp: 20, maxHp: 20 }).state;
+  const [sael, goblin1, goblin2] = state.tokens;
+
+  // 8d6 damage, every die at random=0 -> 1 each, total 8. Goblin 1's save: 0.9 -> d20 19,
+  // +0 DEX mod = 19 vs DC 15 -> success, half damage (floor(8/2) = 4). Goblin 2's save:
+  // 0.1 -> d20 3, +0 = 3 vs DC 15 -> failure, full damage (8).
+  const randoms = [...Array(8).fill(0), 0.9, 0.1];
+  const result = withRandom(randoms, () => CampaignOS.castAreaSpell(state, sael.id, {
+    spellName: "Fireball",
+    level: 3,
+    targetIds: [goblin1.id, goblin2.id],
+    saveAbility: "DEX",
+    saveDC: 15,
+    damageDice: "8d6"
+  }));
+
+  assert.match(result.message, /Sael casts Fireball using a 3rd-level spell slot \(1 remaining\)\./);
+  assert.match(result.message, /Goblin 1 rolls a DEX save.*Success/);
+  assert.match(result.message, /Goblin 1 takes 4 damage/);
+  assert.match(result.message, /Goblin 2 rolls a DEX save.*Failure/);
+  assert.match(result.message, /Goblin 2 takes 8 damage/);
+  const foundGoblin1 = result.state.tokens.find((t) => t.name === "Goblin 1");
+  const foundGoblin2 = result.state.tokens.find((t) => t.name === "Goblin 2");
+  assert.equal(foundGoblin1.hp, 16);
+  assert.equal(foundGoblin2.hp, 12);
+});
+
+test("castAreaSpell deals no damage on a success when halfOnSave is explicitly false", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", spellSlots: { 2: { max: 1, current: 1 } } }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", abilityScores: { DEX: 10 }, hp: 20, maxHp: 20 }).state;
+  const [sael, goblin] = state.tokens;
+
+  const result = withRandom([0, 0, 0.9], () => CampaignOS.castAreaSpell(state, sael.id, {
+    spellName: "Sleet Storm",
+    level: 2,
+    targetIds: [goblin.id],
+    saveAbility: "DEX",
+    saveDC: 10,
+    damageDice: "2d4",
+    halfOnSave: false
+  }));
+
+  const found = result.state.tokens.find((t) => t.name === "Goblin 1");
+  assert.equal(found.hp, 20);
+  assert.match(result.message, /takes no damage/);
+});
+
+test("castAreaSpell starts concentration on a spell when asked", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", spellSlots: { 3: { max: 1, current: 1 } } }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", abilityScores: { DEX: 10 }, hp: 20, maxHp: 20 }).state;
+  const [sael, goblin] = state.tokens;
+
+  const result = withRandom([0, 0.5], () => CampaignOS.castAreaSpell(state, sael.id, {
+    spellName: "Spirit Guardians",
+    level: 3,
+    targetIds: [goblin.id],
+    saveAbility: "WIS",
+    saveDC: 15,
+    damageDice: "3d8",
+    concentration: true
+  }));
+
+  const found = result.state.tokens.find((t) => t.name === "Sael");
+  assert.deepEqual(found.concentratingOn, { spell: "Spirit Guardians" });
+});
+
+test("castAreaSpell fails without changing state once a level's slots are exhausted", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael", spellSlots: { 3: { max: 1, current: 0 } } });
+  const result = CampaignOS.castAreaSpell(withToken, token.id, {
+    spellName: "Fireball", level: 3, targetIds: ["whatever"], saveAbility: "DEX", saveDC: 15, damageDice: "8d6"
+  });
+  assert.match(result.message, /Sael has no 3rd-level spell slots remaining\./);
+  assert.equal(result.state, withToken);
+});
+
+test("castAreaSpell fails outright for an invalid saveAbility", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael" });
+  const result = CampaignOS.castAreaSpell(withToken, token.id, {
+    spellName: "Fireball", level: 3, targetIds: ["whatever"], saveAbility: "luck", saveDC: 15, damageDice: "8d6"
+  });
+  assert.match(result.message, /not a valid ability/);
+  assert.equal(result.state, withToken);
+});
+
+test("castAreaSpell fails outright when no targets are given", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael" });
+  const result = CampaignOS.castAreaSpell(withToken, token.id, {
+    spellName: "Fireball", level: 3, targetIds: [], saveAbility: "DEX", saveDC: 15, damageDice: "8d6"
+  });
+  assert.match(result.message, /no targets given/);
+  assert.equal(result.state, withToken);
+});
+
+test("castAreaSpell reports the caster as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.castAreaSpell(state, "nonexistent-id", {
+    level: 3, targetIds: ["whatever"], saveAbility: "DEX", saveDC: 15, damageDice: "8d6"
+  });
+  assert.match(result.message, /caster was not found/);
+  assert.deepEqual(result.state, state);
 });
 
 test("applyDamage triggers a concentration CON save and maintains it on a success", () => {
@@ -1157,6 +1394,139 @@ test("longRest fully heals HP, restores all spell slots, and restores all resour
   assert.match(result.message, /All resources restored\./);
 });
 
+test("longRest restores half (rounded down, minimum one) of each Hit Dice pool, not all of it", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    hitDice: { d12: { total: 11, current: 2 }, d10: { total: 4, current: 0 } }
+  });
+
+  const result = CampaignOS.longRest(withToken, token.id);
+  const rested = result.state.tokens[0];
+  // d12: 2 + floor(11/2)=5 -> 7. d10: 0 + floor(4/2)=2 -> 2.
+  assert.equal(rested.hitDice.d12.current, 7);
+  assert.equal(rested.hitDice.d10.current, 2);
+  assert.match(result.message, /Half of all Hit Dice restored\./);
+});
+
+test("longRest restores at least one Hit Die even when half would round down to zero", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Sael",
+    hitDice: { d8: { total: 1, current: 0 } }
+  });
+
+  const result = CampaignOS.longRest(withToken, token.id);
+  assert.equal(result.state.tokens[0].hitDice.d8.current, 1);
+});
+
+test("longRest clamps restored Hit Dice at the pool's total", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    hitDice: { d12: { total: 11, current: 10 } }
+  });
+
+  const result = CampaignOS.longRest(withToken, token.id);
+  assert.equal(result.state.tokens[0].hitDice.d12.current, 11);
+});
+
+test("spendHitDie rolls that many dice plus CON modifier per die and heals the total", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    hp: 10,
+    maxHp: 100,
+    abilityScores: { CON: 14 }, // +2 modifier
+    hitDice: { d12: { total: 11, current: 5 } }
+  });
+
+  // 2 dice at random=0.5 -> d12 roll of 7 each, +2 CON = 9 each -> 18 total healing.
+  const result = withRandom([0.5], () => CampaignOS.spendHitDie(withToken, token.id, "d12", 2));
+  const found = result.state.tokens.find((t) => t.name === "Darkhawk");
+  assert.equal(found.hp, 28);
+  assert.equal(found.hitDice.d12.current, 3);
+  assert.match(result.message, /Darkhawk spends 2 d12 Hit Dice, healing 18 \(28\/100 HP\) -- 3\/11 d12 Hit Dice remaining\./);
+});
+
+test("spendHitDie heals a minimum of 1 per die even with a negative CON modifier", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Weakling",
+    hp: 5,
+    maxHp: 50,
+    abilityScores: { CON: 3 }, // -4 modifier
+    hitDice: { d6: { total: 2, current: 2 } }
+  });
+
+  // random=0 -> d6 roll of 1, +(-4) = -3, floored at a minimum of 1 healing.
+  const result = withRandom([0], () => CampaignOS.spendHitDie(withToken, token.id, "d6", 1));
+  const found = result.state.tokens.find((t) => t.name === "Weakling");
+  assert.equal(found.hp, 6);
+});
+
+test("spendHitDie fails without changing state once a die type is exhausted", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", hitDice: { d12: { total: 11, current: 0 } } });
+  const result = CampaignOS.spendHitDie(withToken, token.id, "d12", 1);
+  assert.match(result.message, /doesn't have 1 d12 Hit Dice left \(0\/11 remaining\)\./);
+  assert.equal(result.state, withToken);
+});
+
+test("spendHitDie fails outright for a die type the token doesn't track", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk" });
+  const result = CampaignOS.spendHitDie(withToken, token.id, "d12", 1);
+  assert.match(result.message, /has no d12 Hit Dice tracked\./);
+  assert.equal(result.state, withToken);
+});
+
+test("spendHitDie reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.spendHitDie(state, "nonexistent-id", "d12", 1);
+  assert.match(result.message, /token was not found/);
+  assert.deepEqual(result.state, state);
+});
+
+test("parseCommand resolves spending Hit Dice by token name", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    hp: 10,
+    maxHp: 100,
+    abilityScores: { CON: 14 },
+    hitDice: { d12: { total: 11, current: 5 } }
+  });
+
+  const result = withRandom([0.5], () => CampaignOS.parseCommand(withToken, "Darkhawk spends a hit die"));
+  assert.match(result.message, /Darkhawk spends 1 d12 Hit Dice, healing 9/);
+});
+
+test("parseCommand requires an explicit die type when a token tracks more than one Hit Dice pool", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    hitDice: { d12: { total: 11, current: 5 }, d10: { total: 4, current: 4 } }
+  });
+
+  const result = CampaignOS.parseCommand(withToken, "Darkhawk spends a hit die");
+  assert.match(result.message, /tracks more than one Hit Dice type/);
+});
+
+test("parseCommand resolves spending a specific Hit Dice type", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken } = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    hp: 10,
+    maxHp: 100,
+    abilityScores: { CON: 14 },
+    hitDice: { d12: { total: 11, current: 5 }, d10: { total: 4, current: 4 } }
+  });
+
+  const result = withRandom([0.5], () => CampaignOS.parseCommand(withToken, "Darkhawk spends 2 d10 hit dice"));
+  assert.match(result.message, /Darkhawk spends 2 d10 Hit Dice/);
+});
+
 test("longRest skips healing/reviving a token flagged dead, but still refreshes its slots and resources", () => {
   const state = stateOnMap("Urskelde");
   let { state: withToken, token } = CampaignOS.addToken(state, {
@@ -1347,6 +1717,135 @@ test("effectiveSpeed halves speed at exhaustion level 2-4 and zeroes it at level
   assert.equal(CampaignOS.effectiveSpeed({ speed: 30, exhaustion: 6 }), 0);
 });
 
+test("effectiveSpeed zeroes speed for Grappled or Restrained regardless of exhaustion", () => {
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30, conditions: ["Grappled"] }), 0);
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30, conditions: ["Restrained"] }), 0);
+  assert.equal(CampaignOS.effectiveSpeed({ speed: 30, conditions: ["Prone"] }), 30);
+});
+
+test("attack forces disadvantage on the attacker's own roll when Blinded, Restrained, Prone, or Poisoned", () => {
+  for (const condition of ["Blinded", "Restrained", "Prone", "Poisoned"]) {
+    let state = stateOnMap("Urskelde");
+    state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+    state = CampaignOS.addToken(state, { name: "Target", ac: 15, hp: 10, maxHp: 10 }).state;
+    const [attacker, target] = state.tokens;
+    state = CampaignOS.toggleCondition(state, attacker.id, condition);
+
+    const result = withRandom([0.9, 0.1], () => CampaignOS.attack(state, attacker.id, target.id));
+    assert.match(result.message, /disadvantage: 19, 3/, `expected disadvantage for attacker with ${condition}`);
+  }
+});
+
+test("attack grants the attacker advantage when Invisible", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 15, hp: 10, maxHp: 10 }).state;
+  const [attacker, target] = state.tokens;
+  state = CampaignOS.toggleCondition(state, attacker.id, "Invisible");
+
+  const result = withRandom([0.2, 0.85], () => CampaignOS.attack(state, attacker.id, target.id));
+  assert.match(result.message, /advantage: 5, 18/);
+});
+
+test("attack grants advantage against a target that is Blinded, Restrained, Prone, Stunned, Paralyzed, or Unconscious", () => {
+  for (const condition of ["Blinded", "Restrained", "Prone", "Stunned", "Paralyzed", "Unconscious"]) {
+    let state = stateOnMap("Urskelde");
+    state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+    state = CampaignOS.addToken(state, { name: "Target", ac: 15, hp: 10, maxHp: 10 }).state;
+    const [attacker, target] = state.tokens;
+    state = CampaignOS.toggleCondition(state, target.id, condition);
+
+    const result = withRandom([0.2, 0.85], () => CampaignOS.attack(state, attacker.id, target.id));
+    assert.match(result.message, /advantage: 5, 18/, `expected advantage attacking a ${condition} target`);
+  }
+});
+
+test("attack grants disadvantage against an Invisible target", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 15, hp: 10, maxHp: 10 }).state;
+  const [attacker, target] = state.tokens;
+  state = CampaignOS.toggleCondition(state, target.id, "Invisible");
+
+  const result = withRandom([0.9, 0.1], () => CampaignOS.attack(state, attacker.id, target.id));
+  assert.match(result.message, /disadvantage: 19, 3/);
+});
+
+test("attack against an adjacent Paralyzed or Unconscious target is an automatic critical even on a non-natural-20 hit", () => {
+  for (const condition of ["Paralyzed", "Unconscious"]) {
+    let state = stateOnMap("Urskelde");
+    state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, damageDice: "1d1", hp: 10, maxHp: 10 }).state;
+    state = CampaignOS.addToken(state, { name: "Target", ac: 1, hp: 50, maxHp: 50 }).state;
+    let [attacker, target] = state.tokens;
+    state = CampaignOS.setTokenPosition(state, target.id, attacker.x + 1, attacker.y);
+    state = CampaignOS.toggleCondition(state, target.id, condition);
+
+    // 0.45 -> roll of 10 (not a natural 20), comfortably beats AC 1 -- still forced critical.
+    const result = withRandom([0.45], () => CampaignOS.attack(state, attacker.id, target.id));
+    assert.match(result.message, /Critical hit\./, `expected forced critical vs adjacent ${condition} target`);
+  }
+});
+
+test("attack does NOT force a critical against a Paralyzed target when the attacker isn't adjacent", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, damageDice: "1d1", hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 1, hp: 50, maxHp: 50 }).state;
+  const [attacker, target] = state.tokens;
+  state = CampaignOS.setTokenPosition(state, target.id, attacker.x + 5, attacker.y);
+  state = CampaignOS.toggleCondition(state, target.id, "Paralyzed");
+
+  const result = withRandom([0.45], () => CampaignOS.attack(state, attacker.id, target.id));
+  assert.ok(!/Critical hit\./.test(result.message));
+});
+
+test("attack does not force a critical against a Paralyzed target on an actual miss", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Attacker", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Target", ac: 99, hp: 50, maxHp: 50 }).state;
+  const [attacker, target] = state.tokens;
+  state = CampaignOS.setTokenPosition(state, target.id, attacker.x + 1, attacker.y);
+  state = CampaignOS.toggleCondition(state, target.id, "Paralyzed");
+
+  // Target being Paralyzed grants the attacker advantage automatically (two dice, higher
+  // kept) -- 0.5 -> 11 on both, comfortably below AC 99 and not a natural 20, so this is a
+  // genuine miss despite forceCrit eligibility.
+  const result = withRandom([0.5], () => CampaignOS.attack(state, attacker.id, target.id));
+  assert.match(result.message, /Miss\./);
+});
+
+test("rollSavingThrow auto-fails STR/DEX saves for Stunned, Paralyzed, or Unconscious with no roll", () => {
+  for (const condition of ["Stunned", "Paralyzed", "Unconscious"]) {
+    const state = stateOnMap("Urskelde");
+    let { state: withToken, token } = CampaignOS.addToken(state, { name: "Downed", abilityScores: { DEX: 20 } });
+    withToken = CampaignOS.toggleCondition(withToken, token.id, condition);
+
+    const result = CampaignOS.rollSavingThrow(withToken, token.id, "DEX", 5);
+    assert.equal(result.success, false);
+    assert.match(result.message, /automatically fails/);
+  }
+});
+
+test("rollSavingThrow is unaffected for CON saves even when Stunned/Paralyzed/Unconscious", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, { name: "Downed", abilityScores: { CON: 10 } });
+  withToken = CampaignOS.toggleCondition(withToken, token.id, "Unconscious");
+
+  const result = withRandom([0.45], () => CampaignOS.rollSavingThrow(withToken, token.id, "CON", 5));
+  assert.ok(!/automatically fails/.test(result.message));
+});
+
+test("rollSavingThrow adds disadvantage to DEX saves specifically for Restrained", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, { name: "Snared", abilityScores: { DEX: 10, STR: 10 } });
+  withToken = CampaignOS.toggleCondition(withToken, token.id, "Restrained");
+
+  const dexResult = withRandom([0.9, 0.1], () => CampaignOS.rollSavingThrow(withToken, token.id, "DEX", 10));
+  assert.match(dexResult.message, /disadvantage: 19, 3/);
+
+  const strResult = withRandom([0.45], () => CampaignOS.rollSavingThrow(withToken, token.id, "STR", 10));
+  assert.ok(!/disadvantage/.test(strResult.message));
+});
+
 test("moveToken uses the exhaustion-reduced effective speed, not the token's true speed", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk", speed: 30, initiative: 10 }).state;
@@ -1492,6 +1991,253 @@ test("nextTurn refreshes legendaryActions to max only at the start of that token
 
   state = CampaignOS.nextTurn(state); // wraps back to Dracolich, round 2
   assert.equal(state.tokens.find((t) => t.id === dracolichId).legendaryActions.current, 3, "refreshes at the start of its own turn");
+});
+
+test("nextTurn heals a token with regeneration at the start of its own turn, capped at maxHp", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Troll 1", initiative: 20, hp: 80, maxHp: 84, regeneration: { amount: 10 } }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 5 }).state;
+
+  state = CampaignOS.nextTurn(state); // Troll 1's turn
+  const troll = state.tokens.find((t) => t.name === "Troll 1");
+  assert.equal(troll.hp, 84, "10 HP would overheal past maxHp -- clamped to it instead");
+  assert.match(state.log[0], /Troll 1 regenerates 4 HP \(84\/84\)\./);
+});
+
+test("nextTurn does not regenerate a token at 0 HP or already at full HP", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Troll 1", initiative: 20, hp: 84, maxHp: 84, regeneration: { amount: 10 } }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 5 }).state;
+
+  const beforeLog = state.log.length;
+  state = CampaignOS.nextTurn(state); // Troll 1's turn, already at full HP
+  assert.equal(state.log.length, beforeLog, "no regeneration message when already at full HP");
+
+  state = CampaignOS.updateToken(state, state.tokens.find((t) => t.name === "Troll 1").id, { hp: 0 });
+  state = CampaignOS.nextTurn(state); // Goblin 1's turn
+  const afterGoblin = state.log.length;
+  state = CampaignOS.nextTurn(state); // back to Troll 1, at 0 HP
+  assert.equal(state.log.length, afterGoblin, "no regeneration message for a token at 0 HP");
+});
+
+test("nextTurn rolls to recharge a spent ability at the start of that token's own turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Hellhound 1",
+    initiative: 20,
+    rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: false } }
+  }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 5 }).state;
+
+  // Roll succeeds: random=0.9 -> d6 roll of 6, >= rechargeMin 5.
+  state = withRandom([0.9], () => CampaignOS.nextTurn(state));
+  const hound = state.tokens.find((t) => t.name === "Hellhound 1");
+  assert.equal(hound.rechargeAbilities["Fire Breath"].available, true);
+  assert.match(state.log[0], /Hellhound 1's Fire Breath recharges! \(rolled 6\)/);
+});
+
+test("nextTurn's recharge roll can fail, leaving the ability unavailable", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Hellhound 1",
+    initiative: 20,
+    rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: false } }
+  }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 5 }).state;
+
+  // Roll fails: random=0 -> d6 roll of 1, < rechargeMin 5.
+  state = withRandom([0], () => CampaignOS.nextTurn(state));
+  const hound = state.tokens.find((t) => t.name === "Hellhound 1");
+  assert.equal(hound.rechargeAbilities["Fire Breath"].available, false);
+});
+
+test("nextTurn does not re-roll an already-available recharge ability", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Hellhound 1",
+    initiative: 20,
+    rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: true } }
+  }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", initiative: 5 }).state;
+
+  const beforeLog = state.log.length;
+  state = CampaignOS.nextTurn(state);
+  assert.equal(state.log.length, beforeLog, "no recharge message for an ability that's already available");
+});
+
+test("useRechargeAbility spends an available ability and reports it in the message", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Hellhound 1",
+    rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: true } }
+  });
+
+  const result = CampaignOS.useRechargeAbility(withToken, token.id, "Fire Breath");
+  assert.match(result.message, /Hellhound 1 uses Fire Breath\./);
+  assert.equal(result.state.tokens[0].rechargeAbilities["Fire Breath"].available, false);
+});
+
+test("useRechargeAbility fails without changing state once an ability is already spent", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, {
+    name: "Hellhound 1",
+    rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: false } }
+  });
+
+  const result = CampaignOS.useRechargeAbility(withToken, token.id, "Fire Breath");
+  assert.match(result.message, /hasn't recharged yet/);
+  assert.equal(result.state, withToken);
+});
+
+test("useRechargeAbility fails outright for an ability the token doesn't track", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Hellhound 1" });
+  const result = CampaignOS.useRechargeAbility(withToken, token.id, "Fire Breath");
+  assert.match(result.message, /has no "Fire Breath" recharge ability tracked/);
+  assert.equal(result.state, withToken);
+});
+
+test("useRechargeAbility reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.useRechargeAbility(state, "nonexistent-id", "Fire Breath");
+  assert.match(result.message, /token was not found/);
+  assert.deepEqual(result.state, state);
+});
+
+test("parseCommand spawning a troll gives it Regeneration", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one troll"));
+  const [troll] = result.state.tokens;
+  assert.deepEqual(troll.regeneration, { amount: 10 });
+});
+
+test("parseCommand spawning a hell hound gives it a Fire Breath recharge ability", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one hellhound"));
+  const [hound] = result.state.tokens;
+  assert.deepEqual(hound.rechargeAbilities, { "Fire Breath": { rechargeMin: 5, available: true } });
+});
+
+test("attack is unrestricted outside the attacker's own active turn, even after its action would be spent", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 0, hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 10, maxHp: 10 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  // No turn order running at all (state.turn.tokenId is null) -- free narration/setup.
+  const first = withRandom([0.9], () => CampaignOS.attack(state, darkhawk.id, goblin.id));
+  const second = withRandom([0.9], () => CampaignOS.attack(first.state, darkhawk.id, goblin.id));
+  assert.ok(!/already used their action/.test(second.message), "attacking twice outside formal combat should never be gated");
+});
+
+test("attack consumes the attacker's action on its own active turn, rejecting a second attack the same turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 0, hp: 10, maxHp: 10, initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 10, maxHp: 10, initiative: 5 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  state = CampaignOS.nextTurn(state); // Darkhawk's turn
+
+  const first = withRandom([0.9], () => CampaignOS.attack(state, darkhawk.id, goblin.id));
+  assert.ok(!/already used their action/.test(first.message));
+
+  const second = CampaignOS.attack(first.state, darkhawk.id, goblin.id);
+  assert.match(second.message, /Darkhawk has already used their action this turn\./);
+  assert.equal(second.state, first.state, "a rejected attack should not change state");
+});
+
+test("attack does not restrict a token that isn't the one whose turn it is", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 0, hp: 10, maxHp: 10, initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, ac: 15, hp: 10, maxHp: 10, initiative: 5 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  state = CampaignOS.nextTurn(state); // Darkhawk's turn -- Goblin 1 is NOT active
+
+  const first = withRandom([0.9], () => CampaignOS.attack(state, goblin.id, darkhawk.id));
+  const second = withRandom([0.9], () => CampaignOS.attack(first.state, goblin.id, darkhawk.id));
+  assert.ok(!/already used their action/.test(second.message), "a token that isn't the active turn is never gated");
+});
+
+test("attack allows 1 + extraAttacks calls before the action is spent (Extra Attack)", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 0, hp: 10, maxHp: 10, initiative: 20, extraAttacks: 1 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 999, maxHp: 999, initiative: 5 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  state = CampaignOS.nextTurn(state);
+
+  const first = withRandom([0.9], () => CampaignOS.attack(state, darkhawk.id, goblin.id));
+  assert.ok(!/already used their action/.test(first.message));
+  const second = withRandom([0.9], () => CampaignOS.attack(first.state, darkhawk.id, goblin.id));
+  assert.ok(!/already used their action/.test(second.message), "Extra Attack should allow a second attack call in the same action");
+  const third = CampaignOS.attack(second.state, darkhawk.id, goblin.id);
+  assert.match(third.message, /already used their action/, "a third call exceeds 1 + extraAttacks (1)");
+});
+
+test("attack tracks a bonus-action attack separately from the action budget", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 0, hp: 10, maxHp: 10, initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 999, maxHp: 999, initiative: 5 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  state = CampaignOS.nextTurn(state);
+
+  const actionAttack = withRandom([0.9], () => CampaignOS.attack(state, darkhawk.id, goblin.id, { actionType: "action" }));
+  const bonusAttack = withRandom([0.9], () => CampaignOS.attack(actionAttack.state, darkhawk.id, goblin.id, { actionType: "bonusAction" }));
+  assert.ok(!/already used/.test(bonusAttack.message), "the action and bonus action are independent budgets");
+
+  const secondBonus = CampaignOS.attack(bonusAttack.state, darkhawk.id, goblin.id, { actionType: "bonusAction" });
+  assert.match(secondBonus.message, /already used a bonus action this turn\./);
+});
+
+test("castSpell (leveled) consumes the caster's action, rejecting a second leveled cast the same turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", initiative: 20, spellSlots: { 1: { max: 4, current: 4 } } }).state;
+  const [sael] = state.tokens;
+  state = CampaignOS.nextTurn(state);
+
+  const first = CampaignOS.castSpell(state, sael.id, { level: 1, spellName: "Entangle" });
+  assert.ok(!/already used their action/.test(first.message));
+  const second = CampaignOS.castSpell(first.state, sael.id, { level: 1, spellName: "Entangle" });
+  assert.match(second.message, /Sael has already used their action this turn\./);
+});
+
+test("castSpell exempts cantrips (level 0) from the action-economy gate", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", initiative: 20 }).state;
+  const [sael] = state.tokens;
+  state = CampaignOS.nextTurn(state);
+
+  const first = CampaignOS.castSpell(state, sael.id, { level: 0, spellName: "Guidance" });
+  const second = CampaignOS.castSpell(first.state, sael.id, { level: 0, spellName: "Guidance" });
+  assert.ok(!/already used their action/.test(second.message), "cantrips are exempt from this gate");
+});
+
+test("a leveled cast_spell and attack share the same action budget -- one blocks the other", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Sael", attackBonus: 0, hp: 10, maxHp: 10, initiative: 20, spellSlots: { 1: { max: 4, current: 4 } }
+  }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", ac: 15, hp: 999, maxHp: 999, initiative: 5 }).state;
+  const [sael, goblin] = state.tokens;
+  state = CampaignOS.nextTurn(state);
+
+  const cast = CampaignOS.castSpell(state, sael.id, { level: 1, spellName: "Entangle" });
+  const attackAfterCast = CampaignOS.attack(cast.state, sael.id, goblin.id);
+  assert.match(attackAfterCast.message, /already used their action/, "casting a leveled spell should block a follow-up attack the same turn");
+});
+
+test("nextTurn resets action economy only for the newly active token, not for others", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 0, hp: 10, maxHp: 10, initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, ac: 15, hp: 999, maxHp: 999, initiative: 5 }).state;
+  const [darkhawk, goblin] = state.tokens;
+
+  state = CampaignOS.nextTurn(state); // Darkhawk's turn
+  state = withRandom([0.9], () => CampaignOS.attack(state, darkhawk.id, goblin.id)).state;
+  assert.equal(state.tokens.find((t) => t.id === darkhawk.id).actionUsed, true);
+
+  state = CampaignOS.nextTurn(state); // Goblin 1's turn -- should not touch Darkhawk's flag
+  assert.equal(state.tokens.find((t) => t.id === darkhawk.id).actionUsed, true, "another token's turn starting should not reset a different token's action economy");
+
+  state = CampaignOS.nextTurn(state); // wraps back to Darkhawk, round 2 -- now it resets
+  assert.equal(state.tokens.find((t) => t.id === darkhawk.id).actionUsed, undefined);
 });
 
 test("triggerLairAction fires once per round and refuses a second call the same round", () => {

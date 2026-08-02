@@ -66,6 +66,38 @@ test("applyActions passes an attack action's advantage/disadvantage flags throug
   assert.match(messages[0], /advantage: 5, 18/);
 });
 
+test("applyActions passes an attack action's actionType through to CampaignOS.attack, gating a second action-type attack on the attacker's own turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, hp: 10, maxHp: 10, initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Darkhawk", ac: 15, hp: 999, maxHp: 999, initiative: 5 }).state;
+  state = CampaignOS.nextTurn(state); // Goblin 1's turn
+
+  const { state: afterFirst } = withRandom([0.9], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "attack", attacker: "Goblin 1", target: "Darkhawk" }
+  ]));
+  const { messages } = CampaignOSDMBridge.applyActions(afterFirst, [
+    { type: "attack", attacker: "Goblin 1", target: "Darkhawk" }
+  ]);
+
+  assert.match(messages[0], /Goblin 1 has already used their action this turn\./);
+});
+
+test("applyActions leaves attack unrestricted for a token that isn't the current active turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, hp: 10, maxHp: 10, initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Darkhawk", attackBonus: 0, ac: 15, hp: 999, maxHp: 999, initiative: 5 }).state;
+  state = CampaignOS.nextTurn(state); // Goblin 1's turn -- Darkhawk is not active
+
+  const { state: afterFirst } = withRandom([0.9], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "attack", attacker: "Darkhawk", target: "Goblin 1" }
+  ]));
+  const { messages } = withRandom([0.9], () => CampaignOSDMBridge.applyActions(afterFirst, [
+    { type: "attack", attacker: "Darkhawk", target: "Goblin 1" }
+  ]));
+
+  assert.ok(!/already used their action/.test(messages[0]), "a token that isn't the active turn should never be gated");
+});
+
 test("applyActions applies damage, healing, and condition toggles by token name", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Mara Fenn", hp: 50, maxHp: 86 }).state;
@@ -208,6 +240,27 @@ test("applyActions logs an unresolved-name message for a saving_throw targeting 
   assert.match(messages[0], /could not find "Nonexistent Goblin" for a saving throw/);
 });
 
+test("applyActions resolves an ability_check action using the target's real ability modifier", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", abilityScores: { WIS: 16 } }).state;
+
+  const { state: next, messages } = withRandom([9 / 20], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "ability_check", target: "Sael", skill: "Perception", dc: 12 }
+  ]));
+
+  assert.match(messages[0], /Sael rolls a Perception check: 10 \+3 = 13 vs DC 12\. Success\./);
+  assert.match(next.log[0], /Sael rolls a Perception check/, "the roll should be logged (not double-logged) the same way saving_throw() is");
+  assert.equal(next.log.length, 1);
+});
+
+test("applyActions logs an unresolved-name message for an ability_check targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "ability_check", target: "Nonexistent Goblin", skill: "Stealth", dc: 10 }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" for an ability check/);
+});
+
 test("applyActions resolves a cast_spell action, consuming a slot and rolling a spell attack against a target", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, {
@@ -247,6 +300,54 @@ test("applyActions logs an unresolved-name message for a cast_spell targeting an
   assert.match(messages[0], /could not find "Nonexistent Caster" to cast a spell/);
 });
 
+test("applyActions resolves a cast_area_spell action, resolving one damage roll and a save per target", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", spellSlots: { 3: { max: 2, current: 2 } } }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", abilityScores: { DEX: 10 }, hp: 20, maxHp: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 2", abilityScores: { DEX: 10 }, hp: 20, maxHp: 20 }).state;
+
+  // 8d6 damage at random=0 each -> total 8. Goblin 1 saves at 0.9 (19, success, half = 4);
+  // Goblin 2 saves at 0.1 (3, failure, full = 8) -- same math as the encounter.test.js case.
+  const randoms = [...Array(8).fill(0), 0.9, 0.1];
+  const { state: next, messages } = withRandom(randoms, () => CampaignOSDMBridge.applyActions(state, [
+    {
+      type: "cast_area_spell",
+      caster: "Sael",
+      spell: "Fireball",
+      level: 3,
+      targets: ["Goblin 1", "Goblin 2"],
+      saveAbility: "DEX",
+      saveDC: 15,
+      damageDice: "8d6"
+    }
+  ]));
+
+  assert.match(messages[0], /Sael casts Fireball using a 3rd-level spell slot \(1 remaining\)\./);
+  assert.match(messages[0], /Goblin 1 takes 4 damage/);
+  assert.match(messages[0], /Goblin 2 takes 8 damage/);
+  // Each target's own save self-logs via rollSavingThrow, plus castAreaSpell's own final
+  // combined summary -- 3 entries total for 2 targets, not re-logged a 4th time by
+  // applyActions (alreadyLogged: true), the same convention cast_spell/saving_throw use.
+  assert.equal(next.log.length, 3);
+});
+
+test("applyActions logs an unresolved-name message for a cast_area_spell targeting an unknown caster", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "cast_area_spell", caster: "Nonexistent", spell: "Fireball", level: 3, targets: ["Goblin 1"], saveAbility: "DEX", saveDC: 15, damageDice: "8d6" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent" to cast an area spell/);
+});
+
+test("applyActions logs an unresolved-name message for a cast_area_spell targeting an unknown token", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Sael", spellSlots: { 3: { max: 2, current: 2 } } }).state;
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "cast_area_spell", caster: "Sael", spell: "Fireball", level: 3, targets: ["Nonexistent Goblin"], saveAbility: "DEX", saveDC: 15, damageDice: "8d6" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" among the area spell's targets/);
+});
+
 test("applyActions resolves a use_resource action, spending a charge and reporting how many remain", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk", resources: { Rage: { max: 4, current: 4 } } }).state;
@@ -278,6 +379,34 @@ test("applyActions logs an unresolved-name message for a use_resource targeting 
     { type: "use_resource", target: "Nonexistent Goblin", resource: "Rage" }
   ]);
   assert.match(messages[0], /could not find "Nonexistent Goblin" to use a resource/);
+});
+
+test("applyActions resolves a spend_hit_die action, healing from the roll plus CON modifier", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Darkhawk",
+    hp: 10,
+    maxHp: 100,
+    abilityScores: { CON: 14 },
+    hitDice: { d12: { total: 11, current: 5 } }
+  }).state;
+
+  const { state: next, messages } = withRandom([0.5], () => CampaignOSDMBridge.applyActions(state, [
+    { type: "spend_hit_die", target: "Darkhawk", die: "d12", count: 1 }
+  ]));
+
+  assert.match(messages[0], /Darkhawk spends 1 d12 Hit Dice, healing 9/);
+  const darkhawk = next.tokens.find((t) => t.name === "Darkhawk");
+  assert.equal(darkhawk.hp, 19);
+  assert.equal(darkhawk.hitDice.d12.current, 4);
+});
+
+test("applyActions logs an unresolved-name message for a spend_hit_die targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "spend_hit_die", target: "Nonexistent Goblin", die: "d10" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" to spend Hit Dice/);
 });
 
 test("applyActions passes the concentration flag through cast_spell", () => {
@@ -482,6 +611,29 @@ test("applyActions logs an unresolved-name message for use_legendary_action targ
     { type: "use_legendary_action", target: "Nonexistent Boss" }
   ]);
   assert.match(messages[0], /could not find "Nonexistent Boss" to use a legendary action/);
+});
+
+test("applyActions resolves a use_recharge_ability action", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Hellhound 1",
+    rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: true } }
+  }).state;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "use_recharge_ability", target: "Hellhound 1", ability: "Fire Breath" }
+  ]);
+
+  assert.match(messages[0], /Hellhound 1 uses Fire Breath\./);
+  assert.equal(next.tokens.find((t) => t.name === "Hellhound 1").rechargeAbilities["Fire Breath"].available, false);
+});
+
+test("applyActions logs an unresolved-name message for use_recharge_ability targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "use_recharge_ability", target: "Nonexistent Hound", ability: "Fire Breath" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Hound" to use a recharge ability/);
 });
 
 test("applyActions resolves a trigger_lair_action action, refusing a second one the same round", () => {
