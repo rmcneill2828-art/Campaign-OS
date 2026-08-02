@@ -670,6 +670,15 @@
     }
 
     tokenSheet.className = "token-sheet";
+    // Conditions/Hit Dice/Resources/Recharge Abilities are wrapped in <details> below and
+    // default open only when the token actually has something in them -- most tokens use
+    // none of these, and an always-expanded empty "Add" form per section (times four) was
+    // real, avoidable scroll distance on every single token sheet. Collapsed (not hidden)
+    // so the Add control is still one click away rather than gone entirely.
+    const hasConditions = Array.isArray(token.conditions) && token.conditions.length > 0;
+    const hasHitDice = Boolean(token.hitDice && Object.keys(token.hitDice).length);
+    const hasResources = Boolean(token.resources && Object.keys(token.resources).length);
+    const hasRechargeAbilities = Boolean(token.rechargeAbilities && Object.keys(token.rechargeAbilities).length);
     tokenSheet.innerHTML = `
       <div class="token-heading">
         <div>
@@ -901,12 +910,12 @@
         <button type="button" data-action="long-rest" title="Full heal, and restores every spell slot and resource to max (skips healing a token flagged dead).">Long Rest</button>
         <button type="button" data-action="short-rest" title="Restores only resources tagged 'Short/long rest' -- doesn't touch HP or spell slots.">Short Rest</button>
       </div>
-      <div>
-        <h3 class="subheading">Conditions</h3>
+      <details class="section-details" ${hasConditions ? "open" : ""}>
+        <summary>Conditions</summary>
         <div class="conditions"></div>
-      </div>
-      <div>
-        <h3 class="subheading">Hit Dice</h3>
+      </details>
+      <details class="section-details" ${hasHitDice ? "open" : ""}>
+        <summary>Hit Dice</summary>
         <div class="hit-dice"></div>
         <form class="add-hit-dice-control" title="Track a Hit Dice pool -- one per die size, from class levels (a multiclassed token can have more than one).">
           <label>
@@ -924,9 +933,9 @@
           </label>
           <button type="submit">Add</button>
         </form>
-      </div>
-      <div>
-        <h3 class="subheading">Resources</h3>
+      </details>
+      <details class="section-details" ${hasResources ? "open" : ""}>
+        <summary>Resources</summary>
         <div class="resources"></div>
         <form class="add-resource-control" title="Track a limited class resource -- Rage, Wild Shape, Ki Points, Superiority Dice, Channel Divinity, etc.">
           <label>
@@ -946,9 +955,9 @@
           </label>
           <button type="submit">Add</button>
         </form>
-      </div>
-      <div>
-        <h3 class="subheading">Recharge Abilities</h3>
+      </details>
+      <details class="section-details" ${hasRechargeAbilities ? "open" : ""}>
+        <summary>Recharge Abilities</summary>
         <div class="recharge-abilities"></div>
         <form class="add-recharge-control" title="Track a recharge-based ability (Fire Breath, etc.) -- rolls a d6 at the start of this token's own turn once spent, becoming available again on a roll at or above Recharge.">
           <label>
@@ -965,7 +974,7 @@
           </label>
           <button type="submit">Add</button>
         </form>
-      </div>
+      </details>
       <button class="danger-button" type="button" data-action="remove">Remove Token</button>
     `;
 

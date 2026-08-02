@@ -636,6 +636,36 @@ body[data-fog="on"] .map-tile:hover {
   text-transform: uppercase;
 }
 
+.section-details {
+  margin: 8px 0;
+}
+
+.section-details summary {
+  margin: 12px 0 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+
+.section-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.section-details summary::before {
+  content: "\25b8  ";
+  color: var(--accent);
+}
+
+.section-details[open] summary::before {
+  content: "\25be  ";
+}
+
+.section-details summary:hover {
+  color: var(--text);
+}
+
 .conditions {
   display: grid;
   gap: 8px;
