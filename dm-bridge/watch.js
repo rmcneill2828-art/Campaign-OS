@@ -71,6 +71,8 @@ const SYSTEM_PROMPT = [
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',
   `{"type": "toggle_condition", "target": "<exact token name>", "condition": "${CONDITION_LIST.join("|")}"}`,
   '{"type": "set_visibility", "target": "<exact token name>", "hidden": <true or false>}',
+  '{"type": "add_wall", "x1": <integer>, "y1": <integer>, "x2": <integer>, "y2": <integer>}',
+  '{"type": "remove_wall_near", "x": <integer>, "y": <integer>}',
   '{"type": "move_token", "target": "<exact token name>", "x": <integer>, "y": <integer>}',
   '{"type": "next_turn"}',
   '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
@@ -317,6 +319,18 @@ const SYSTEM_PROMPT = [
   "prospectively) scrub the hidden token's name out of narration or the combat log, so avoid",
   "naming a hidden token in your own `message` text if the point is to keep it a surprise.",
   "",
+  "Use add_wall/remove_wall_near only for a real, narrated change to the map's geometry -- a",
+  "section of wall collapsing, a secret door swinging open, rubble sealing a passage. These are",
+  "map-prep tools the DM normally uses directly (a Walls toggle + click-drag), not something to",
+  "reach for casually. Wall coordinates are grid VERTICES (corners between cells), NOT the same",
+  "1-indexed cell coordinates tokens use for x/y -- vertex (0,0) is the map's top-left corner and",
+  "vertex (columns,rows) is its bottom-right, so a wall spanning the full left edge of a 12x8 grid",
+  "is x1=0,y1=0 to x2=0,y2=8. The line below shows how many walls a map already has -- 0 means",
+  "line of sight/fog of war aren't active for it at all (no restriction exists until at least one",
+  "wall is drawn); don't add a wall just to \"turn on\" that system unless the narration actually",
+  "calls for a real obstruction existing there. remove_wall_near takes a point close to the wall",
+  "you mean, not exact endpoints -- it finds and removes whichever wall is nearest.",
+  "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
   "but it never overrides the actual token state above, which is always the current truth."
@@ -364,6 +378,11 @@ function isValidAction(action) {
       return typeof action.target === "string" && CONDITION_LIST.includes(action.condition);
     case "set_visibility":
       return typeof action.target === "string" && typeof action.hidden === "boolean";
+    case "add_wall":
+      return Number.isFinite(action.x1) && Number.isFinite(action.y1)
+        && Number.isFinite(action.x2) && Number.isFinite(action.y2);
+    case "remove_wall_near":
+      return Number.isFinite(action.x) && Number.isFinite(action.y);
     case "move_token":
       return typeof action.target === "string" && Number.isFinite(action.x) && Number.isFinite(action.y);
     case "next_turn":
@@ -447,6 +466,7 @@ function buildPrompt(request) {
   lines.push(
     `Current map: ${state.mapName || "(none)"}`,
     `Grid size: ${grid.columns || 12} columns x ${grid.rows || 8} rows (1-based, top-left is 1,1).`,
+    `Walls on this map: ${Number.isFinite(state.wallCount) ? state.wallCount : 0} (0 means line of sight/fog of war aren't active for it at all).`,
     state.activeToken
       ? `Turn order: running -- round ${state.round || 1}, ${state.activeToken}'s turn.`
       : "Turn order: not running -- use next_turn to start it once formal combat begins.",
@@ -504,7 +524,8 @@ function buildPrompt(request) {
       const vulnText = Array.isArray(t.damageVulnerabilities) && t.damageVulnerabilities.length ? `, vulnerable: ${t.damageVulnerabilities.join(", ")}` : "";
       const immuneText = Array.isArray(t.damageImmunities) && t.damageImmunities.length ? `, immune: ${t.damageImmunities.join(", ")}` : "";
       const visibilityText = t.hiddenFromPlayers ? ", hidden from players" : "";
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}${legendaryActionsText}${resistText}${vulnText}${immuneText}${visibilityText}`);
+      const visionRangeText = Number.isFinite(t.visionRange) ? `, vision range ${t.visionRange} ft` : "";
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}${legendaryActionsText}${resistText}${vulnText}${immuneText}${visibilityText}${visionRangeText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

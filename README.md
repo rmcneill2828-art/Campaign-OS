@@ -304,8 +304,15 @@ dependencies to install for the app itself. See Tests, below, for running the te
   the player window's map and initiative list entirely (on top of, not instead of, manually
   hiding a token -- see Player window below), the same "if any PC can see it, the table sees
   it" convention a real table uses. A map with no walls drawn has no line-of-sight restriction
-  at all -- draw a wall only where you actually want one to matter. Straight-line-of-sight only
-  (no vision radius/darkvision distance limit) -- a deliberate first-cut simplification.
+  at all -- draw a wall only where you actually want one to matter. A hero-type token's sheet
+  has a **Vision Range (ft)** field -- set it (e.g. 60 for standard darkvision) to cap how far
+  that character can see regardless of walls; leave it blank for unlimited sight distance. Only
+  takes effect on a map that already has at least one wall drawn -- the same "opt in by drawing
+  a wall" rule as everything else here, so filling in a vision range on a wall-free map has no
+  effect. No lighting model (no per-cell bright/dim/dark state) -- a flat maximum sight
+  distance only, a deliberate first-cut simplification. The Claude DM bridge can draw or remove
+  a wall too (`add_wall`/`remove_wall_near`), reserved for an actual narrated change to the map
+  (a section of wall collapsing, a secret door) rather than something it does casually.
 - Fog of war: on any map with walls drawn (see above -- walls are what make this mean anything;
   a wall-free map has none), the player window automatically tracks which tiles the party has
   ever seen. A tile is either never explored (hidden entirely), explored but not currently

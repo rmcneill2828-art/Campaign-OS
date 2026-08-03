@@ -132,6 +132,27 @@ test("applyActions applies set_visibility both ways", () => {
   assert.match(revealed.messages[0], /Ambush Troll is now visible to players\./);
 });
 
+test("applyActions applies add_wall and remove_wall_near", () => {
+  let state = stateOnMap("Urskelde");
+
+  const added = CampaignOSDMBridge.applyActions(state, [
+    { type: "add_wall", x1: 5, y1: 0, x2: 5, y2: 10 }
+  ]);
+  assert.deepEqual(added.state.maps.Urskelde.walls, [{ x1: 5, y1: 0, x2: 5, y2: 10 }]);
+  assert.match(added.messages[0], /A wall appears on Urskelde\./);
+
+  const removed = CampaignOSDMBridge.applyActions(added.state, [
+    { type: "remove_wall_near", x: 5, y: 5 }
+  ]);
+  assert.deepEqual(removed.state.maps.Urskelde.walls, []);
+  assert.match(removed.messages[0], /A wall on Urskelde is removed\./);
+
+  const nothingNearby = CampaignOSDMBridge.applyActions(removed.state, [
+    { type: "remove_wall_near", x: 50, y: 50 }
+  ]);
+  assert.match(nothingNearby.messages[0], /no wall found near \(50, 50\) on Urskelde/);
+});
+
 test("applyActions logs an unresolved-name message instead of throwing when a target doesn't exist", () => {
   const state = stateOnMap("Urskelde");
   const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [

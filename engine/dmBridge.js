@@ -91,6 +91,29 @@
           alreadyLogged: false
         };
       }
+      case "add_wall": {
+        if (!state.mapName) return { state, message: "(DM assistant) no active map to add a wall to.", alreadyLogged: false };
+        return {
+          state: window.CampaignOS.addWall(state, state.mapName, action.x1, action.y1, action.x2, action.y2),
+          message: `A wall appears on ${state.mapName}.`,
+          alreadyLogged: false
+        };
+      }
+      case "remove_wall_near": {
+        if (!state.mapName) return { state, message: "(DM assistant) no active map to remove a wall from.", alreadyLogged: false };
+        // A wider threshold than the UI's own click-to-delete (0.35) -- Claude is estimating a
+        // coordinate from narration, not clicking a pixel, so it needs more slack to land near
+        // the wall it actually means.
+        const index = window.CampaignOS.findNearestWallIndex(state, state.mapName, action.x, action.y, 0.75);
+        if (index === null) {
+          return { state, message: `(DM assistant) no wall found near (${action.x}, ${action.y}) on ${state.mapName}.`, alreadyLogged: false };
+        }
+        return {
+          state: window.CampaignOS.removeWall(state, state.mapName, index),
+          message: `A wall on ${state.mapName} is removed.`,
+          alreadyLogged: false
+        };
+      }
       case "move_token": {
         const target = findTokenByName(state, action.target);
         if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to move.`, alreadyLogged: false };

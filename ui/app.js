@@ -791,6 +791,10 @@
             Exhaustion
             <input name="exhaustion" type="number" min="0" max="6" value="${token.exhaustion || 0}">
           </label>
+          <label title="Only matters for a hero-type token -- caps how far it can see for the player window's line-of-sight/fog-of-war filtering (e.g. 60 for standard darkvision). Blank means unlimited sight distance (still subject to walls).">
+            Vision Range (ft)
+            <input name="visionRange" type="number" min="0" max="999" placeholder="unlimited" value="${token.visionRange ?? ""}">
+          </label>
         </div>
         <p class="subheading">Ability Scores</p>
         <div class="cc-scores">
@@ -1084,6 +1088,7 @@
         damageVulnerabilities: form.get("damageVulnerabilities"),
         damageImmunities: form.get("damageImmunities"),
         extraAttacks: form.get("extraAttacks"),
+        visionRange: form.get("visionRange"),
         speed: form.get("speed"),
         exhaustion: form.get("exhaustion"),
         abilityScores,
@@ -2539,6 +2544,7 @@
     return {
       mapName: state.mapName,
       grid: window.CampaignOS.currentGrid(state),
+      wallCount: (state.maps?.[state.mapName]?.walls || []).length,
       round: state.turn?.round || 0,
       activeToken: activeTokens().find((token) => token.id === state.turn?.tokenId)?.name || null,
       lairActionUsedThisRound: state.lairActionRound === (state.turn?.round || 0),
@@ -2573,6 +2579,7 @@
         regeneration: token.regeneration,
         rechargeAbilities: token.rechargeAbilities,
         extraAttacks: token.extraAttacks,
+        visionRange: token.visionRange,
         actionUsed: Boolean(token.actionUsed),
         bonusActionUsed: Boolean(token.bonusActionUsed),
         hiddenFromPlayers: Boolean(token.hiddenFromPlayers)

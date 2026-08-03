@@ -463,15 +463,27 @@ See README.md for the full feature list and usage. Notes specific to working on 
   before running `segmentsIntersect()` (the textbook orientation-based test) against every
   wall -- centers landing exactly on an integer wall vertex is therefore *impossible*, which
   sidesteps the "does a ray touching a wall's endpoint count as blocked" ambiguity for the
-  common case entirely rather than needing to resolve it. This is a **straight-line check
-  only** -- no vision radius/darkvision distance limit, no dim-light gradation, and (since
-  Phase 3/fog-of-war was explicitly not built alongside this) no memory of previously-seen-but-
-  not-currently-visible area either; a token is either in line of sight right now or it isn't.
+  common case entirely rather than needing to resolve it. `hasLineOfSight` itself is a
+  **straight-line check only** -- no dim-light gradation, no distance limit of its own; a
+  wall-based obstruction is either in the way or it isn't. `cellVisibleToHero(state, mapName,
+  hero, x, y)` is the layer that adds a per-hero **vision radius**: `hero.visionRange` (feet,
+  sparse -- absent means unlimited) is checked via `gridMoveCost(..., 0)` (a one-off static
+  distance measurement, not a real move -- the same feet-per-square + alternating-diagonal
+  measure the Ruler tool already shows the DM, so "how far away" means the same thing
+  everywhere in this app). **Critically, `cellVisibleToHero` re-checks "does this map have any
+  walls at all" itself, before even calling `hasLineOfSight`**, rather than trusting
+  `hasLineOfSight`'s own internal fast path to cover it -- without that explicit early return, a
+  DM who fills in a hero's Vision Range on a map that has never had a wall drawn would find
+  monsters silently disappearing from the player window with no wall involved at all, breaking
+  the "no walls = zero restriction, full stop" invariant this whole feature set is built around.
+  If you add a third gate here later, it needs the same explicit early return, not just a
+  dependency on `hasLineOfSight`'s fast path. This is not a lighting model -- no per-cell
+  bright/dim/dark state, no light sources, just a flat maximum sight distance.
   `isVisibleToParty(state, token)` is the actual consumer-facing check: a `hero`-type token is
-  always visible (a PC always sees itself), otherwise it's visible if `hasLineOfSight` succeeds
-  against **any** hero-type token on the same map (union over the whole party, "if any one of
-  you can see it, the table sees it") -- and if there are no hero tokens on the map at all, it
-  returns `true` unconditionally (nothing to hide anything *from*), rather than hiding
+  always visible (a PC always sees itself), otherwise it's visible if `cellVisibleToHero`
+  succeeds against **any** hero-type token on the same map (union over the whole party, "if any
+  one of you can see it, the table sees it") -- and if there are no hero tokens on the map at
+  all, it returns `true` unconditionally (nothing to hide anything *from*), rather than hiding
   everything by default. `ui/playerView.js` applies this as a second filter, independent of and
   layered on top of `hiddenFromPlayers` -- a token can be both in line of sight AND manually
   hidden, and the manual flag still wins (both filters just `.filter()` in sequence, whichever
@@ -493,10 +505,19 @@ See README.md for the full feature list and usage. Notes specific to working on 
   UI-only, never persisted), walls are real map data, so they render on the DM's own map
   **unconditionally** -- `renderWallsOverlay()` doesn't check whether Walls mode is currently
   toggled on, the same "the grid itself always shows" precedent Map Settings already follows;
-  only drawing/deleting requires the toggle. Unlike `hiddenFromPlayers` (which got a
-  `set_visibility` DM-bridge action alongside its UI toggle), there is currently **no**
-  DM-bridge action for drawing/removing a wall at all -- a DM-only map-prep tool, not something
-  narration would plausibly trigger mid-session; revisit if that gap turns out to matter.
+  only drawing/deleting requires the toggle. `add_wall`/`remove_wall_near` are the DM-bridge
+  equivalents (`engine/dmBridge.js`, mirroring `set_visibility`'s pattern) -- `add_wall` takes
+  the same `{x1,y1,x2,y2}` vertex-space coordinates `addWall()` does; `remove_wall_near` takes a
+  single point and deletes whichever wall `findNearestWallIndex` finds closest, using a wider
+  0.75-grid-unit threshold than the UI's own 0.35 (Claude is estimating a coordinate from
+  narration, not clicking a pixel, so it needs more slack to land near the wall it actually
+  means). `SYSTEM_PROMPT` is explicit that these are for a real narrated geometry change (a
+  wall collapsing, a secret door), not something to reach for casually, and that Claude
+  shouldn't add a wall just to "turn on" line of sight/fog of war for a map that doesn't
+  actually call for an obstruction -- the per-map wall count shown in the prompt (`Walls on
+  this map: N`, from a new `wallCount` field in `buildBridgeStateSnapshot()`/`buildPrompt()`)
+  is there so Claude can check before deciding, the same way `hiddenFromPlayers` status is
+  shown per-token before `set_visibility` is used.
 - Fog of war: **replaced, not layered onto, the previous "fog" feature** -- `state.fogEnabled`,
   the `#toggleFog` button, and `ui/styles.css`'s `body[data-fog="on"] .map-tile:nth-child(...)`
   rules (a purely decorative pattern completely disconnected from grid position or vision) were

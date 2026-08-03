@@ -436,6 +436,13 @@
     if (Number.isFinite(Number(draft.extraAttacks)) && Number(draft.extraAttacks) > 0) {
       token.extraAttacks = clampNumber(draft.extraAttacks, 1, 10);
     }
+    // Max sight distance in feet for a hero-type token (cellVisibleToHero) -- sparse,
+    // absent/unset means unlimited. Meaningless on a non-hero token today (only hero vision
+    // drives what the player window reveals), but not restricted to type "hero" here, in case
+    // a token later changes type or the field turns out useful elsewhere.
+    if (Number.isFinite(Number(draft.visionRange)) && Number(draft.visionRange) > 0) {
+      token.visionRange = clampNumber(draft.visionRange, 1, 999);
+    }
     token.hp = clampNumber(token.hp, 0, token.maxHp);
     nextState.tokens.push(token);
     nextState.selectedTokenId = token.id;
@@ -1645,6 +1652,14 @@
       }
     }
 
+    if (changes.visionRange !== undefined) {
+      if (changes.visionRange === null || !Number.isFinite(Number(changes.visionRange)) || Number(changes.visionRange) <= 0) {
+        delete token.visionRange;
+      } else {
+        token.visionRange = clampNumber(changes.visionRange, 1, 999);
+      }
+    }
+
     if (typeof changes.image === "string") {
       token.image = changes.image;
     }
@@ -1808,9 +1823,8 @@
   // entirely, rather than needing to resolve it). No walls drawn for this map at all (the
   // overwhelmingly common case -- most maps never get any) is a fast path that skips the
   // geometry entirely and always returns true: absence of walls means no restriction, not an
-  // opaque map. This is a straight-line check only -- no vision RADIUS/darkvision distance
-  // limit, no "dim light" gradation; a token can see infinitely far as long as nothing drawn
-  // is in the way, a deliberate first-cut simplification.
+  // opaque map. Walls only -- no vision RADIUS/darkvision distance limit here (see
+  // cellVisibleToHero below for that layered on top) and no "dim light" gradation.
   function hasLineOfSight(state, mapName, ax, ay, bx, by) {
     const walls = state.maps?.[mapName]?.walls;
     if (!Array.isArray(walls) || !walls.length) return true;
@@ -1819,19 +1833,48 @@
     return !walls.some((wall) => segmentsIntersect(p1, p2, { x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }));
   }
 
+  // True if `hero` (a hero-type token) can see grid cell (x, y) on `mapName` -- both a clear
+  // line of sight (hasLineOfSight, walls only) AND, when hero.visionRange is set, within that
+  // distance. Distance is measured with gridMoveCost's own feet-per-square + RAW alternating-
+  // diagonal rule (diagonalStepsAlreadyUsed 0, a one-off static measurement, not an actual
+  // move) -- the same distance the Ruler tool already shows the DM, so "how far away is that"
+  // means the same thing everywhere in this app rather than introducing a second, divergent
+  // notion of distance just for vision. hero.visionRange absent/not finite means unlimited
+  // sight distance (sparse, same convention as every other optional numeric field in this
+  // file) -- this is a flat maximum-distance limit only, NOT a full lighting model: no per-cell
+  // bright/dim/dark state, no light sources, just "can this hero see this far, at all,"
+  // deliberately staying a first-cut simplification rather than growing into one.
+  //
+  // A map with no walls drawn returns true immediately, BEFORE even considering visionRange --
+  // deliberately checked here rather than left to fall through to hasLineOfSight's own "no
+  // walls" fast path, so the entire vision system (range included) stays strictly opt-in via
+  // drawing at least one wall, matching every other "no walls = zero restriction" default in
+  // this feature set. Without this explicit check, a DM who fills in a hero's Vision Range on
+  // a map that has never had a wall drawn would find monsters silently disappearing from the
+  // player window with no walls involved at all -- a surprising, hard-to-explain regression on
+  // a map that opted into nothing.
+  function cellVisibleToHero(state, mapName, hero, x, y) {
+    const walls = state.maps?.[mapName]?.walls;
+    if (!Array.isArray(walls) || !walls.length) return true;
+    if (!hasLineOfSight(state, mapName, hero.x, hero.y, x, y)) return false;
+    if (!Number.isFinite(hero.visionRange)) return true;
+    return gridMoveCost({ ...state, mapName }, hero.x, hero.y, x, y, 0).feet <= hero.visionRange;
+  }
+
   // A token is "visible to the party" if it's itself a hero (a PC always sees itself/is always
-  // shown, regardless of line of sight to its own square) or within line of sight of at least
-  // one hero-type token on the same map -- the union of every player character's vision, the
-  // standard tabletop convention ("if any one of you can see it, the table sees it"). Used by
-  // the player window (ui/playerView.js) to filter tokens on top of the manual
-  // hiddenFromPlayers flag, not instead of it -- a token can be both technically in line of
-  // sight AND manually hidden (not yet meant to be revealed even if walls would allow seeing
-  // it), and the manual flag always wins in that case (checked separately by the caller).
+  // shown, regardless of line of sight to its own square) or within sight (see
+  // cellVisibleToHero) of at least one hero-type token on the same map -- the union of every
+  // player character's vision, the standard tabletop convention ("if any one of you can see
+  // it, the table sees it"). Used by the player window (ui/playerView.js) to filter tokens on
+  // top of the manual hiddenFromPlayers flag, not instead of it -- a token can be both
+  // technically in line of sight AND manually hidden (not yet meant to be revealed even if
+  // walls would allow seeing it), and the manual flag always wins in that case (checked
+  // separately by the caller).
   function isVisibleToParty(state, token) {
     if (token.type === "hero") return true;
     const heroes = tokensOnCurrentMap({ ...state, mapName: token.mapName }).filter((other) => other.type === "hero");
     if (!heroes.length) return true; // no PCs on the map at all -- nothing to hide anything from
-    return heroes.some((hero) => hasLineOfSight(state, token.mapName, hero.x, hero.y, token.x, token.y));
+    return heroes.some((hero) => cellVisibleToHero(state, token.mapName, hero, token.x, token.y));
   }
 
   // Every currently-visible cell for the party on `mapName` (union over every hero-type token
@@ -1847,7 +1890,7 @@
     const cells = [];
     for (let y = 1; y <= grid.rows; y += 1) {
       for (let x = 1; x <= grid.columns; x += 1) {
-        if (heroes.some((hero) => hasLineOfSight(state, mapName, hero.x, hero.y, x, y))) {
+        if (heroes.some((hero) => cellVisibleToHero(state, mapName, hero, x, y))) {
           cells.push([x, y]);
         }
       }

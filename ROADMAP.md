@@ -213,25 +213,31 @@ the same way Phase 5 did).
 
 ## Phase 6 -- Finish line of sight (small, high-value, builds on Phase 3/4 directly)
 
-- [ ] **Vision radius / darkvision distance limit.** `hasLineOfSight()` currently only checks
-  whether a wall is in the way -- no maximum distance at all, so a token can technically see
-  the full length of an unlit corridor. Add an optional per-token `visionRange` (feet, sparse --
-  absent means unlimited, matching every other sparse-field convention in `engine/encounter.js`)
-  and fold a distance check into `hasLineOfSight`/`isVisibleToParty` alongside the existing wall
-  check. Deliberately NOT a full lighting model (no per-cell bright/dim/dark state, no light
-  sources) -- that's a much bigger feature; this is the same "flat distance limit, not RAW's full
-  light-level nuance" simplification the rest of this feature set already uses. Token sheet gets
-  a Vision Range field; SRD monsters with real darkvision (most humanoids' player-facing
-  counterparts don't have it, but plenty of monsters do) could get one set in `STAT_BLOCKS`, same
-  as `damageType` was backfilled per-monster in the damage-types phase -- worth doing at the same
-  time rather than as a separate pass.
-- [ ] **DM-bridge wall actions.** There is currently no way for Claude to draw or remove a wall
-  -- `set_visibility` got a DM-bridge action alongside its UI toggle, walls didn't. Add
-  `add_wall`/`remove_wall` (or a single `set_wall` with an add/remove mode) to `engine/dmBridge.js`
-  and `dm-bridge/watch.js`'s `isValidAction`/`SYSTEM_PROMPT`, mirroring the existing pattern
-  exactly. Lower value than vision range (walls are mostly a DM map-prep concern, not something
-  narration dynamically changes mid-session -- "a section of wall collapses" is the realistic use
-  case), which is why it's second in this phase, not first.
+- [x] **Vision radius / darkvision distance limit.** Done 2026-08-03. Optional per-token
+  `visionRange` (feet, sparse -- absent means unlimited). New `cellVisibleToHero()` layers a
+  `gridMoveCost`-based distance check (the same feet-per-square + alternating-diagonal measure
+  the Ruler tool already uses) on top of `hasLineOfSight`'s wall check, consumed by both
+  `isVisibleToParty` and `visibleCellsForParty` (so it feeds fog-of-war reveal too, not just
+  token hiding). Caught a real design bug before shipping: a naive implementation let
+  `visionRange` apply even on a wall-free map, breaking the "no walls = zero restriction"
+  invariant this whole feature set depends on -- fixed by making `cellVisibleToHero` check for
+  walls explicitly, rather than trusting `hasLineOfSight`'s own internal fast path to cover it
+  (a unit test locks this in). New **Vision Range (ft)** field on the token sheet. Deliberately
+  NOT a full lighting model (no per-cell bright/dim/dark state) -- a flat distance limit only.
+  Skipped backfilling monster `STAT_BLOCKS` with darkvision as originally suggested here: only
+  hero-type tokens' vision drives this system at all, so a monster's own vision range would be
+  inert data, not a real gap. 6 new unit tests (341 total) plus a live Playwright pass setting
+  Vision Range via the actual token sheet and confirming the player window responds.
+- [x] **DM-bridge wall actions.** Done 2026-08-03. `add_wall`/`remove_wall_near` in
+  `engine/dmBridge.js`, mirroring `set_visibility`'s pattern; `remove_wall_near` uses a wider
+  0.75-grid-unit threshold than the UI's own 0.35, since Claude is estimating a coordinate from
+  narration rather than clicking a pixel. `SYSTEM_PROMPT` explains the vertex-vs-cell coordinate
+  distinction and warns against adding a wall just to "turn on" line of sight/fog of war --
+  `buildPrompt()` now shows a per-map `Walls on this map: N` count (from a new `wallCount` field
+  in `buildBridgeStateSnapshot()`, which feeds both the cold-start and live-session channels for
+  free) so Claude can check before deciding. 1 new dmBridge test (342 total).
+
+Phase 6 complete.
 
 ## Phase 7 -- Finish AoE templates (medium)
 

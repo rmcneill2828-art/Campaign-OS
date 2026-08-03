@@ -2520,6 +2520,47 @@ test("isVisibleToParty treats a map with no PCs on it as fully visible (nothing 
   assert.equal(CampaignOS.isVisibleToParty(state, goblin), true);
 });
 
+test("isVisibleToParty respects a hero's visionRange once walls are drawn on the map", () => {
+  let state = stateOnMap("Urskelde");
+  const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero", visionRange: 20 });
+  state = CampaignOS.setTokenPosition(hero.state, hero.token.id, 1, 1);
+  const near = CampaignOS.addToken(state, { name: "Goblin 1", type: "monster" });
+  state = CampaignOS.setTokenPosition(near.state, near.token.id, 5, 1); // 4 squares * 5 ft = 20 ft, at the limit
+  const far = CampaignOS.addToken(state, { name: "Goblin 2", type: "monster" });
+  state = CampaignOS.setTokenPosition(far.state, far.token.id, 6, 1); // 5 squares * 5 ft = 25 ft, beyond the limit
+  // A wall that doesn't actually block anything -- present only to opt this map into the
+  // vision system at all (see the next test for what happens with no wall present).
+  state = CampaignOS.addWall(state, "Urskelde", 0, 5, 10, 5);
+
+  const nearToken = state.tokens.find((t) => t.name === "Goblin 1");
+  const farToken = state.tokens.find((t) => t.name === "Goblin 2");
+  assert.equal(CampaignOS.isVisibleToParty(state, nearToken), true, "exactly at the 20 ft limit");
+  assert.equal(CampaignOS.isVisibleToParty(state, farToken), false, "beyond the 20 ft limit");
+});
+
+test("a hero's visionRange is ignored entirely on a map with no walls drawn", () => {
+  let state = stateOnMap("Urskelde");
+  const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero", visionRange: 5 });
+  state = CampaignOS.setTokenPosition(hero.state, hero.token.id, 1, 1);
+  const far = CampaignOS.addToken(state, { name: "Goblin 1", type: "monster" });
+  state = CampaignOS.setTokenPosition(far.state, far.token.id, 20, 1); // far beyond 5 ft, but no wall exists at all
+
+  const farToken = state.tokens.find((t) => t.name === "Goblin 1");
+  assert.equal(CampaignOS.isVisibleToParty(state, farToken), true,
+    "the whole vision system, range included, stays opt-in via drawing at least one wall");
+});
+
+test("updateToken sets and clears visionRange", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk" });
+
+  const withRange = CampaignOS.updateToken(withToken, token.id, { visionRange: 60 }).tokens[0];
+  assert.equal(withRange.visionRange, 60);
+
+  const cleared = CampaignOS.updateToken({ ...withToken, tokens: [withRange] }, token.id, { visionRange: "" }).tokens[0];
+  assert.equal(cleared.visionRange, undefined);
+});
+
 test("visibleCellsForParty returns nothing when there are no hero tokens on the map", () => {
   let state = stateOnMap("Urskelde");
   state.maps.Urskelde = { columns: 5, rows: 4 };
