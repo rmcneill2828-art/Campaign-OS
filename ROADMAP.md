@@ -270,13 +270,14 @@ Phase 7 complete.
 
 ## Phase 8 -- Save/session ergonomics (small-medium)
 
-- [ ] **Multiple save slots / named encounters.** The original Phase 0 item, deferred at the
-  time ("decide after using export/import for a while -- may turn out unnecessary"). Revisit now:
-  does the single implicit autosave + manual Export/Import actually cover real usage, or does
-  running more than one encounter/campaign in the same browser profile want real named local
-  slots (still `localStorage`, just multiple keys instead of one fixed `storageKey`)? If it does,
-  this needs a small slot-picker UI (list, rename, delete, switch) alongside the existing
-  Save/Load/Export/Import row.
+- [x] **Multiple save slots / named encounters.** Decided 2026-08-03 (user decision): **skip
+  it.** The original Phase 0 item, deferred at the time with a note that it "may turn out
+  unnecessary" once Export/Import existed -- revisited now and confirmed: the single implicit
+  autosave plus manual Export/Import already covers the real need, so the slot-picker UI (list,
+  rename, delete, switch) this would have required isn't worth building. Revisit only if actual
+  usage running multiple encounters/campaigns in one browser profile turns out to want it later.
+
+Phase 8 complete (resolved by not building it).
 
 ## Phase 9 -- Cleanup (small, no new user-facing capability)
 
