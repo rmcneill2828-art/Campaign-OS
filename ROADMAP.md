@@ -34,21 +34,37 @@ conventions, the Windows argv-escaping rule in dm-bridge/watch.js).
   wired in `ui/app.js`), not tied to any token. 4 new unit tests (positive/negative modifier, no
   modifier, unparseable input) plus a Playwright pass covering the same cases through the actual
   UI.
-- [ ] **Standalone ruler/measure tool.** Let the DM measure grid distance without committing to a
-  token move -- e.g. click-drag on the map that shows live ft (using the map's feet-per-square
-  scale and the existing alternating-diagonal cost logic) and clears on release. Mostly
-  `ui/app.js` map-click handling; can reuse the diagonal-movement math already in
-  `engine/encounter.js` rather than duplicating it.
-- [ ] **AoE templates (cone/line/circle/cube).** A drawable overlay on the grid to help decide
-  which tokens fall inside a spell's area before calling `cast_area_spell` -- circle first
-  (simplest: radius from a click point), cone/line after. Purely a UI/visual aid; doesn't need to
-  feed `targetIds` automatically at first (that's a nice-to-have follow-up once the shape math
-  exists) -- even just "show me the circle so I can pick targets by eye" is the real win.
-- [ ] **Undo (single-level, or a short history stack).** `resetEncounter` is currently the only
-  way to back out of a mistake, and it nukes everything. Snapshot `state` before each mutating
-  action (cheap -- it's already a plain JSON-serializable object) and add an "Undo" button that
-  restores the last snapshot. Start with depth 1 before building a full stack; check whether that
-  alone covers real usage before investing more.
+- [x] **Standalone ruler/measure tool.** Done 2026-08-03. A "Ruler" toggle in the map toolbar;
+  while on, click-drag on the map draws a dashed line + live ft label instead of moving the
+  selected token, clearing on release. No engine change needed -- reuses the existing
+  `gridMoveCost()` (feet-per-square scale + the RAW alternating-diagonal rule) exactly as a real
+  move would compute it, and a new shared `gridCellFromEvent()` helper factored out of
+  `handleMapClick` so click-to-move and the ruler agree on pixel-to-cell math. Verified with
+  Playwright against a map with a non-default 10 ft/square scale (not the app's own default) to
+  confirm it reads the map's real settings rather than coincidentally matching a hardcoded
+  default.
+- [x] **AoE templates (circle only for now).** Done 2026-08-03. A "Template" toggle in the map
+  toolbar plus a Radius (ft) input; while on, clicking the map centers a circular overlay there.
+  Deliberately visual-only -- no `targetIds` auto-detection, per the original scope call (that
+  needs real shape-vs-token geometry, a separate follow-up). Circle math lives entirely in
+  `ui/app.js` (no engine change): radius in feet is converted to the grid's own feetPerSquare,
+  then expressed directly in the same 0-100 percentage coordinate space `cellCenterPercent()`
+  already uses for the ruler, so it reads correctly off each map's own scale. Renders as a true
+  circle only when the grid is calibrated to square cells -- the same assumption the token/grid
+  rendering already makes everywhere else, not a new one. Persists across unrelated re-renders
+  (e.g. a token move) by hooking into the same `renderGridHandles()`-style "survive the innerHTML
+  wipe" pattern `renderMap()` already used. Cone/line are still open -- circle covers the most
+  common case (Fireball, Burning Hands) and was the explicit starting point. Verified with
+  Playwright: correct radius math against a non-default scale, live radius updates without
+  re-clicking, and survival across an unrelated re-render.
+- [x] **Undo (single-level).** Done 2026-08-03. Hooked into `saveEncounter()` itself rather than
+  each of the ~60 individual `state = ...` call sites: every save stashes whatever was on disk
+  *before* it into `undoSnapshot`, so Undo is really "swap with what this last replaced" --
+  clicking it restores the prior state, and because that restore itself calls `saveEncounter()`,
+  a second click redoes it (a depth-1 swap, not a growing stack, matching the "start simple"
+  scope call). Covers every mutation for free, `resetEncounter` included -- verified specifically
+  that Reset followed by Undo restores the whole pre-reset encounter, the actual pain point that
+  motivated this item. Session-only by design (`undoSnapshot` starts `null` on a fresh load).
 
 ## Phase 2 -- Rules depth
 

@@ -244,7 +244,8 @@ h1 {
 
 .map-toggle,
 .range-input,
-.fit-input {
+.fit-input,
+.template-radius-input {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -261,6 +262,12 @@ h1 {
   width: 92px;
   min-height: 32px;
   padding: 0;
+}
+
+.template-radius-input input {
+  width: 92px;
+  min-height: 32px;
+  padding: 0 6px;
 }
 
 .fit-input select {
@@ -296,6 +303,70 @@ h1 {
 .battle-map.grid-hidden .map-tile:hover {
   border-color: rgba(215, 181, 109, 0.72);
   background: rgba(215, 181, 109, 0.08);
+}
+
+.ruler-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.ruler-line {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.ruler-line line {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.ruler-label {
+  position: absolute;
+  transform: translate(12px, -50%);
+  background: var(--panel-strong);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.template-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.template-shape {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.template-shape ellipse {
+  fill: rgba(207, 113, 96, 0.22);
+  stroke: var(--monster);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.template-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background: var(--panel-strong);
+  border: 1px solid var(--monster);
+  color: var(--text);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .grid-handle {

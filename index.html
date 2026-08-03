@@ -16,6 +16,7 @@
         <div class="topbar-actions">
           <button id="saveEncounter" type="button">Save</button>
           <button id="loadEncounter" type="button">Load</button>
+          <button id="undoEncounter" type="button" title="Reverts to the encounter as it stood right before the last change (including a Reset) -- click again to redo. Only covers this session's most recent change, not a full history.">Undo</button>
           <button id="exportEncounter" type="button" title="Download the current encounter as a .json file -- for backup, or to move it to another machine.">Export</button>
           <label class="import-encounter-label" title="Load an encounter from a previously exported .json file, replacing the current one.">
             Import
@@ -38,6 +39,12 @@
                 Grid
               </label>
               <button id="toggleFog" type="button">Toggle Fog</button>
+              <button id="toggleRuler" type="button" title="While on, click-drag on the map to measure grid distance (using the map's ft/square scale and the RAW alternating-diagonal rule) instead of moving the selected token.">Ruler</button>
+              <button id="toggleTemplate" type="button" title="While on, click the map to center a circular AoE template there (radius set below) -- a visual aid for picking cast_area_spell targets by eye, not an automatic target list.">Template</button>
+              <label class="template-radius-input">
+                Radius (ft)
+                <input id="templateRadius" type="number" min="5" step="5" value="20" aria-label="AoE template radius in feet">
+              </label>
               <button id="mapSettingsToggle" type="button">Map Settings</button>
             </div>
             <div id="mapToolbarSecondary" class="map-toolbar-secondary" hidden>

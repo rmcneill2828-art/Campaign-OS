@@ -64,6 +64,9 @@
   const tokenSize = document.querySelector("#tokenSize");
   const feetPerSquareInput = document.querySelector("#feetPerSquare");
   const toggleFog = document.querySelector("#toggleFog");
+  const toggleRuler = document.querySelector("#toggleRuler");
+  const toggleTemplate = document.querySelector("#toggleTemplate");
+  const templateRadiusInput = document.querySelector("#templateRadius");
   const clearMapImage = document.querySelector("#clearMapImage");
   const mapSettingsToggle = document.querySelector("#mapSettingsToggle");
   const mapToolbarSecondary = document.querySelector("#mapToolbarSecondary");
@@ -574,6 +577,7 @@
     });
 
     renderGridHandles();
+    renderTemplateOverlay();
   }
 
   let lastRenderedMapImageValue = undefined;
@@ -1875,14 +1879,138 @@
     updateState(result.state);
   }
 
-  function handleMapClick(event) {
-    if (event.target.closest(".token")) return;
+  // Shared by click-to-move and the ruler drag below, so both agree on exactly which
+  // grid cell a given pixel position falls in.
+  function gridCellFromEvent(event) {
     const rect = map.getBoundingClientRect();
     const grid = currentGrid();
     const x = Math.min(grid.columns, Math.max(1, Math.floor(((event.clientX - rect.left) / rect.width) * grid.columns) + 1));
     const y = Math.min(grid.rows, Math.max(1, Math.floor(((event.clientY - rect.top) / rect.height) * grid.rows) + 1));
+    return { x, y };
+  }
+
+  function handleMapClick(event) {
+    if (rulerModeOn) return;
+    if (event.target.closest(".token")) return;
+    if (templateModeOn) {
+      templateCenter = gridCellFromEvent(event);
+      renderTemplateOverlay();
+      return;
+    }
+    const { x, y } = gridCellFromEvent(event);
     moveSelectedToken(x, y);
   }
+
+  // Ruler: while toggleRuler is active, a click-drag on the map measures grid distance
+  // (feetPerSquare + the RAW alternating-diagonal rule, via the same gridMoveCost() a real
+  // move would use) instead of moving the selected token. Purely a local UI concern -- not
+  // part of `state`, cleared on mouseup, never persisted/saved.
+  let rulerModeOn = false;
+  let rulerDragStart = null;
+  let rulerOverlayEl = null;
+
+  function cellCenterPercent(cell, grid) {
+    return { xPct: ((cell.x - 0.5) / grid.columns) * 100, yPct: ((cell.y - 0.5) / grid.rows) * 100 };
+  }
+
+  function updateRulerOverlay(start, current) {
+    rulerOverlayEl?.remove();
+    const grid = currentGrid();
+    const cost = window.CampaignOS.gridMoveCost(state, start.x, start.y, current.x, current.y, 0);
+    const startPct = cellCenterPercent(start, grid);
+    const currentPct = cellCenterPercent(current, grid);
+
+    const overlay = document.createElement("div");
+    overlay.className = "ruler-overlay";
+    overlay.innerHTML = `
+      <svg class="ruler-line" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <line x1="${startPct.xPct}" y1="${startPct.yPct}" x2="${currentPct.xPct}" y2="${currentPct.yPct}"></line>
+      </svg>
+      <span class="ruler-label" style="left: ${currentPct.xPct}%; top: ${currentPct.yPct}%;">${cost.feet} ft</span>
+    `;
+    map.appendChild(overlay);
+    rulerOverlayEl = overlay;
+  }
+
+  function clearRulerOverlay() {
+    rulerOverlayEl?.remove();
+    rulerOverlayEl = null;
+  }
+
+  function startRulerDrag(event) {
+    if (!rulerModeOn || event.button !== 0 || event.target.closest(".token")) return;
+    event.preventDefault();
+    rulerDragStart = gridCellFromEvent(event);
+    updateRulerOverlay(rulerDragStart, rulerDragStart);
+    window.addEventListener("mousemove", dragRuler);
+    window.addEventListener("mouseup", endRulerDrag);
+  }
+
+  function dragRuler(event) {
+    if (!rulerDragStart) return;
+    updateRulerOverlay(rulerDragStart, gridCellFromEvent(event));
+  }
+
+  function endRulerDrag() {
+    rulerDragStart = null;
+    clearRulerOverlay();
+    window.removeEventListener("mousemove", dragRuler);
+    window.removeEventListener("mouseup", endRulerDrag);
+  }
+
+  map.addEventListener("mousedown", startRulerDrag);
+
+  // AoE template: while toggleTemplate is active, clicking the map centers a circular
+  // template there at the radius set in templateRadiusInput -- a visual aid for eyeballing
+  // cast_area_spell targets, not an automatic target list (see the roadmap for why:
+  // resolving targetIds from the shape needs real geometry work this is deliberately not
+  // doing yet). Unlike the ruler, this persists across renders once placed (until moved or
+  // toggled off), so renderTemplateOverlay() is also called from the end of renderMap()
+  // itself, the same "survives the innerHTML wipe" pattern renderGridHandles() already uses
+  // -- a plain click handler alone would lose it the moment anything else re-renders the map.
+  let templateModeOn = false;
+  let templateCenter = null;
+  let templateOverlayEl = null;
+
+  function renderTemplateOverlay() {
+    templateOverlayEl?.remove();
+    templateOverlayEl = null;
+    if (!templateModeOn || !templateCenter) return;
+
+    const grid = currentGrid();
+    const radiusFeet = Math.max(0, Number(templateRadiusInput.value) || 0);
+    const radiusCells = radiusFeet / window.CampaignOS.feetPerSquare(state);
+    const centerPct = cellCenterPercent(templateCenter, grid);
+    // Circle radius expressed directly in the same non-uniform 0-100 coordinate space the
+    // line/center math already uses (see cellCenterPercent) -- looks like a true circle only
+    // when the map's grid is calibrated to square cells, the same assumption the token/grid
+    // rendering already makes everywhere else.
+    const rx = radiusCells * (100 / grid.columns);
+    const ry = radiusCells * (100 / grid.rows);
+
+    const overlay = document.createElement("div");
+    overlay.className = "template-overlay";
+    overlay.innerHTML = `
+      <svg class="template-shape" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <ellipse cx="${centerPct.xPct}" cy="${centerPct.yPct}" rx="${rx}" ry="${ry}"></ellipse>
+      </svg>
+      <span class="template-label" style="left: ${centerPct.xPct}%; top: ${centerPct.yPct}%;">${radiusFeet} ft radius</span>
+    `;
+    map.appendChild(overlay);
+    templateOverlayEl = overlay;
+  }
+
+  templateRadiusInput.addEventListener("input", renderTemplateOverlay);
+
+  toggleTemplate.addEventListener("click", () => {
+    templateModeOn = !templateModeOn;
+    toggleTemplate.textContent = templateModeOn ? "Template On" : "Template";
+    toggleTemplate.classList.toggle("active-toggle", templateModeOn);
+    if (!templateModeOn) {
+      templateCenter = null;
+      renderTemplateOverlay();
+    }
+  });
 
   commandForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -2467,6 +2595,17 @@
     render();
   });
 
+  document.querySelector("#undoEncounter").addEventListener("click", () => {
+    if (!undoSnapshot) {
+      commandResult.textContent = "Nothing to undo yet this session.";
+      return;
+    }
+    state = normalizeEncounter(JSON.parse(undoSnapshot));
+    saveEncounter();
+    commandResult.textContent = "Reverted to the previous encounter state. Click Undo again to redo.";
+    render();
+  });
+
   document.querySelector("#resetEncounter").addEventListener("click", () => {
     state = window.CampaignOS.createState();
     saveEncounter();
@@ -2547,6 +2686,13 @@
     state.fogEnabled = !state.fogEnabled;
     saveEncounter();
     render();
+  });
+
+  toggleRuler.addEventListener("click", () => {
+    rulerModeOn = !rulerModeOn;
+    toggleRuler.textContent = rulerModeOn ? "Ruler On" : "Ruler";
+    toggleRuler.classList.toggle("active-toggle", rulerModeOn);
+    if (!rulerModeOn) endRulerDrag();
   });
 
   nextTurnButton.addEventListener("click", () => {
@@ -2637,7 +2783,18 @@
     render();
   });
 
+  // Depth-1 undo: every mutation in this app ends up calling saveEncounter() (directly or via
+  // updateState()), so hooking undo in here -- rather than at each of the ~60 individual call
+  // sites that assign `state = ...` -- covers all of them for free, Reset included. Each save
+  // stashes whatever was on disk *before* it as undoSnapshot, so Undo is really "swap with what
+  // this last replaced": clicking it restores the prior state AND (since that restore itself
+  // calls saveEncounter()) leaves the just-undone state as the new undoSnapshot, so a second
+  // Undo click redoes it. Session-only -- undoSnapshot starts null on a fresh page load, so
+  // there's nothing to undo until this session's first save.
+  let undoSnapshot = null;
+
   function saveEncounter() {
+    undoSnapshot = localStorage.getItem(storageKey);
     localStorage.setItem(storageKey, JSON.stringify(state));
     if (dmBridgeDirHandle) {
       writeLiveStateSnapshot().catch((err) => {
