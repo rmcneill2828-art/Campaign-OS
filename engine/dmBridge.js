@@ -53,7 +53,7 @@
         // concentration-check result to fold in) -- it never self-logs, so this base
         // "takes N damage" line plus whatever it reports still goes through appendLog below
         // as one combined entry, same as attack()/castSpell() fold it into their own message.
-        const result = window.CampaignOS.applyDamage(state, target.id, action.amount);
+        const result = window.CampaignOS.applyDamage(state, target.id, action.amount, { damageType: action.damageType });
         const baseMessage = `${target.name} takes ${action.amount} damage.`;
         return {
           state: result.state,
@@ -135,6 +135,7 @@
           spellName: action.spell,
           targetId: target ? target.id : null,
           damageDice: action.damageDice,
+          damageType: action.damageType,
           concentration: Boolean(action.concentration),
           advantage: Boolean(action.advantage),
           disadvantage: Boolean(action.disadvantage),
@@ -163,6 +164,7 @@
           saveAbility: action.saveAbility,
           saveDC: action.saveDC,
           damageDice: action.damageDice,
+          damageType: action.damageType,
           halfOnSave: action.halfOnSave === undefined ? true : Boolean(action.halfOnSave),
           concentration: Boolean(action.concentration)
         });

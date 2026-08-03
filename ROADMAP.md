@@ -68,15 +68,32 @@ conventions, the Windows argv-escaping rule in dm-bridge/watch.js).
 
 ## Phase 2 -- Rules depth
 
-- [ ] **Damage types.** The highest-leverage rules gap: nothing in the engine tracks damage type,
-  so resistance/vulnerability/immunity can't work at all. Needs: a `damageType` field on attack
-  profiles/spells (stat blocks in `encounter.js`'s `STAT_BLOCKS`, `characterCreator.js`'s
-  generated attack, `cast_spell`/`cast_area_spell`'s dmBridge actions), a token-level
-  `resistances`/`vulnerabilities`/`immunities` set, and a damage-modifier step in `applyDamage()`.
-  This is the biggest single item in this phase -- touches `engine/encounter.js`,
-  `engine/campaign.js` (import), `engine/dmBridge.js` (action shape), `dm-bridge/watch.js`
-  (system prompt), and the token sheet UI. Re-read the `applyDamage()` CLAUDE.md bullet before
-  starting; its `{state, message}` return shape and every call site matter here.
+- [x] **Damage types.** Done 2026-08-03. `token.damageResistances`/`damageVulnerabilities`/
+  `damageImmunities` (plain lowercase-string arrays, case-insensitive matching) plus a
+  `damageType` on attack profiles (`STAT_BLOCKS`, Multiattack rows, spells) feed
+  `damageTypeModifier()` inside `applyDamage()` -- immunity zeroes, resistance halves (rounded
+  down), vulnerability doubles, both-at-once cancels out to the RAW-accepted ruling.
+  `applyDamage()`'s `{state, message}` return shape is unchanged; the adjustment folds into the
+  same message every other call already produces. Threaded through `attack()` (reads the
+  attacker's own profile automatically), `castSpell`/`castAreaSpell` (optional
+  `options.damageType`), `dmBridge.js`'s `apply_damage`/`cast_spell`/`cast_area_spell`, and
+  `dm-bridge/watch.js`'s `isValidAction`/`SYSTEM_PROMPT`/`buildPrompt` (resist/vulnerable/immune
+  now shown per token) and the live-session snapshot. Every SRD monster in `STAT_BLOCKS` got its
+  real weapon type, except two combined-roll Bites (hell hound, giant spider) left deliberately
+  untyped -- tagging a blended two-damage-type roll with either type alone would misrepresent it.
+  Skeleton got its SRD-documented `damageVulnerabilities: ["bludgeoning"]`; no other
+  resistances/immunities were invented for monsters not already confirmed elsewhere in this
+  codebase's own comments. `engine/campaign.js` now extracts a real sheet's stated type from its
+  Attacks table's Damage cell (`"1d8+3 slashing"`), and `characterCreator.js` writes new
+  character sheets in that same format (round-trips cleanly on re-import) plus a new Damage
+  Type field in the Character Creator UI. Token sheet gained a damage-type select (single/
+  primary attack only, same scope as the existing Attack/Damage fields) and three comma-
+  separated Resistances/Vulnerabilities/Immunities text inputs. 12 new/extended unit tests
+  across `encounter.test.js`/`campaign.test.js`/`characterCreator.test.js` (314 total, all
+  passing) plus a live Playwright pass verifying the token sheet edits persist correctly and a
+  real attack through the local command parser (not just a raw API call) correctly resists.
+  See CLAUDE.md's new "Damage types / resistance / vulnerability / immunity" bullet for the
+  full design writeup.
 - [ ] **Reactions / opportunity attacks.** Needs a "left this token's reach" trigger, which the
   engine currently has no notion of (movement is just a speed budget, not adjacency-tracked over
   a path). Design the trigger detection before writing the action -- this is more of an

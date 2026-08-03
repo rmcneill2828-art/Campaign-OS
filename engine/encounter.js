@@ -45,6 +45,17 @@
     "Unconscious"
   ];
 
+  // The 13 SRD damage types -- a reference list for the token sheet's dropdowns (below) and
+  // characterCreator.js's weapon field, not an engine-side validation gate: damageTypeModifier
+  // matches whatever string an attack profile/token carries case-insensitively, same
+  // "freeform, not a closed enum" treatment resource names already get, so a homebrew type
+  // typed directly (not through a dropdown) still works for resistance/vulnerability/immunity
+  // matching -- it just won't appear pre-listed in the UI.
+  const DAMAGE_TYPE_LIST = [
+    "acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic",
+    "piercing", "poison", "psychic", "radiant", "slashing", "thunder"
+  ];
+
   // RAW mechanical hooks for a subset of the conditions above -- attack()/rollSavingThrow()/
   // effectiveSpeed() read these the same way they already read token.exhaustion. Charmed and
   // Frightened are deliberately left descriptive-only (tag only, no automated effect): their
@@ -114,9 +125,10 @@
     // non-humanoid encounter, three hellhounds guarding a market entrance; everything else
     // fought was generic human guards, already covered by `bandit`). Bite RAW deals two
     // damage types in one hit (1d8+3 piercing plus 2d6 fire); damageDice here is a single
-    // dice notation with no damage-type modeling anywhere in this engine, so it's
-    // approximated as one combined roll (avg ~14.5, matching 1d8+3 + 2d6) rather than
-    // dropping either component. Fire Breath (15 ft cone, DC 12 DEX save, 6d6 fire/half) now
+    // dice notation, and tagging the combined roll with either type alone would misrepresent
+    // it for a creature resistant/immune to only one of the two (see damageTypeModifier), so
+    // it's left untyped -- approximated as one combined roll (avg ~14.5, matching 1d8+3 + 2d6)
+    // rather than dropping either component. Fire Breath (15 ft cone, DC 12 DEX save, 6d6 fire/half) now
     // has a real path end to end: rechargeAbilities tracks whether it's available (roll a
     // d6 >= 5 at the start of the hell hound's turn, per nextTurn()), use_recharge_ability
     // spends it, and cast_area_spell (or the equivalent local command) resolves the actual
@@ -129,25 +141,28 @@
       rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: true } }
     },
     goblin: {
-      hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2, speed: 30,
+      hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", damageType: "slashing", initiativeMod: 2, speed: 30,
       abilityScores: { STR: 8, DEX: 14, CON: 10, INT: 10, WIS: 8, CHA: 8 }
     },
     orc: {
-      hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", initiativeMod: 1, speed: 30,
+      hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", damageType: "slashing", initiativeMod: 1, speed: 30,
       abilityScores: { STR: 16, DEX: 12, CON: 16, INT: 7, WIS: 11, CHA: 10 }
     },
     wolf: {
-      hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", initiativeMod: 2, speed: 40,
+      hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", damageType: "piercing", initiativeMod: 2, speed: 40,
       abilityScores: { STR: 12, DEX: 15, CON: 12, INT: 3, WIS: 12, CHA: 6 }
     },
     bandit: {
-      hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30,
+      hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", damageType: "slashing", initiativeMod: 1, speed: 30,
       abilityScores: { STR: 11, DEX: 12, CON: 12, INT: 10, WIS: 10, CHA: 10 }
     },
     // Regeneration (10 HP at the start of its turn "unless it took acid or fire damage
-    // since its last turn") is handled by nextTurn() -- the acid/fire exception isn't
-    // modeled, since damage types aren't tracked anywhere in this engine; skip issuing the
-    // heal by hand (via the token editor) on a turn where that exception should apply.
+    // since its last turn") is handled by nextTurn() -- the acid/fire exception still isn't
+    // modeled, even now that damage types are tracked elsewhere: it needs "did this token
+    // take type X since its LAST turn," a per-turn damage-type history nextTurn() has no
+    // notion of (damageTypeModifier only sees one hit at a time, at the moment it lands), a
+    // different problem from resistance/vulnerability/immunity; skip issuing the heal by hand
+    // (via the token editor) on a turn where that exception should apply.
     troll: {
       hp: 84,
       ac: 15,
@@ -160,23 +175,25 @@
       abilityScores: { STR: 18, DEX: 13, CON: 20, INT: 7, WIS: 9, CHA: 7 },
       regeneration: { amount: 10 },
       attacks: [
-        { name: "Bite", attackBonus: 7, damageDice: "1d6+4" },
-        { name: "Claw", attackBonus: 7, damageDice: "2d6+4" },
-        { name: "Claw", attackBonus: 7, damageDice: "2d6+4" }
+        { name: "Bite", attackBonus: 7, damageDice: "1d6+4", damageType: "piercing" },
+        { name: "Claw", attackBonus: 7, damageDice: "2d6+4", damageType: "slashing" },
+        { name: "Claw", attackBonus: 7, damageDice: "2d6+4", damageType: "slashing" }
       ]
     },
-    // Skeleton's Vulnerability to bludgeoning damage isn't modeled -- damage types aren't
-    // tracked anywhere in this engine (same known gap as the hell hound's combined-type Bite).
+    // Vulnerability to bludgeoning damage IS modeled now that damage types are tracked --
+    // resistance/vulnerability/immunity checks against a token's damageVulnerabilities list.
     skeleton: {
-      hp: 13, ac: 13, attackBonus: 4, damageDice: "1d6+2", initiativeMod: 2, speed: 30,
-      abilityScores: { STR: 10, DEX: 14, CON: 15, INT: 6, WIS: 8, CHA: 5 }
+      hp: 13, ac: 13, attackBonus: 4, damageDice: "1d6+2", damageType: "piercing", initiativeMod: 2, speed: 30,
+      abilityScores: { STR: 10, DEX: 14, CON: 15, INT: 6, WIS: 8, CHA: 5 },
+      damageVulnerabilities: ["bludgeoning"]
     },
     // Undead Fortitude (a failed CON save lets it drop to 1 HP instead of 0, unless the
-    // killing damage was radiant or a critical hit) isn't automated -- damage types aren't
-    // tracked and applyDamage has no notion of "this specific hit" to key a save off of
-    // separately from the death-save machinery it already runs; apply it by hand.
+    // killing damage was radiant or a critical hit) still isn't automated -- applyDamage has
+    // no notion of "this specific hit" to key a save off of separately from the death-save
+    // machinery it already runs, even though damage type itself is now tracked; apply it by
+    // hand.
     zombie: {
-      hp: 22, ac: 8, attackBonus: 3, damageDice: "1d6+1", initiativeMod: -2, speed: 20,
+      hp: 22, ac: 8, attackBonus: 3, damageDice: "1d6+1", damageType: "bludgeoning", initiativeMod: -2, speed: 20,
       abilityScores: { STR: 13, DEX: 6, CON: 16, INT: 3, WIS: 6, CHA: 5 }
     },
     // Ghoul's Claws (the second Multiattack hit) also inflict paralysis on a failed CON
@@ -186,47 +203,49 @@
       hp: 22, ac: 12, attackBonus: 2, damageDice: "2d6+2", initiativeMod: 2, speed: 30,
       abilityScores: { STR: 13, DEX: 15, CON: 10, INT: 7, WIS: 10, CHA: 6 },
       attacks: [
-        { name: "Bite", attackBonus: 2, damageDice: "2d6+2" },
-        { name: "Claws", attackBonus: 4, damageDice: "2d4+2" }
+        { name: "Bite", attackBonus: 2, damageDice: "2d6+2", damageType: "piercing" },
+        { name: "Claws", attackBonus: 4, damageDice: "2d4+2", damageType: "slashing" }
       ]
     },
     ogre: {
-      hp: 59, ac: 11, attackBonus: 6, damageDice: "2d8+4", initiativeMod: -1, speed: 40,
+      hp: 59, ac: 11, attackBonus: 6, damageDice: "2d8+4", damageType: "bludgeoning", initiativeMod: -1, speed: 40,
       abilityScores: { STR: 19, DEX: 8, CON: 16, INT: 5, WIS: 7, CHA: 7 }
     },
     owlbear: {
       hp: 59, ac: 13, attackBonus: 7, damageDice: "1d10+5", initiativeMod: 1, speed: 40,
       abilityScores: { STR: 20, DEX: 12, CON: 17, INT: 3, WIS: 12, CHA: 7 },
       attacks: [
-        { name: "Beak", attackBonus: 7, damageDice: "1d10+5" },
-        { name: "Claws", attackBonus: 7, damageDice: "2d8+5" }
+        { name: "Beak", attackBonus: 7, damageDice: "1d10+5", damageType: "piercing" },
+        { name: "Claws", attackBonus: 7, damageDice: "2d8+5", damageType: "slashing" }
       ]
     },
     worg: {
-      hp: 26, ac: 13, attackBonus: 5, damageDice: "2d6+3", initiativeMod: 1, speed: 50,
+      hp: 26, ac: 13, attackBonus: 5, damageDice: "2d6+3", damageType: "piercing", initiativeMod: 1, speed: 50,
       abilityScores: { STR: 16, DEX: 13, CON: 13, INT: 7, WIS: 11, CHA: 8 }
     },
     // Bite RAW deals two damage types in one hit (1d8+3 piercing plus 2d8 poison) plus a
     // DC 11 CON save or poisoned -- same combined-single-roll approximation the hell hound's
-    // Bite above uses (damage types aren't modeled), and the poisoned-on-hit rider isn't
-    // automated for the same reason ghoul's paralysis rider isn't.
+    // Bite above uses, so it's left untyped here too (tagging it as either piercing or poison
+    // alone would misrepresent it for a creature resistant/immune to only one of the two), and
+    // the poisoned-on-hit rider isn't automated for the same reason ghoul's paralysis rider
+    // isn't.
     "giant spider": {
       hp: 26, ac: 14, attackBonus: 5, damageDice: "3d8+4", initiativeMod: 3, speed: 30,
       abilityScores: { STR: 14, DEX: 16, CON: 12, INT: 2, WIS: 11, CHA: 4 }
     },
     cultist: {
-      hp: 9, ac: 12, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30,
+      hp: 9, ac: 12, attackBonus: 3, damageDice: "1d6+1", damageType: "slashing", initiativeMod: 1, speed: 30,
       abilityScores: { STR: 11, DEX: 12, CON: 10, INT: 10, WIS: 11, CHA: 10 }
     },
     guard: {
-      hp: 11, ac: 16, attackBonus: 3, damageDice: "1d6+1", initiativeMod: 1, speed: 30,
+      hp: 11, ac: 16, attackBonus: 3, damageDice: "1d6+1", damageType: "piercing", initiativeMod: 1, speed: 30,
       abilityScores: { STR: 13, DEX: 12, CON: 12, INT: 10, WIS: 11, CHA: 10 }
     },
     // The SRD Priest also has Channel Divinity/Spiritual Weapon-style spellcasting -- not
     // modeled here, same "melee stat line only" simplification noted where STAT_BLOCKS is
     // introduced above; only its Mace attack is represented.
     priest: {
-      hp: 27, ac: 13, attackBonus: 2, damageDice: "1d6", initiativeMod: 0, speed: 30,
+      hp: 27, ac: 13, attackBonus: 2, damageDice: "1d6", damageType: "bludgeoning", initiativeMod: 0, speed: 30,
       abilityScores: { STR: 10, DEX: 10, CON: 12, INT: 13, WIS: 16, CHA: 13 }
     }
   };
@@ -336,6 +355,10 @@
         abilityScores: { ...stats.abilityScores }
       };
       if (stats.attacks) token.attacks = stats.attacks;
+      if (stats.damageType) token.damageType = stats.damageType;
+      if (stats.damageResistances) token.damageResistances = [...stats.damageResistances];
+      if (stats.damageVulnerabilities) token.damageVulnerabilities = [...stats.damageVulnerabilities];
+      if (stats.damageImmunities) token.damageImmunities = [...stats.damageImmunities];
       if (stats.regeneration) token.regeneration = { ...stats.regeneration };
       if (stats.rechargeAbilities) {
         token.rechargeAbilities = Object.fromEntries(
@@ -374,6 +397,15 @@
       sourcePath: draft.sourcePath || ""
     };
     if (Array.isArray(draft.attacks) && draft.attacks.length > 1) token.attacks = draft.attacks;
+    if (typeof draft.damageType === "string" && draft.damageType.trim()) {
+      token.damageType = draft.damageType.trim().toLowerCase();
+    }
+    const damageResistances = normalizeDamageTypeList(draft.damageResistances);
+    if (damageResistances) token.damageResistances = damageResistances;
+    const damageVulnerabilities = normalizeDamageTypeList(draft.damageVulnerabilities);
+    if (damageVulnerabilities) token.damageVulnerabilities = damageVulnerabilities;
+    const damageImmunities = normalizeDamageTypeList(draft.damageImmunities);
+    if (damageImmunities) token.damageImmunities = damageImmunities;
     const abilityScores = normalizeAbilityScores(draft.abilityScores);
     if (abilityScores) token.abilityScores = abilityScores;
     const savingThrows = normalizeSavingThrows(draft.savingThrows);
@@ -578,6 +610,19 @@
       any = true;
     });
     return any ? resources : undefined;
+  }
+
+  // A token's damageResistances/damageVulnerabilities/damageImmunities: a plain array of
+  // lowercase type strings (not a sparse map like resources/hitDice, since there's no
+  // per-entry {max,current} to track -- a type is either listed or it isn't). Accepts either
+  // a real array or a comma-separated string (the token sheet's own text-input shape), so the
+  // UI can submit either without its own pre-parsing. Deduplicated case-insensitively; empty/
+  // blank entries dropped.
+  function normalizeDamageTypeList(raw) {
+    if (!raw) return undefined;
+    const list = Array.isArray(raw) ? raw : String(raw).split(",");
+    const cleaned = [...new Set(list.map((entry) => String(entry || "").trim().toLowerCase()).filter(Boolean))];
+    return cleaned.length ? cleaned : undefined;
   }
 
   // A token's Hit Dice, sparse by die type (e.g. "d12", "d10") rather than a single
@@ -853,7 +898,7 @@
           const result = resolveOneAttack(caster, target, bonus, options.damageDice, mode, spellName, forceCrit);
           messages.push(result.message);
           if (result.damageTotal > 0) {
-            const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical });
+            const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical, damageType: options.damageType });
             nextState = damageResult.state;
             if (damageResult.message) messages.push(damageResult.message);
           }
@@ -877,7 +922,9 @@
   // here from the roll itself, not chosen by Claude after the fact, the same reasoning
   // applyDamage() already uses to resolve a concentration check synchronously with no round
   // trip. `options`: { spellName, level, targetIds: [...], saveAbility, saveDC, damageDice,
-  // halfOnSave (default true), concentration }. Damage is rolled ONCE for the whole area
+  // damageType (optional -- feeds applyDamage's resistance/vulnerability/immunity check per
+  // target, same as attack()/castSpell()), halfOnSave (default true), concentration }.
+  // Damage is rolled ONCE for the whole area
   // (RAW: one damage roll applies to everyone caught in it, not a separate roll per target)
   // and applied per target via applyDamage, so each target's own concentration/death-save
   // bookkeeping still resolves individually -- same as attack()'s Multiattack loop resolving
@@ -934,7 +981,7 @@
 
       const amount = saveResult.success ? (halfOnSave ? Math.floor(damage.total / 2) : 0) : damage.total;
       if (amount > 0) {
-        const damageResult = applyDamage(nextState, target.id, amount);
+        const damageResult = applyDamage(nextState, target.id, amount, { damageType: options.damageType });
         nextState = damageResult.state;
         messages.push(`${target.name} takes ${amount} damage (${damage.notation}).${damageResult.message ? ` ${damageResult.message}` : ""}`);
       } else {
@@ -1213,16 +1260,54 @@
   // combined message/log line, so the caller folds `message` into that rather than getting a
   // second, separately-logged entry for free. See attack(), castSpell(), dmBridge.js's
   // apply_damage case, and the HP panel's Damage button.
+  //
+  // Resistance/vulnerability/immunity, when options.damageType is given and matches (case-
+  // insensitively) one of the token's own damageImmunities/damageResistances/
+  // damageVulnerabilities: immunity zeroes the damage outright, resistance halves it (rounded
+  // down), vulnerability doubles it. A token listed as BOTH resistant and vulnerable to the
+  // exact same type (a contradiction under normal RAW, but not one this engine enforces at
+  // entry) cancels out to the raw amount, the commonly accepted ruling for that edge case --
+  // matched before either single-direction check so it can't fall through to one of them by
+  // list-ordering accident. No damageType given (every existing call site before this feature,
+  // and still the deliberate choice for the HP panel's manual Damage button and a flat
+  // DM-narrated amount with no stated type) skips this entirely -- full amount applies, exactly
+  // today's behavior, so nothing is affected without opting in.
+  function damageTypeModifier(token, damageType) {
+    if (!damageType) return null;
+    const type = String(damageType).trim().toLowerCase();
+    if (!type) return null;
+    const listHas = (list) => Array.isArray(list) && list.some((entry) => String(entry).toLowerCase() === type);
+    if (listHas(token.damageImmunities)) return "immune";
+    const resistant = listHas(token.damageResistances);
+    const vulnerable = listHas(token.damageVulnerabilities);
+    if (resistant && vulnerable) return null;
+    if (resistant) return "resistant";
+    if (vulnerable) return "vulnerable";
+    return null;
+  }
+
   function applyDamage(state, tokenId, amount, options = {}) {
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
     if (!token) return { state: nextState, message: null };
 
-    const wasAboveZero = token.hp > 0;
-    token.hp = clampNumber(token.hp - amount, 0, token.maxHp);
-    if (amount <= 0) return { state: nextState, message: null };
+    const modifier = damageTypeModifier(token, options.damageType);
+    const adjustedAmount = modifier === "immune" ? 0
+      : modifier === "resistant" ? Math.floor(amount / 2)
+      : modifier === "vulnerable" ? amount * 2
+      : amount;
+    const modifierNote = modifier && amount > 0
+      ? modifier === "immune" ? `${token.name} is immune to ${options.damageType} -- no damage taken.`
+        : modifier === "resistant" ? `${token.name} resists ${options.damageType} -- damage reduced to ${adjustedAmount}.`
+        : `${token.name} is vulnerable to ${options.damageType} -- damage increased to ${adjustedAmount}.`
+      : null;
 
-    const messages = [];
+    const wasAboveZero = token.hp > 0;
+    token.hp = clampNumber(token.hp - adjustedAmount, 0, token.maxHp);
+    if (adjustedAmount <= 0) return { state: nextState, message: modifierNote };
+
+    const amountTaken = adjustedAmount;
+    const messages = modifierNote ? [modifierNote] : [];
 
     if (wasAboveZero && token.hp === 0) {
       if (token.concentratingOn) {
@@ -1236,7 +1321,7 @@
     } else if (wasAboveZero) {
       if (token.concentratingOn) {
         const spellName = token.concentratingOn.spell;
-        const dc = Math.max(10, Math.floor(amount / 2));
+        const dc = Math.max(10, Math.floor(amountTaken / 2));
         const bonus = savingThrowBonus(token, "CON");
         const roll = rollDie(20);
         const total = roll + bonus;
@@ -1414,6 +1499,34 @@
 
     if (typeof changes.damageDice === "string") {
       token.damageDice = changes.damageDice.trim() || token.damageDice || "1d4";
+    }
+
+    // The token's own single/primary attack damage type -- Multiattack sub-profiles
+    // (token.attacks[].damageType) aren't editable here, same as attackBonus/damageDice above
+    // only ever reflect the primary attack, not each Multiattack row.
+    if (typeof changes.damageType === "string") {
+      const trimmed = changes.damageType.trim().toLowerCase();
+      if (trimmed) token.damageType = trimmed;
+      else delete token.damageType;
+    }
+
+    // Whole-list replace, not a per-key merge like resources/hitDice -- there's no per-entry
+    // {max,current} to preserve, just a flat set of type names, so the token sheet's comma-
+    // separated text field can always submit its full current list.
+    if (changes.damageResistances !== undefined) {
+      const normalized = normalizeDamageTypeList(changes.damageResistances);
+      if (normalized) token.damageResistances = normalized;
+      else delete token.damageResistances;
+    }
+    if (changes.damageVulnerabilities !== undefined) {
+      const normalized = normalizeDamageTypeList(changes.damageVulnerabilities);
+      if (normalized) token.damageVulnerabilities = normalized;
+      else delete token.damageVulnerabilities;
+    }
+    if (changes.damageImmunities !== undefined) {
+      const normalized = normalizeDamageTypeList(changes.damageImmunities);
+      if (normalized) token.damageImmunities = normalized;
+      else delete token.damageImmunities;
     }
 
     if (changes.speed !== undefined) {
@@ -1742,7 +1855,7 @@
     const mode = hasDisadvantage && hasAdvantage ? null : hasDisadvantage ? "disadvantage" : hasAdvantage ? "advantage" : null;
     const profiles = Array.isArray(attacker.attacks) && attacker.attacks.length
       ? attacker.attacks
-      : [{ name: null, attackBonus: attacker.attackBonus, damageDice: attacker.damageDice }];
+      : [{ name: null, attackBonus: attacker.attackBonus, damageDice: attacker.damageDice, damageType: attacker.damageType }];
     const useLabel = profiles.length > 1;
 
     const messages = [];
@@ -1754,7 +1867,7 @@
       const result = resolveOneAttack(attacker, liveTarget, profile.attackBonus, profile.damageDice, mode, useLabel ? profile.name : null, forceCrit);
       messages.push(result.message);
       if (result.damageTotal > 0) {
-        const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical });
+        const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical, damageType: profile.damageType });
         nextState = damageResult.state;
         if (damageResult.message) messages.push(damageResult.message);
       }
@@ -1866,9 +1979,10 @@
 
       // RAW: some creatures (Troll's Regeneration) heal automatically at the start of their
       // own turn -- damage-type exceptions ("unless it took acid or fire damage since its
-      // last turn") aren't modeled, since damage types aren't tracked anywhere in this
-      // engine; skip issuing the heal by hand (via updateToken/the HP panel) when that
-      // matters narratively.
+      // last turn") still aren't modeled even now that damage types are tracked elsewhere
+      // (see damageTypeModifier): that needs a per-turn history of what type of damage a
+      // token took, which nothing here keeps; skip issuing the heal by hand (via
+      // updateToken/the HP panel) when that matters narratively.
       if (activeToken.regeneration && activeToken.hp > 0 && activeToken.hp < activeToken.maxHp) {
         const healed = Math.min(activeToken.regeneration.amount, activeToken.maxHp - activeToken.hp);
         activeToken.hp += healed;
@@ -2181,6 +2295,8 @@
     castSpell,
     conditionList,
     createState,
+    DAMAGE_TYPE_LIST,
+    damageTypeModifier,
     dropConcentration,
     currentGrid,
     effectiveSpeed,

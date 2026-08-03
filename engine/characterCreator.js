@@ -117,7 +117,10 @@
     return {
       weaponName: attackDraft?.weaponName || "Weapon",
       toHit: prof + mod,
-      damageDice: mod === 0 ? diceSize : `${diceSize}${formatModifier(mod)}`
+      damageDice: mod === 0 ? diceSize : `${diceSize}${formatModifier(mod)}`,
+      // Defaults to bludgeoning (an unarmed strike's real RAW type) rather than an arbitrary
+      // martial-weapon guess when the form draft doesn't specify one.
+      damageType: attackDraft?.damageType || "bludgeoning"
     };
   }
 
@@ -227,7 +230,7 @@
       "### Attacks",
       "| Weapon | To Hit | Damage |",
       "|---|---|---|",
-      `| ${c.attack.weaponName} | ${formatModifier(c.attack.toHit)} | ${c.attack.damageDice} |`,
+      `| ${c.attack.weaponName} | ${formatModifier(c.attack.toHit)} | ${c.attack.damageDice} ${c.attack.damageType} |`,
       "",
       "## Proficiencies & Skills",
       `- **Saving throws:** ${savingThrowsText}`,

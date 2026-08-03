@@ -161,6 +161,7 @@ test("tokenDraftFromItem reads HP/AC from flat fields and attack/damage from the
   assert.equal(draft.ac, 17);
   assert.equal(draft.attackBonus, 10, "should read the leftmost damage column's matching To Hit value, not the generic default of 3");
   assert.equal(draft.damageDice, "1d8+5", "should pick the leftmost (non-raging) Damage column, not the raging one");
+  assert.equal(draft.damageType, "slashing");
   assert.equal(draft.attacks, undefined, "a characters/ sheet's multi-row table lists weapon options, not a Multiattack -- only the first row should apply");
 });
 
@@ -187,6 +188,8 @@ test("tokenDraftFromItem folds every row of an npcs/ sheet's Attacks table into 
   assert.equal(draft.attacks.length, 3);
   assert.deepEqual(draft.attacks.map((a) => a.name), ["Claw", "Claw", "Sting"]);
   assert.equal(draft.attacks[2].damageDice, "2d8+4", "the poison clause should be stripped the same way a conditional bonus is");
+  assert.deepEqual(draft.attacks.map((a) => a.damageType), ["slashing", "slashing", "piercing"],
+    "the Sting row's own weapon type (piercing) should win over the poison rider mentioned later in its cell");
 });
 
 test("tokenDraftFromItem does not add a Multiattack array for an npcs/ sheet with only one attack row", () => {
@@ -206,6 +209,7 @@ test("tokenDraftFromItem strips a conditional bonus clause out of a damage cell"
   const draft = CampaignOSCampaign.tokenDraftFromItem({ title: "Mara Fenn", path: "characters/Mara Fenn.md", text: sheet });
   assert.equal(draft.attackBonus, 12);
   assert.equal(draft.damageDice, "1d8+5", "the conditional +1d6 clause should not leak into the base damage notation");
+  assert.equal(draft.damageType, "piercing");
 });
 
 test("tokenDraftFromItem reads Speed from the sheet's flat field, defaulting to 30 ft", () => {
@@ -223,6 +227,7 @@ test("tokenDraftFromItem falls back to generic defaults when there is no Attacks
 
   assert.equal(draft.attackBonus, 3);
   assert.equal(draft.damageDice, "1d6+1");
+  assert.equal(draft.damageType, null, "no Attacks table means no stated damage type either");
   assert.equal(draft.hp, 12, "HP should fall back to the generic default when the field has no digits");
 });
 

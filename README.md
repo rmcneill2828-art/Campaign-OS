@@ -40,19 +40,35 @@ dependencies to install for the app itself. See Tests, below, for running the te
   the Claude DM bridge's `advantage`/`disadvantage` action flags), and automatic Multiattack
   for monsters that have one (a troll's Bite + two Claws resolve as one attack action,
   each roll shown individually). Troll's Regeneration now heals it automatically at the
-  start of its own turn (see Start-of-turn recharge/regeneration below). A hell hound's Bite
-  is RAW two damage types in one hit (piercing plus fire) -- since damage types aren't
-  modeled anywhere in this engine, its single damageDice is a combined roll approximating
-  the same average total; its recharge-based Fire Breath now has a real path too: it
-  recharges automatically (see below), and the actual 15 ft cone/6d6-fire-half-on-DEX-save
-  effect is resolved via `cast_area_spell` once you decide which tokens are caught in it (this
-  engine has no cone/blast geometry of its own to figure that out for you). A few of the
-  newer monsters have similar riders left to the DM's hand for the same reason damage types
-  aren't modeled: a Ghoul's Claws can paralyze, a Giant Spider's Bite can
-  poison (and, like the hell hound, combines two damage types into one approximated roll), a
-  Zombie's Undead Fortitude can keep it up at 1 HP, and a Skeleton's vulnerability to
-  bludgeoning damage isn't modeled -- none of these have a per-attack-rider or damage-type
-  mechanic to hook into yet.
+  start of its own turn (see Start-of-turn recharge/regeneration below). Damage types are now
+  tracked (see below) and every SRD monster's attacks carry their real weapon type, with one
+  documented exception: a hell hound's Bite is RAW two damage types in one hit (piercing plus
+  fire) rolled as a single combined damageDice notation approximating the same average total,
+  so tagging the roll with either type alone would misrepresent it for a creature
+  resistant/immune to only one of the two -- it's deliberately left untyped, same as a Giant
+  Spider's similarly-blended piercing-plus-poison Bite. The hell hound's recharge-based Fire
+  Breath has a real path end to end: it recharges automatically (see below), and the actual
+  15 ft cone/6d6-fire-half-on-DEX-save effect is resolved via `cast_area_spell` (with
+  `damageType: fire`) once you decide which tokens are caught in it (this engine has no
+  cone/blast geometry of its own to figure that out for you). A few riders still aren't
+  automated, for reasons unrelated to damage type: a Ghoul's Claws can paralyze, a Giant
+  Spider's Bite can poison, and a Zombie's Undead Fortitude can keep it up at 1 HP -- none of
+  these have a per-attack-rider mechanic to hook into yet, so apply them by hand.
+- Damage types and resistance/vulnerability/immunity: any token can carry a list of damage
+  types it resists, is vulnerable to, or is immune to (editable on the token sheet as
+  comma-separated text, e.g. "fire, cold" -- matched case-insensitively). An attack's damage
+  type comes from its own weapon/spell automatically where known (every SRD monster's stat
+  block, an imported character sheet's Attacks table when the Damage cell states one, e.g.
+  "1d8+3 slashing", or the Character Creator's new Damage type field); apply_damage/cast_spell/
+  cast_area_spell can also set one explicitly (the Claude DM bridge does this when a source has
+  a real, single, well-defined type). Immunity zeroes the damage outright, resistance halves it
+  (rounded down), vulnerability doubles it -- a token listed as both resistant and vulnerable
+  to the exact same type cancels out to the raw amount. The adjustment (and the reasoning
+  behind it, e.g. "Skeleton 1 is vulnerable to bludgeoning -- damage increased to 12.") is
+  folded into the same combined message every other damage source already produces, so there's
+  nothing extra to read. Damage with no stated type (a flat DM-narrated amount, the HP panel's
+  manual Damage button) always applies in full, ignoring resistances entirely, same as before
+  this existed.
 - Turn tracker: a "Next Turn" control in the Initiative panel steps through the current
   map's initiative order, shows the round number and whose turn it is, and resets that
   token's movement budget. Speed limits only apply to whichever token the tracker currently
@@ -325,7 +341,13 @@ The "Claude DM" panel works two ways:
   Burning Hands), it resolves the whole thing in one action -- one damage roll for the area,
   one save per target, full damage on a failure or half (rounded down, or none at all if
   `halfOnSave: false`) on a success -- computed inside the engine itself, so Claude never needs
-  to see an intermediate roll before deciding the outcome.
+  to see an intermediate roll before deciding the outcome. `apply_damage`, `cast_spell`, and
+  `cast_area_spell` all accept an optional `damageType` -- Claude sets it when a damage source
+  has one real, well-defined type (a fireball is fire, a mace is bludgeoning), and the engine
+  applies the target's resistance/vulnerability/immunity automatically and reports the
+  adjustment in the result message; `attack`'s own damage type is read off the attacker's stat
+  block automatically, not something Claude ever sets. Each token's line in the state Claude
+  sees lists its resistances/vulnerabilities/immunities when it has any.
   `use_resource` spends a charge of a named resource shown in that token's own list and fails
   outright if none are left or the name doesn't match one it actually has -- like the other
   compose-only actions above, it never bundles the resource's actual effect (an attack,

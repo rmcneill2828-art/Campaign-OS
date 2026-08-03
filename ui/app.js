@@ -96,6 +96,7 @@
   const ccWeaponName = document.querySelector("#ccWeaponName");
   const ccWeaponDice = document.querySelector("#ccWeaponDice");
   const ccWeaponAbility = document.querySelector("#ccWeaponAbility");
+  const ccWeaponDamageType = document.querySelector("#ccWeaponDamageType");
   const ccSkillList = document.querySelector("#ccSkillList");
   const ccLanguages = document.querySelector("#ccLanguages");
   const ccTools = document.querySelector("#ccTools");
@@ -248,7 +249,7 @@
       equipment: ccEquipment.value,
       personality: { traits: ccTraits.value, ideals: ccIdeals.value, bonds: ccBonds.value, flaws: ccFlaws.value },
       backstory: ccBackstory.value,
-      attack: { weaponName: ccWeaponName.value, diceSize: ccWeaponDice.value, ability: ccWeaponAbility.value }
+      attack: { weaponName: ccWeaponName.value, diceSize: ccWeaponDice.value, ability: ccWeaponAbility.value, damageType: ccWeaponDamageType.value }
     };
   }
 
@@ -760,6 +761,15 @@
             Damage
             <input name="damageDice" type="text" value="${escapeAttribute(token.damageDice || "1d4")}">
           </label>
+          <label title="This token's single/primary attack only -- a Multiattack profile's per-sub-attack type (set at spawn/import) isn't editable here.">
+            Type
+            <select name="damageType">
+              <option value="">—</option>
+              ${window.CampaignOS.DAMAGE_TYPE_LIST.map((type) =>
+                `<option value="${type}" ${token.damageType === type ? "selected" : ""}>${type[0].toUpperCase()}${type.slice(1)}</option>`
+              ).join("")}
+            </select>
+          </label>
           <label title="RAW Extra Attack -- lets attack() be called this many extra times in one action before it's spent, for a Fighter/Barbarian-style attacker.">
             Extra Attacks
             <input name="extraAttacks" type="number" min="0" max="10" value="${token.extraAttacks || 0}">
@@ -787,6 +797,18 @@
           <label>INT<input name="int" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.INT ?? ""}"></label>
           <label>WIS<input name="wis" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.WIS ?? ""}"></label>
           <label>CHA<input name="cha" type="number" min="1" max="30" placeholder="—" value="${token.abilityScores?.CHA ?? ""}"></label>
+        </div>
+        <p class="subheading" title="Comma-separated damage type names (e.g. 'fire, cold') -- matched case-insensitively against an attack/spell/apply_damage's own damageType, when given.">Damage Resistances / Vulnerabilities / Immunities</p>
+        <div class="cc-grid">
+          <label>Resistant to
+            <input name="damageResistances" type="text" placeholder="e.g. fire, cold" value="${escapeAttribute((token.damageResistances || []).join(", "))}">
+          </label>
+          <label>Vulnerable to
+            <input name="damageVulnerabilities" type="text" placeholder="e.g. bludgeoning" value="${escapeAttribute((token.damageVulnerabilities || []).join(", "))}">
+          </label>
+          <label>Immune to
+            <input name="damageImmunities" type="text" placeholder="e.g. poison" value="${escapeAttribute((token.damageImmunities || []).join(", "))}">
+          </label>
         </div>
         <p class="subheading">Spellcasting</p>
         <div class="stat-grid">
@@ -1054,6 +1076,10 @@
         ac: form.get("ac"),
         attackBonus: form.get("attackBonus"),
         damageDice: form.get("damageDice"),
+        damageType: form.get("damageType"),
+        damageResistances: form.get("damageResistances"),
+        damageVulnerabilities: form.get("damageVulnerabilities"),
+        damageImmunities: form.get("damageImmunities"),
         extraAttacks: form.get("extraAttacks"),
         speed: form.get("speed"),
         exhaustion: form.get("exhaustion"),
@@ -2407,6 +2433,9 @@
         spellSlots: token.spellSlots,
         resources: token.resources,
         hitDice: token.hitDice,
+        damageResistances: token.damageResistances,
+        damageVulnerabilities: token.damageVulnerabilities,
+        damageImmunities: token.damageImmunities,
         concentratingOn: token.concentratingOn,
         dying: token.dying,
         dead: token.dead,

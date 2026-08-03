@@ -327,6 +327,60 @@ See README.md for the full feature list and usage. Notes specific to working on 
   this phase's blast radius, since it's a newer, less common action; revisit if that gap causes
   a real problem at the table. Given how many existing behaviors this phase touches, treat it as
   the most likely to need a follow-up adjustment once it's actually exercised in play.
+- Damage types / resistance / vulnerability / immunity: `token.damageResistances`/
+  `damageVulnerabilities`/`damageImmunities` are plain arrays of lowercase type strings (not a
+  sparse map like `resources`/`hitDice` -- there's no per-entry `{max,current}`, a type is
+  either listed or it isn't), normalized by `normalizeDamageTypeList()` from either a real
+  array or the token sheet's own comma-separated text-input shape, deduplicated
+  case-insensitively. `DAMAGE_TYPE_LIST` (the 13 SRD types) is a reference list for UI
+  dropdowns only, **not** a validation gate on the engine side -- `damageTypeModifier(token,
+  damageType)` matches whatever string it's given case-insensitively against those three lists,
+  so a homebrew type typed directly still works, it just won't be pre-listed in a dropdown.
+  Precedence: immunity wins outright (zeroes the damage); a token listed as **both** resistant
+  and vulnerable to the exact same type cancels out to the raw amount (checked before either
+  single-direction branch, not left to fall through by list-ordering accident) -- the commonly
+  accepted ruling for that RAW edge case; otherwise resistance halves (rounded down) or
+  vulnerability doubles. `applyDamage(state, tokenId, amount, options)` gained an optional
+  `options.damageType` -- **its return shape is still exactly `{state, message}`**, unchanged
+  from the concentration/death-save bullet above; the adjustment is computed internally and
+  folded into the same message a modifier-free call already produces (or becomes the *entire*
+  message, e.g. `"Golem is immune to poison -- no damage taken."`, when nothing else about the
+  hit was notable) rather than becoming a second field or a separately-logged entry. Every
+  downstream calculation that used to read the caller's raw `amount` (the HP subtraction, the
+  concentration DC's `half the damage taken`) now reads the post-modifier adjusted amount
+  instead, since that's what actually happened to the token -- re-read `applyDamage()` before
+  adding a new call site that assumes otherwise. A `damageType`-free call (every call site that
+  existed before this feature, and still the deliberate choice for the HP panel's manual
+  Damage button and a flat DM-narrated amount with no stated type) skips the whole check --
+  full amount applies, identical to pre-feature behavior, so nothing changed without opting in.
+  `attack()` reads `damageType` off the attacker's own attack profile automatically (`token.
+  damageType` for a single-attack token, `token.attacks[].damageType` per Multiattack row) --
+  Claude/the DM never sets it for `attack`, only for `apply_damage`/`cast_spell`/
+  `cast_area_spell`, where it has to be told what a narrated/spell source's type actually is.
+  `STAT_BLOCKS` carries a real SRD weapon type per attack for every monster except two
+  deliberately-untyped combined-roll Bites (hell hound: piercing+fire; giant spider:
+  piercing+poison) -- tagging either as a single type would misrepresent it for a creature
+  resistant/immune to only one of the blended two, so both stay untyped on purpose, not as an
+  oversight. Skeleton is the one monster with a real `damageVulnerabilities: ["bludgeoning"]`
+  entry (SRD-documented); no other monster below got resistances/immunities invented for it --
+  only what's already confirmed elsewhere in this file's own comments made it in, to avoid
+  silently mis-modeling a monster's real stat block. `engine/campaign.js`'s
+  `extractAttackRows` reads a real sheet's Damage cell the same way `characterCreator.js`
+  writes one back (`computeAttack`'s generated cell + table row) -- dice notation followed by
+  the type word, e.g. `"1d8+3 slashing"` -- via a plain word-list regex matched against the
+  whole cell, not just text after the dice, so a rider mentioned later in the same cell (a
+  Sting's `"2d8+4 piercing plus 5d6 poison"`) still resolves to the weapon's own type
+  (piercing), not the rider's. `dm-bridge/watch.js` duplicates `DAMAGE_TYPE_LIST` under its own
+  name (same MONSTER_LIST/CONDITION_LIST/SKILL_LIST convention -- no bundler between the Node
+  script and the browser engine) and validates an incoming `damageType` against it in
+  `isValidAction`; `buildPrompt()`'s per-token line surfaces `resist:`/`vulnerable:`/`immune:`
+  segments the same way it already surfaces conditions/exhaustion/etc. The live-session channel
+  (`buildBridgeStateSnapshot()` in `ui/app.js`) sends the same three fields per token in
+  `live-state.json` for the same reason. The token sheet editor's `damageType` select only
+  edits the token's own single/primary attack (like `attackBonus`/`damageDice` already do) --
+  a Multiattack profile's per-row type isn't editable there, same limitation as those two
+  fields; the three list fields are plain comma-separated text inputs submitted as strings,
+  which `normalizeDamageTypeList` accepts directly (no pre-parsing needed in `ui/app.js`).
 - Live-session control contract: if you (a live Claude Code session working in this repo, not
   the `dm-bridge/watch.js` subprocess) are asked to control the board directly, this is the
   channel -- no `claude -p` call, no editing `watch.js`.

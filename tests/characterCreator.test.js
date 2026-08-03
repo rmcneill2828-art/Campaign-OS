@@ -61,7 +61,19 @@ test("computeCharacter derives AC, saves, skills, and attack from a level-1 Figh
   assert.equal(character.passivePerception, 13); // 10 + WIS(+1) + prof(2), proficient
   assert.equal(character.attack.toHit, 5); // STR +3 mod + 2 prof
   assert.equal(character.attack.damageDice, "1d8+3");
+  assert.equal(character.attack.damageType, "bludgeoning"); // no damageType in the draft -> default
   assert.equal(character.spellcasting, null);
+});
+
+test("computeCharacter respects an explicit weapon damageType from the draft", () => {
+  const character = Creator.computeCharacter({
+    name: "Test Fighter", className: "Fighter", level: 1,
+    abilityScores: { STR: 16, DEX: 14, CON: 14, INT: 10, WIS: 12, CHA: 8 },
+    attack: { weaponName: "Longsword", diceSize: "1d8", ability: "STR", damageType: "slashing" }
+  });
+  assert.equal(character.attack.damageType, "slashing");
+  const markdown = Creator.characterMarkdown(character);
+  assert.match(markdown, /\| Longsword \| \+5 \| 1d8\+3 slashing \|/);
 });
 
 test("computeCharacter respects an explicit AC override instead of the default formula", () => {
@@ -102,7 +114,7 @@ test("characterMarkdown renders the ability score table, attacks table, and N/A 
   assert.match(markdown, /\*\*Class & Level:\*\* Barbarian 2/);
   assert.match(markdown, /\| 17 \(\+3\) \| 13 \(\+1\) \| 16 \(\+3\) \| 8 \(-1\) \| 10 \(\+0\) \| 8 \(-1\) \|/);
   assert.match(markdown, /### Attacks/);
-  assert.match(markdown, /\| Greataxe \| \+5 \| 1d12\+3 \|/);
+  assert.match(markdown, /\| Greataxe \| \+5 \| 1d12\+3 bludgeoning \|/);
   assert.match(markdown, /Spellcasting ability: N\/A/);
   assert.match(markdown, /Spell save DC \/ attack bonus: N\/A/);
   assert.match(markdown, /Left the mountain to see the world\./);

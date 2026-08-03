@@ -291,6 +291,7 @@
       ac: readNumber(fields.ac || fields["armor class"], 12),
       attackBonus: attack?.attackBonus ?? readNumber(fields.attack || fields["attack bonus"], 3),
       damageDice: attack?.damageDice || fields.damage || fields["damage dice"] || "1d6+1",
+      damageType: attack?.damageType || null,
       speed: readNumber(fields.speed, 30),
       initiative: rollDie(20) + initiativeBonus,
       conditions: [],
@@ -306,7 +307,8 @@
       draft.attacks = attackRows.map((row) => ({
         name: row.name,
         attackBonus: row.attackBonus ?? draft.attackBonus,
-        damageDice: row.damageDice || draft.damageDice
+        damageDice: row.damageDice || draft.damageDice,
+        damageType: row.damageType || draft.damageType || undefined
       }));
     }
 
@@ -527,11 +529,18 @@
     while (rowIndex < lines.length && isTableRow(lines[rowIndex])) {
       const cells = splitTableRow(lines[rowIndex]);
       const attackBonus = readNumber(cells[toHitIndex], null);
-      const damageMatch = (cells[damageIndex] || "").match(/\d*d\d+(?:\s*[+-]\s*\d+)?/i);
+      const damageCell = cells[damageIndex] || "";
+      const damageMatch = damageCell.match(/\d*d\d+(?:\s*[+-]\s*\d+)?/i);
       const damageDice = damageMatch ? damageMatch[0].replace(/\s+/g, "") : null;
+      // A real sheet's Damage cell is written the same way this app's own Character Creator
+      // generates one (see characterCreator.js's computeAttack) -- dice notation followed by
+      // the damage type word, e.g. "1d8+3 slashing". Matched against the whole cell, not just
+      // after the dice, so type order/spacing quirks in hand-written sheets don't matter.
+      const typeMatch = damageCell.match(/\b(acid|bludgeoning|cold|fire|force|lightning|necrotic|piercing|poison|psychic|radiant|slashing|thunder)\b/i);
+      const damageType = typeMatch ? typeMatch[0].toLowerCase() : null;
       if (attackBonus !== null || damageDice) {
         const name = (cells[0] || "").replace(/\*+/g, "").trim() || null;
-        rows.push({ name, attackBonus, damageDice });
+        rows.push({ name, attackBonus, damageDice, damageType });
       }
       rowIndex += 1;
     }

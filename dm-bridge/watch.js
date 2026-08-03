@@ -47,6 +47,13 @@ const SKILL_LIST = [
   "Insight", "Intimidation", "Investigation", "Medicine", "Nature", "Perception",
   "Performance", "Persuasion", "Religion", "Sleight of Hand", "Stealth", "Survival"
 ];
+// The 13 SRD damage types -- duplicated from engine/encounter.js's own DAMAGE_TYPE_LIST,
+// same convention as MONSTER_LIST/CONDITION_LIST/SKILL_LIST being duplicated between this
+// Node script and the browser-side engine file (no bundler/shared-module mechanism here).
+const DAMAGE_TYPE_LIST = [
+  "acid", "bludgeoning", "cold", "fire", "force", "lightning", "necrotic",
+  "piercing", "poison", "psychic", "radiant", "slashing", "thunder"
+];
 
 const SYSTEM_PROMPT = [
   "You are the DM assistant for a D&D 5e virtual tabletop called Campaign OS.",
@@ -60,7 +67,7 @@ const SYSTEM_PROMPT = [
   "Each action is one of:",
   `{"type": "spawn_monster", "monster": "${MONSTER_LIST.join("|")}", "count": <integer>}`,
   '{"type": "attack", "attacker": "<exact token name>", "target": "<exact token name>", "advantage": <optional true>, "disadvantage": <optional true>, "actionType": "<optional \'action\' (default) or \'bonusAction\'>"}',
-  '{"type": "apply_damage", "target": "<exact token name>", "amount": <integer>}',
+  `{"type": "apply_damage", "target": "<exact token name>", "amount": <integer>, "damageType": "<optional ${DAMAGE_TYPE_LIST.join("|")}>"}`,
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',
   `{"type": "toggle_condition", "target": "<exact token name>", "condition": "${CONDITION_LIST.join("|")}"}`,
   '{"type": "move_token", "target": "<exact token name>", "x": <integer>, "y": <integer>}',
@@ -68,8 +75,8 @@ const SYSTEM_PROMPT = [
   '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
   '{"type": "saving_throw", "target": "<exact token name>", "ability": "STR|DEX|CON|INT|WIS|CHA", "dc": <integer>}',
   `{"type": "ability_check", "target": "<exact token name>", "skill": "${SKILL_LIST.join("|")}|STR|DEX|CON|INT|WIS|CHA", "dc": <integer>}`,
-  '{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "concentration": <optional true, only for a spell that requires concentration>, "advantage": <optional true>, "disadvantage": <optional true>, "actionType": "<optional \'action\' (default) or \'bonusAction\', only enforced for a leveled spell>"}',
-  '{"type": "cast_area_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <1-9, area spells are never cantrips>, "targets": ["<exact token name>", "..."], "saveAbility": "STR|DEX|CON|INT|WIS|CHA", "saveDC": <integer>, "damageDice": "<dice like 8d6>", "halfOnSave": <optional false to negate entirely on a success instead of half -- defaults to true>, "concentration": <optional true>}',
+  `{"type": "cast_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <0 for a cantrip, else 1-9>, "target": "<optional exact token name>", "damageDice": "<optional dice like 4d6>", "damageType": "<optional ${DAMAGE_TYPE_LIST.join("|")}>", "concentration": <optional true, only for a spell that requires concentration>, "advantage": <optional true>, "disadvantage": <optional true>, "actionType": "<optional 'action' (default) or 'bonusAction', only enforced for a leveled spell>"}`,
+  `{"type": "cast_area_spell", "caster": "<exact token name>", "spell": "<spell name>", "level": <1-9, area spells are never cantrips>, "targets": ["<exact token name>", "..."], "saveAbility": "STR|DEX|CON|INT|WIS|CHA", "saveDC": <integer>, "damageDice": "<dice like 8d6>", "damageType": "<optional ${DAMAGE_TYPE_LIST.join("|")}>", "halfOnSave": <optional false to negate entirely on a success instead of half -- defaults to true>, "concentration": <optional true>}`,
   '{"type": "use_resource", "target": "<exact token name>", "resource": "<exact resource name from that token\'s list below>", "amount": <optional integer, default 1>}',
   '{"type": "spend_hit_die", "target": "<exact token name>", "die": "<exact Hit Dice type from that token\'s list below, e.g. d10>", "count": <optional integer, default 1>}',
   '{"type": "drop_concentration", "target": "<exact token name>"}',
@@ -95,6 +102,17 @@ const SYSTEM_PROMPT = [
   "omit both flags instead. A single attack action already resolves a monster's full",
   "Multiattack (e.g. a troll's Bite + two Claws) automatically -- issue one attack action per turn,",
   "not one per individual attack in its stat block.",
+  "",
+  "Damage types now carry real mechanical weight. attack's damage type comes from the attacker's",
+  "own weapon/stat block automatically -- you don't set it. For apply_damage/cast_spell/",
+  "cast_area_spell, set damageType when the source has a real, single, well-defined type (a",
+  "fireball is fire, a mace is bludgeoning) so the engine can apply the target's resistance/",
+  "vulnerability/immunity automatically -- each token's line below shows these when it has any",
+  "(e.g. \"resist: fire\", \"vulnerable: bludgeoning\", \"immune: poison\"). Omit damageType entirely",
+  "for a flat/narrative amount with no real single type, or one already blended across types in",
+  "the source data (some monster bites approximate two damage types in one roll -- you'll see no",
+  "damage type mentioned for those, on purpose). The engine applies the adjustment and reports it",
+  "in the result message -- you don't compute the halved/doubled/zeroed amount yourself.",
   "",
   "attack and cast_spell (leveled spells only -- cantrips are exempt) now enforce a basic",
   "action economy, but ONLY once a token's own turn is actually running (next_turn has been",
@@ -312,6 +330,8 @@ function isValidAction(action) {
         && (action.disadvantage === undefined || typeof action.disadvantage === "boolean")
         && (action.actionType === undefined || action.actionType === "action" || action.actionType === "bonusAction");
     case "apply_damage":
+      return typeof action.target === "string" && Number.isFinite(action.amount)
+        && (action.damageType === undefined || DAMAGE_TYPE_LIST.includes(String(action.damageType).toLowerCase()));
     case "apply_healing":
       return typeof action.target === "string" && Number.isFinite(action.amount);
     case "toggle_condition":
@@ -331,6 +351,7 @@ function isValidAction(action) {
         && Number.isFinite(action.level) && action.level >= 0 && action.level <= 9
         && (action.target === undefined || typeof action.target === "string")
         && (action.damageDice === undefined || typeof action.damageDice === "string")
+        && (action.damageType === undefined || DAMAGE_TYPE_LIST.includes(String(action.damageType).toLowerCase()))
         && (action.concentration === undefined || typeof action.concentration === "boolean")
         && (action.advantage === undefined || typeof action.advantage === "boolean")
         && (action.disadvantage === undefined || typeof action.disadvantage === "boolean")
@@ -342,6 +363,7 @@ function isValidAction(action) {
         && action.targets.every((name) => typeof name === "string")
         && typeof action.saveAbility === "string" && Number.isFinite(action.saveDC)
         && typeof action.damageDice === "string"
+        && (action.damageType === undefined || DAMAGE_TYPE_LIST.includes(String(action.damageType).toLowerCase()))
         && (action.halfOnSave === undefined || typeof action.halfOnSave === "boolean")
         && (action.concentration === undefined || typeof action.concentration === "boolean");
     case "use_resource":
@@ -450,7 +472,10 @@ function buildPrompt(request) {
       const legendaryActionsText = t.legendaryActions && Number.isFinite(t.legendaryActions.current) && Number.isFinite(t.legendaryActions.max)
         ? `, legendary actions ${t.legendaryActions.current}/${t.legendaryActions.max}`
         : "";
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}${legendaryActionsText}`);
+      const resistText = Array.isArray(t.damageResistances) && t.damageResistances.length ? `, resist: ${t.damageResistances.join(", ")}` : "";
+      const vulnText = Array.isArray(t.damageVulnerabilities) && t.damageVulnerabilities.length ? `, vulnerable: ${t.damageVulnerabilities.join(", ")}` : "";
+      const immuneText = Array.isArray(t.damageImmunities) && t.damageImmunities.length ? `, immune: ${t.damageImmunities.join(", ")}` : "";
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}${legendaryActionsText}${resistText}${vulnText}${immuneText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);
