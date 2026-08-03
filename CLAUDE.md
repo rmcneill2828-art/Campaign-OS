@@ -600,6 +600,32 @@ See README.md for the full feature list and usage. Notes specific to working on 
   convention as exact HP and hidden tokens. **Reset Fog** (`ui/app.js`, next to Clear Walls)
   clears one map's `revealedTiles` via `resetFog()`, behind the same `window.confirm(...)`
   pattern `clearWallsButton`/the token/map library "Clear All" buttons already use.
+- Token image dedup: `ui/imageStore.js`'s `saveImageDeduped(dataUrl)` is **content-addressed**
+  -- the key is `"sha256-" + SHA-256(dataUrl)` (via `crypto.subtle.digest`, confirmed working
+  under a plain `file://` origin, not just `https://`/`localhost` -- verified directly with
+  Playwright before relying on it, not assumed), not a per-call `generateKey()` random ID. Used
+  by `applyLibraryImages` (auto-attach at spawn -- e.g. three goblins matching the same Token
+  Library entry) and `useTokenFolderEntry` (manually attaching the same Tokens Folder file to
+  more than one token) -- both previously gave every token spawned/attached from the same
+  source its own full copy of the same bytes; now they share one IndexedDB record. Falls back
+  to a plain `generateKey()`-based save if `crypto.subtle` is ever unavailable -- dedup is a
+  nice-to-have, never something that should block a token from getting its portrait.
+  **A key from `saveImageDeduped` may be referenced by more than one token, so it must never be
+  passed to `deleteImage()` directly** -- every place a token's image can be replaced or
+  cleared (the token sheet's own file-upload `change` handler, the **Clear Image** button,
+  `useTokenFolderEntry`'s own replace-on-reattach) now calls `ui/app.js`'s
+  `deleteTokenImageIfUnshared(key)` instead, which recognizes and skips any `"sha256-"`-prefixed
+  key, only ever deleting a key guaranteed unique to one caller (the `generateKey()`-based
+  `"token-<timestamp>-<random>"` shape a direct, one-off file upload still uses and is never
+  deduped). If you add a new place a token's image can be replaced/cleared, use this helper,
+  not `CampaignOSImageStore.deleteImage()` -- verified both directions with Playwright: clearing
+  one of three tokens sharing a deduped image leaves the other two resolving correctly and the
+  underlying record still present (not deleted out from under them), while clearing a
+  genuinely unique, non-deduped image still actually removes it from IndexedDB. Map images and
+  a token sheet's own direct file upload are deliberately **not** deduped -- maps are rarely
+  identical to each other, and an ad-hoc upload has no known "source" to dedupe against in the
+  first place; scope stayed on the two auto/library-sourced attach paths the roadmap's "token
+  art dedup" item was actually about.
 - Player window: `player.html` + `ui/playerView.js` sync with the DM's `index.html` tab by
   **polling `localStorage.getItem("campaign-os-encounter-state")` once a second and diffing
   the raw JSON string** against the last-seen value -- not `BroadcastChannel`, not the

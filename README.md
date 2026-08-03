@@ -548,6 +548,9 @@ then on, without re-uploading it per token:
   the art attaches if there's a match.
 - Entries are stored in IndexedDB (not localStorage), since portrait images are exactly the kind
   of content that would otherwise blow past localStorage's origin quota.
+- Spawning several tokens that all match the same library entry (or manually attaching the same
+  Tokens Folder file to more than one token) stores that art once, not once per token -- three
+  goblins sharing a portrait share one saved copy of it, not three.
 
 ## Player window
 
@@ -623,12 +626,9 @@ parses it into a searchable local index. Click a location to make it the active 
 
 ## Possible Next Steps
 
-Nothing here is committed to -- just the open threads worth knowing about:
-
-- Character/token art currently gets copied into the shared image store per-token; several
-  monsters spawned from the same library entry each get their own copy of the same bytes rather
-  than sharing one. Fine at IndexedDB's storage scale, but worth revisiting if it matters.
-- Fog-of-war tiles exist but haven't been exercised as heavily as the rest of the map tooling.
+See `ROADMAP.md` for the actively-maintained list of open threads and planned work -- kept
+there instead of duplicated here, so there's one place tracking what's done and what's next
+rather than two that can drift out of sync with each other.
 
 ## Tests
 

@@ -491,8 +491,13 @@
         // downscales before saving) -- do it here so a full-resolution source file doesn't
         // get copied into the image store as-is.
         const finalImage = fromFolder ? (await resizeImageDataUrl(libraryImage, 512, "image/png")).dataUrl : libraryImage;
-        const key = window.CampaignOSImageStore.generateKey("token");
-        await window.CampaignOSImageStore.saveImage(key, finalImage);
+        // Content-addressed save -- three goblins auto-attaching the same Token Library
+        // portrait share one IndexedDB record instead of each getting a full copy of it (see
+        // ui/imageStore.js's saveImageDeduped). The returned key may end up shared with other
+        // tokens, so it must never be blindly deleteImage()'d later -- see
+        // deleteTokenImageIfUnshared below, used everywhere a token's image can be replaced or
+        // cleared.
+        const key = await window.CampaignOSImageStore.saveImageDeduped(finalImage);
         nextState = window.CampaignOS.updateToken(nextState, token.id, { image: key });
         changed = true;
       }
@@ -520,6 +525,19 @@
     await window.CampaignOSImageStore.saveImage(key, dataUrl);
     state = window.CampaignOS.updateToken(state, tokenId, { image: key });
     saveEncounter();
+  }
+
+  // A token's image key may be a content-addressed "sha256-..." key shared with other tokens
+  // (see applyLibraryImages/useTokenFolderEntry's saveImageDeduped calls) -- deleting a shared
+  // key just because THIS ONE token stopped using it would silently corrupt every other
+  // token still pointing at the same record. Only ever deletes a key guaranteed unique to one
+  // caller (the plain generateKey()-based "token-<timestamp>-<random>" shape a direct file
+  // upload still uses); every place a token's image can be replaced or cleared should call
+  // this instead of CampaignOSImageStore.deleteImage() directly.
+  function deleteTokenImageIfUnshared(key) {
+    if (key && !key.startsWith("data:") && !key.startsWith("sha256-")) {
+      window.CampaignOSImageStore.deleteImage(key).catch(() => {});
+    }
   }
 
   function renderMap() {
@@ -1034,18 +1052,13 @@
       const previousKey = token.image;
       const key = window.CampaignOSImageStore.generateKey("token");
       await window.CampaignOSImageStore.saveImage(key, resized.dataUrl);
-      if (previousKey && !previousKey.startsWith("data:")) {
-        window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
-      }
+      deleteTokenImageIfUnshared(previousKey);
       updateState(window.CampaignOS.updateToken(state, token.id, { image: key }));
     });
     const clearImageButton = tokenSheet.querySelector('[data-action="clear-image"]');
     if (clearImageButton) {
       clearImageButton.addEventListener("click", () => {
-        const previousKey = token.image;
-        if (previousKey && !previousKey.startsWith("data:")) {
-          window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
-        }
+        deleteTokenImageIfUnshared(token.image);
         updateState(window.CampaignOS.updateToken(state, token.id, { image: "" }));
       });
     }
@@ -2685,11 +2698,10 @@
     const raw = await window.CampaignOSFolderAssets.readEntryAsDataUrl(entry);
     const resized = await resizeImageDataUrl(raw, 512, "image/png");
     const previousKey = token.image;
-    const key = window.CampaignOSImageStore.generateKey("token");
-    await window.CampaignOSImageStore.saveImage(key, resized.dataUrl);
-    if (previousKey && !previousKey.startsWith("data:")) {
-      window.CampaignOSImageStore.deleteImage(previousKey).catch(() => {});
-    }
+    // Deduped, same reasoning as applyLibraryImages -- picking the same folder file for two
+    // different tokens (a common manual-attach pattern) shouldn't store it twice either.
+    const key = await window.CampaignOSImageStore.saveImageDeduped(resized.dataUrl);
+    deleteTokenImageIfUnshared(previousKey);
     updateState(window.CampaignOS.updateToken(state, token.id, { image: key }));
     commandResult.textContent = `${entry.name} attached to ${token.name}.`;
   }

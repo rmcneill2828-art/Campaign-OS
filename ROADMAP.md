@@ -281,12 +281,26 @@ Phase 8 complete (resolved by not building it).
 
 ## Phase 9 -- Cleanup (small, no new user-facing capability)
 
-- [ ] **Token art dedup.** Flagged in README's "Possible Next Steps" since before this whole
-  work-plan pass started. Every monster spawned from the same Token Library entry copies the same
-  image bytes into IndexedDB again rather than sharing one record -- fine at IndexedDB's storage
-  scale for a normal session, but worth fixing if it ever actually causes a problem. Lowest
-  priority here on purpose: it's real technical debt, but it doesn't add anything a DM would
-  notice at the table, unlike everything above it.
+- [x] **Token art dedup.** Done 2026-08-03. `ui/imageStore.js`'s new `saveImageDeduped(dataUrl)`
+  is content-addressed -- key = `"sha256-" + SHA-256(dataUrl)` (`crypto.subtle`, confirmed
+  working under plain `file://`, not just `https://`, with a live Playwright check before
+  relying on it) -- so identical bytes always land on the same IndexedDB record no matter how
+  many times/tokens they get saved for. Used by `applyLibraryImages` (auto-attach at spawn) and
+  `useTokenFolderEntry` (manual folder-file attach); three goblins spawned from the same Token
+  Library entry now share one record instead of three. Falls back to a plain random-key save
+  if `crypto.subtle` is ever unavailable. The real design work was on the OTHER end: a shared
+  key can't be blindly deleted just because one token stopped using it (that would corrupt
+  every other token still pointing at it) -- new `deleteTokenImageIfUnshared()` recognizes and
+  skips any `"sha256-"`-prefixed key, now used at all three places a token's image can be
+  replaced/cleared instead of calling `deleteImage()` directly. Deliberately scoped to just the
+  two auto/library-sourced attach paths (what the original README item was actually about) --
+  map images and a token sheet's own ad-hoc file upload stay undeduped, since maps are rarely
+  identical and a one-off upload has no known "source" to dedupe against anyway. Verified both
+  directions with Playwright: clearing one of three tokens sharing a deduped image leaves the
+  other two intact and the record still present; clearing a genuinely unique image still
+  actually deletes it. See CLAUDE.md's new "Token image dedup" bullet for the full writeup.
+
+Phase 9 complete.
 
 ## Phase 10 -- Large, speculative features (needs a scoping conversation before starting)
 
