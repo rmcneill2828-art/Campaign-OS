@@ -19,10 +19,8 @@ conventions, the Windows argv-escaping rule in dm-bridge/watch.js).
   `index.html`, `ui/styles.css` only -- no engine change. Verified with a one-off Playwright
   script (seed state -> export -> reset -> import -> matches; garbage-file import leaves state
   alone) rather than the committed suite, per this repo's existing UI-testing convention.
-- [ ] **Multiple save slots / named encounters.** Once export/import exists, consider whether a
-  single implicit autosave slot is still enough, or whether named local scenes (still
-  localStorage, just multiple keys) are worth it. Decide after using export/import for a while --
-  may turn out unnecessary if export covers the real need.
+- [ ] **Multiple save slots / named encounters.** Moved to Phase 8 (below) as part of the
+  2026-08-03 work-plan pass -- kept here as a pointer so this line's history isn't confusing.
 
 ## Phase 1 -- Core DM tooling (self-contained, no architecture change)
 
@@ -201,10 +199,91 @@ Phase 5 complete (as scoped). Phase 3 (fog of war) and Phase 4 (line of sight) w
 after this because a DM-only tool gets little value from either -- both now have a real
 player-facing viewport to matter for, so they're unblocked.
 
-## Smaller / lower-priority items (park here, revisit if they start to matter)
+---
 
-- [ ] Audio/ambience/music layer -- no existing precedent in this codebase, would be a new
-  subsystem from scratch.
-- [ ] Player-editable character sheets (`character.html` is currently a read-only DM-side viewer).
-- [ ] Token art dedup -- already flagged in README's "Possible Next Steps"; each spawn from a
-  library entry copies the same image bytes into IndexedDB again rather than sharing one record.
+# Work plan: what's next (2026-08-03 pass)
+
+Everything above (Phases 0-5) is done except the one item moved down to Phase 8. What follows is
+every open thread identified along the way -- both the original "smaller/lower-priority" parking
+lot and the follow-ups each phase's own bullets flagged as deliberately out of scope -- organized
+into phases in **recommended order**: cheap, high-value finishing touches on freshly-shipped work
+first (while the design is still fresh), then medium-effort feature completions, then cleanup,
+then the two large, open-ended items last (they need real scoping conversations before starting,
+the same way Phase 5 did).
+
+## Phase 6 -- Finish line of sight (small, high-value, builds on Phase 3/4 directly)
+
+- [ ] **Vision radius / darkvision distance limit.** `hasLineOfSight()` currently only checks
+  whether a wall is in the way -- no maximum distance at all, so a token can technically see
+  the full length of an unlit corridor. Add an optional per-token `visionRange` (feet, sparse --
+  absent means unlimited, matching every other sparse-field convention in `engine/encounter.js`)
+  and fold a distance check into `hasLineOfSight`/`isVisibleToParty` alongside the existing wall
+  check. Deliberately NOT a full lighting model (no per-cell bright/dim/dark state, no light
+  sources) -- that's a much bigger feature; this is the same "flat distance limit, not RAW's full
+  light-level nuance" simplification the rest of this feature set already uses. Token sheet gets
+  a Vision Range field; SRD monsters with real darkvision (most humanoids' player-facing
+  counterparts don't have it, but plenty of monsters do) could get one set in `STAT_BLOCKS`, same
+  as `damageType` was backfilled per-monster in the damage-types phase -- worth doing at the same
+  time rather than as a separate pass.
+- [ ] **DM-bridge wall actions.** There is currently no way for Claude to draw or remove a wall
+  -- `set_visibility` got a DM-bridge action alongside its UI toggle, walls didn't. Add
+  `add_wall`/`remove_wall` (or a single `set_wall` with an add/remove mode) to `engine/dmBridge.js`
+  and `dm-bridge/watch.js`'s `isValidAction`/`SYSTEM_PROMPT`, mirroring the existing pattern
+  exactly. Lower value than vision range (walls are mostly a DM map-prep concern, not something
+  narration dynamically changes mid-session -- "a section of wall collapses" is the realistic use
+  case), which is why it's second in this phase, not first.
+
+## Phase 7 -- Finish AoE templates (medium)
+
+- [ ] **Cone and line template shapes.** The AoE template tool only draws a circle today
+  (`renderTemplateOverlay()` in `ui/app.js`) -- cone (Burning Hands, a dragon's breath) and line
+  (Lightning Bolt) are common enough spell shapes to be worth the same treatment. Needs real
+  shape math (a cone needs an origin + direction + angle; a line needs an origin + direction +
+  length/width) and a UI decision for how the DM sets direction/angle (drag-to-aim is the natural
+  extension of the existing click-to-place-radius interaction). Circle was deliberately built
+  first and scoped to skip this -- see its own roadmap entry above.
+- [ ] **AoE auto-target-detection.** Once a template shape exists on the grid (circle today,
+  cone/line after the item above), compute which tokens fall inside it and feed that straight
+  into `cast_area_spell`'s `targetIds` instead of the DM reading them off by eye. This was
+  explicitly scoped out when the circle template shipped ("doesn't need to feed targetIds
+  automatically at first... even just 'show me the circle so I can pick targets by eye' is the
+  real win") -- worth doing now that the shape math from the item above will exist anyway, since
+  "is this token's cell inside the shape" is most of what target-detection needs.
+
+## Phase 8 -- Save/session ergonomics (small-medium)
+
+- [ ] **Multiple save slots / named encounters.** The original Phase 0 item, deferred at the
+  time ("decide after using export/import for a while -- may turn out unnecessary"). Revisit now:
+  does the single implicit autosave + manual Export/Import actually cover real usage, or does
+  running more than one encounter/campaign in the same browser profile want real named local
+  slots (still `localStorage`, just multiple keys instead of one fixed `storageKey`)? If it does,
+  this needs a small slot-picker UI (list, rename, delete, switch) alongside the existing
+  Save/Load/Export/Import row.
+
+## Phase 9 -- Cleanup (small, no new user-facing capability)
+
+- [ ] **Token art dedup.** Flagged in README's "Possible Next Steps" since before this whole
+  work-plan pass started. Every monster spawned from the same Token Library entry copies the same
+  image bytes into IndexedDB again rather than sharing one record -- fine at IndexedDB's storage
+  scale for a normal session, but worth fixing if it ever actually causes a problem. Lowest
+  priority here on purpose: it's real technical debt, but it doesn't add anything a DM would
+  notice at the table, unlike everything above it.
+
+## Phase 10 -- Large, speculative features (needs a scoping conversation before starting)
+
+Both of these are big enough, and open-ended enough, that they deserve the same
+"decide-before-building" treatment Phase 5 got -- don't start either from this bullet list alone.
+
+- [ ] **Player-editable character sheets.** `character.html` is currently a read-only DM-side
+  viewer opened from an imported sheet. Making it genuinely player-editable raises real questions
+  this roadmap hasn't answered yet: who has access (only via the DM's machine, or should the
+  player window -- Phase 5 -- expose an edit path)? Where do edits actually go (the campaign
+  repo's markdown directly? A separate persisted layer)? Is this even the right layer for it, given
+  campaign markdown is otherwise DM/Claude-authored? Needs a real design conversation, not just an
+  implementation pass.
+- [ ] **Audio/ambience/music layer.** No existing precedent anywhere in this codebase to extend
+  -- would be a wholly new subsystem: an asset-management layer for audio files (something like
+  the Token/Map Library's IndexedDB pattern, or a folder connection like Tokens/Maps Folder),
+  playback controls, and a decision about scope (looping ambience per map? one-shot stingers?
+  music tied to combat state?). The most speculative, highest-effort item on this whole list --
+  last for a reason.
