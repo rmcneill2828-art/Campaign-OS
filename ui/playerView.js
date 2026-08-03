@@ -104,7 +104,12 @@
       }
     }
 
-    const tokens = (state.tokens || []).filter((token) => token.mapName === state.mapName);
+    // hiddenFromPlayers tokens (a secret monster, an NPC not yet revealed) are left out of
+    // the map AND the initiative list entirely -- this is the one filter this whole file
+    // applies; it does NOT redact a hidden token's name out of combat log text (see the
+    // CLAUDE.md "Player window" bullet for why that's a known, documented gap rather than
+    // something attempted and broken).
+    const tokens = (state.tokens || []).filter((token) => token.mapName === state.mapName && !token.hiddenFromPlayers);
     tokens.forEach((token) => {
       const tokenEl = document.createElement("div");
       tokenEl.className = `token ${token.type}`;

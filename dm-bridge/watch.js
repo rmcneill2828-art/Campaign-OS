@@ -70,6 +70,7 @@ const SYSTEM_PROMPT = [
   `{"type": "apply_damage", "target": "<exact token name>", "amount": <integer>, "damageType": "<optional ${DAMAGE_TYPE_LIST.join("|")}>"}`,
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',
   `{"type": "toggle_condition", "target": "<exact token name>", "condition": "${CONDITION_LIST.join("|")}"}`,
+  '{"type": "set_visibility", "target": "<exact token name>", "hidden": <true or false>}',
   '{"type": "move_token", "target": "<exact token name>", "x": <integer>, "y": <integer>}',
   '{"type": "next_turn"}',
   '{"type": "switch_map", "map": "<exact name from \'Maps available to switch to\' below>"}',
@@ -308,6 +309,14 @@ const SYSTEM_PROMPT = [
   "effect the lair action causes (damage, a saving throw, a condition) still needs its own",
   "separate action in the same response, same compose-only pattern as cast_spell/use_resource.",
   "",
+  "Use set_visibility to hide a token from the DM's read-only player window (a second screen the",
+  "table can see) entirely -- a secret monster, an ambush not yet sprung, an NPC the party hasn't",
+  "met yet -- or to reveal one once it should be seen. A token's line below says \"hidden from",
+  "players\" when it currently is, so check that before deciding whether to toggle it. This only",
+  "affects the player window's map and initiative list -- it does NOT retroactively (or",
+  "prospectively) scrub the hidden token's name out of narration or the combat log, so avoid",
+  "naming a hidden token in your own `message` text if the point is to keep it a surprise.",
+  "",
   "You may also receive campaign context (a prior session's recap, an NPC's notes) before the",
   "current state. Use it to keep names, places, and plot details consistent with the real campaign --",
   "but it never overrides the actual token state above, which is always the current truth."
@@ -353,6 +362,8 @@ function isValidAction(action) {
       return typeof action.target === "string" && Number.isFinite(action.amount);
     case "toggle_condition":
       return typeof action.target === "string" && CONDITION_LIST.includes(action.condition);
+    case "set_visibility":
+      return typeof action.target === "string" && typeof action.hidden === "boolean";
     case "move_token":
       return typeof action.target === "string" && Number.isFinite(action.x) && Number.isFinite(action.y);
     case "next_turn":
@@ -492,7 +503,8 @@ function buildPrompt(request) {
       const resistText = Array.isArray(t.damageResistances) && t.damageResistances.length ? `, resist: ${t.damageResistances.join(", ")}` : "";
       const vulnText = Array.isArray(t.damageVulnerabilities) && t.damageVulnerabilities.length ? `, vulnerable: ${t.damageVulnerabilities.join(", ")}` : "";
       const immuneText = Array.isArray(t.damageImmunities) && t.damageImmunities.length ? `, immune: ${t.damageImmunities.join(", ")}` : "";
-      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}${legendaryActionsText}${resistText}${vulnText}${immuneText}`);
+      const visibilityText = t.hiddenFromPlayers ? ", hidden from players" : "";
+      lines.push(`- ${t.name} (${t.type}) at (${t.x}, ${t.y}): ${t.hp}/${t.maxHp} HP, AC ${t.ac}, speed ${speed} ft (${movementLeft} ft left this turn)${conditions}${abilities}${spellcastingText}${slotsText}${resourcesText}${concentrationText}${deathStatusText}${exhaustionText}${legendaryActionsText}${resistText}${vulnText}${immuneText}${visibilityText}`);
     });
   }
   lines.push("", `DM narration/command: "${request.command}"`);

@@ -927,6 +927,28 @@ body[data-fog="on"] .map-tile:hover {
   border-radius: 4px;
 }
 
+.visibility-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.visibility-status-hidden {
+  border-color: rgba(185, 83, 76, 0.6);
+  color: #f0b3ae;
+}
+
+.visibility-status button {
+  margin-left: auto;
+  padding: 0 8px;
+}
+
 .exhaustion-status {
   display: flex;
   align-items: center;

@@ -531,8 +531,13 @@ A few things worth knowing:
 
 - Each token shows a rough health bar (colored by how bloodied it is) instead of the DM's exact
   HP numbers -- a middle ground between showing players nothing and showing them everything.
-  There's no way yet to hide a specific token (a secret monster, an NPC not yet revealed) from
-  the player window entirely; it mirrors the full board as the DM sees it, minus exact numbers.
+- A token can be hidden from the player window entirely -- a secret monster, an ambush not yet
+  sprung, an NPC the party hasn't met yet. The token sheet shows **Visible to players** or
+  **Hidden from players** with a toggle button (or the Claude DM bridge's `set_visibility`
+  action); a hidden token is left out of the player window's map and initiative list
+  completely, not just visually obscured. This does **not** retroactively (or prospectively)
+  scrub the token's name out of combat log text -- avoid naming it in narration if the point
+  is to keep it a surprise.
 - It's a separate browser tab/window, not a new device -- for now this only helps a table sharing
   one physical screen setup (a laptop plus a second monitor/TV), not players joining remotely
   from their own devices. That would need real multiplayer (a server or sync service), a much

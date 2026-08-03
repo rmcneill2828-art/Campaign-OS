@@ -115,6 +115,23 @@ test("applyActions applies damage, healing, and condition toggles by token name"
   assert.equal(messages.length, 3);
 });
 
+test("applyActions applies set_visibility both ways", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Ambush Troll" }).state;
+
+  const hidden = CampaignOSDMBridge.applyActions(state, [
+    { type: "set_visibility", target: "Ambush Troll", hidden: true }
+  ]);
+  assert.equal(hidden.state.tokens[0].hiddenFromPlayers, true);
+  assert.match(hidden.messages[0], /Ambush Troll is now hidden from players\./);
+
+  const revealed = CampaignOSDMBridge.applyActions(hidden.state, [
+    { type: "set_visibility", target: "Ambush Troll", hidden: false }
+  ]);
+  assert.equal(revealed.state.tokens[0].hiddenFromPlayers, undefined);
+  assert.match(revealed.messages[0], /Ambush Troll is now visible to players\./);
+});
+
 test("applyActions logs an unresolved-name message instead of throwing when a target doesn't exist", () => {
   const state = stateOnMap("Urskelde");
   const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [

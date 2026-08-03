@@ -397,6 +397,11 @@
       sourcePath: draft.sourcePath || ""
     };
     if (Array.isArray(draft.attacks) && draft.attacks.length > 1) token.attacks = draft.attacks;
+    // Sparse, absent (visible) by default -- excluded from the read-only player window's map
+    // and initiative list entirely when true (see ui/playerView.js), for a secret monster or
+    // an NPC not yet revealed. Does NOT retroactively (or prospectively) redact the token's
+    // name out of freeform combat log text -- that's a known, documented gap, not an oversight.
+    if (draft.hiddenFromPlayers) token.hiddenFromPlayers = true;
     if (typeof draft.damageType === "string" && draft.damageType.trim()) {
       token.damageType = draft.damageType.trim().toLowerCase();
     }
@@ -1643,6 +1648,11 @@
 
     if (typeof changes.image === "string") {
       token.image = changes.image;
+    }
+
+    if (changes.hiddenFromPlayers !== undefined) {
+      if (changes.hiddenFromPlayers) token.hiddenFromPlayers = true;
+      else delete token.hiddenFromPlayers;
     }
 
     return nextState;

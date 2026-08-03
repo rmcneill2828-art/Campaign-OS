@@ -150,8 +150,18 @@ now real too -- the player window (Phase 5) gives it somewhere to actually matte
   within one poll cycle, the empty "waiting for the DM" state, and the "Open Player Window"
   button itself. See CLAUDE.md's new "Player window" bullet for the full design writeup
   (including why the origin-matches-but-still-doesn't-work finding matters for any future
-  cross-tab feature). No per-token hide/reveal system yet -- a real gap for secret
-  monsters/unrevealed NPCs, noted as a natural follow-up below.
+  cross-tab feature).
+- [x] **Per-token hide/reveal.** Done 2026-08-03 (same-day follow-up -- the gap noted right
+  after the player window shipped). A sparse `token.hiddenFromPlayers` boolean, toggled from
+  the token sheet (a status row + button under the heading) or the Claude DM bridge's new
+  `set_visibility` action (`{target, hidden: true|false}` -- an explicit boolean, not a blind
+  toggle, so Claude doesn't need to have tracked prior state correctly). `ui/playerView.js`
+  excludes a hidden token from both the map and initiative list at its one token-filtering
+  point. Does NOT scrub a hidden token's name out of freeform combat log text -- a known,
+  documented limitation (log entries are already-generated strings by the time this could
+  apply), not attempted. 5 new unit tests (325 total) plus Playwright verification of the full
+  loop: seed a hidden token, confirm it's absent from the player window, reveal it from the DM
+  token sheet, confirm the player window picks it up within one poll cycle.
 
 Phase 5 complete (as scoped). Phase 3 (fog of war) and Phase 4 (line of sight) were sequenced
 after this because a DM-only tool gets little value from either -- both now have a real

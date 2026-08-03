@@ -696,6 +696,10 @@
         </div>
         <strong>${token.hp} / ${token.maxHp}</strong>
       </div>
+      <p class="visibility-status ${token.hiddenFromPlayers ? "visibility-status-hidden" : ""}" title="When hidden, this token is left out of the player window's map and initiative list entirely -- a secret monster, an NPC not yet revealed. Doesn't retroactively hide past combat log mentions of it by name.">
+        ${token.hiddenFromPlayers ? "Hidden from players" : "Visible to players"}
+        <button type="button" data-action="toggle-visibility">${token.hiddenFromPlayers ? "Reveal" : "Hide"}</button>
+      </p>
       ${token.dead ? `<p class="death-status death-status-dead">Dead</p>` : ""}
       ${token.dying && token.dying.stable ? `<p class="death-status death-status-stable">Stable at 0 HP</p>` : ""}
       ${token.dying && !token.dying.stable ? `
@@ -1173,6 +1177,10 @@
         render();
       });
     }
+
+    tokenSheet.querySelector('[data-action="toggle-visibility"]').addEventListener("click", () => {
+      updateState(window.CampaignOS.updateToken(state, token.id, { hiddenFromPlayers: !token.hiddenFromPlayers }));
+    });
 
     const rollDeathSaveButton = tokenSheet.querySelector('[data-action="roll-death-save"]');
     if (rollDeathSaveButton) {
@@ -2445,7 +2453,8 @@
         rechargeAbilities: token.rechargeAbilities,
         extraAttacks: token.extraAttacks,
         actionUsed: Boolean(token.actionUsed),
-        bonusActionUsed: Boolean(token.bonusActionUsed)
+        bonusActionUsed: Boolean(token.bonusActionUsed),
+        hiddenFromPlayers: Boolean(token.hiddenFromPlayers)
       }))
     };
   }

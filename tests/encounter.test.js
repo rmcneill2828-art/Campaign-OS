@@ -908,6 +908,26 @@ test("updateToken sets and clears damageType, and comma-separated damage type li
   assert.equal(cleared.damageImmunities, undefined);
 });
 
+test("addToken sets hiddenFromPlayers only when the draft asks for it (sparse, absent by default)", () => {
+  const state = stateOnMap("Urskelde");
+  const visible = CampaignOS.addToken(state, { name: "Goblin 1" }).token;
+  assert.equal(visible.hiddenFromPlayers, undefined);
+
+  const hidden = CampaignOS.addToken(state, { name: "Ambush Troll", hiddenFromPlayers: true }).token;
+  assert.equal(hidden.hiddenFromPlayers, true);
+});
+
+test("updateToken sets and clears hiddenFromPlayers", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Ambush Troll" });
+
+  const hidden = CampaignOS.updateToken(withToken, token.id, { hiddenFromPlayers: true }).tokens[0];
+  assert.equal(hidden.hiddenFromPlayers, true);
+
+  const revealed = CampaignOS.updateToken({ ...withToken, tokens: [hidden] }, token.id, { hiddenFromPlayers: false }).tokens[0];
+  assert.equal(revealed.hiddenFromPlayers, undefined);
+});
+
 test("useResource spends a charge and reports how many remain, matching the resource name case-insensitively", () => {
   const state = stateOnMap("Urskelde");
   const { state: withToken, token } = CampaignOS.addToken(state, {

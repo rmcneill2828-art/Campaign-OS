@@ -82,6 +82,15 @@
           alreadyLogged: false
         };
       }
+      case "set_visibility": {
+        const target = findTokenByName(state, action.target);
+        if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to change visibility.`, alreadyLogged: false };
+        return {
+          state: window.CampaignOS.updateToken(state, target.id, { hiddenFromPlayers: Boolean(action.hidden) }),
+          message: `${target.name} is now ${action.hidden ? "hidden from" : "visible to"} players.`,
+          alreadyLogged: false
+        };
+      }
       case "move_token": {
         const target = findTokenByName(state, action.target);
         if (!target) return { state, message: `(DM assistant) could not find "${action.target}" to move.`, alreadyLogged: false };

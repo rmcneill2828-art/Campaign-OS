@@ -470,11 +470,27 @@ See README.md for the full feature list and usage. Notes specific to working on 
   than importing or sharing code with `app.js`, since `app.js`'s render functions are entangled
   with the DM's own editable `state`/`selectedTokenId`/library stores in ways a read-only
   mirror shouldn't need or want. Token HP is shown as a color-graded bar (bloodied/critical
-  thresholds at 50%/25%), never the DM's exact numbers -- there is **no per-token hide/reveal
-  system** (a secret monster, an unrevealed NPC) at all yet; the player window mirrors
-  everything on the DM's board except exact HP. `index.html`'s **Open Player Window** button
-  uses a fixed `window.open()` target name (`"campaignOSPlayerWindow"`, not `"_blank"`) so
-  repeated clicks focus the existing window instead of spawning duplicates.
+  thresholds at 50%/25%), never the DM's exact numbers. A token's sparse `hiddenFromPlayers`
+  boolean (absent/visible by default, same convention as `dead`/`actionUsed`/every other sparse
+  flag in this file) is the per-token hide/reveal system -- `ui/playerView.js`'s single filter
+  point (`tokens = state.tokens.filter(t => t.mapName === state.mapName && !t.hiddenFromPlayers)`)
+  excludes it from BOTH the map and the initiative list, since `renderInitiative()` is called
+  with that same already-filtered array rather than re-deriving its own. Toggled from the token
+  sheet (a `visibility-status` row + button, right under the heading, mirroring `updateToken()`
+  directly the same way the HP quick-buttons do -- no dedicated engine primitive, no
+  self-logged message, since this is a DM-only settings toggle, not a game event) or via the
+  Claude DM bridge's `set_visibility` action (`{target, hidden: true|false}` -- an explicit
+  boolean, not a blind toggle like `toggle_condition`, since Claude needs to be able to set the
+  correct state without necessarily having tracked whether it was already hidden; each token's
+  line in `buildPrompt()` shows `", hidden from players"` when true so Claude can check first
+  anyway). **Does NOT retroactively or prospectively redact a hidden token's name out of
+  freeform combat log text** -- a known, documented limitation, not an oversight: log entries
+  are already-generated strings by the time this filter could apply, and no attempt is made to
+  scrub token names out of narration text either; the SYSTEM_PROMPT tells Claude not to name a
+  hidden token in its own `message` if the point is to keep it a surprise, but that's a
+  prompting convention, not an engine-enforced guarantee. `index.html`'s **Open Player Window**
+  button uses a fixed `window.open()` target name (`"campaignOSPlayerWindow"`, not `"_blank"`)
+  so repeated clicks focus the existing window instead of spawning duplicates.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure
