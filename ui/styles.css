@@ -369,6 +369,31 @@ h1 {
   white-space: nowrap;
 }
 
+.walls-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.walls-shape {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.walls-shape line {
+  stroke: #f1eadc;
+  stroke-width: 3;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.walls-drag-preview .walls-shape line {
+  stroke: var(--accent);
+  stroke-dasharray: 6 4;
+}
+
 .grid-handle {
   position: absolute;
   z-index: 4;

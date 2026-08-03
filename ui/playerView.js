@@ -104,12 +104,20 @@
       }
     }
 
-    // hiddenFromPlayers tokens (a secret monster, an NPC not yet revealed) are left out of
-    // the map AND the initiative list entirely -- this is the one filter this whole file
-    // applies; it does NOT redact a hidden token's name out of combat log text (see the
-    // CLAUDE.md "Player window" bullet for why that's a known, documented gap rather than
-    // something attempted and broken).
-    const tokens = (state.tokens || []).filter((token) => token.mapName === state.mapName && !token.hiddenFromPlayers);
+    // Two independent filters, both applied before anything renders -- neither redacts a
+    // token's name out of combat log text (see the CLAUDE.md "Player window" bullet for why
+    // that's a known, documented gap rather than something attempted and broken):
+    //   - hiddenFromPlayers: a manual DM override (a secret monster, an NPC not yet revealed).
+    //     Always wins regardless of line of sight -- a token can be technically visible AND
+    //     still deliberately hidden.
+    //   - isVisibleToParty (engine/encounter.js): line-of-sight against the map's own walls
+    //     (state.maps[name].walls), union over every hero-type token on the map -- "if any PC
+    //     could see it, the table sees it." A map with no walls drawn has no restriction at
+    //     all (isVisibleToParty's own fast path), so this is a no-op for every map that never
+    //     got a wall, i.e. almost all of them until a DM actually uses the Walls tool.
+    const tokens = (state.tokens || [])
+      .filter((token) => token.mapName === state.mapName && !token.hiddenFromPlayers)
+      .filter((token) => window.CampaignOS.isVisibleToParty(state, token));
     tokens.forEach((token) => {
       const tokenEl = document.createElement("div");
       tokenEl.className = `token ${token.type}`;

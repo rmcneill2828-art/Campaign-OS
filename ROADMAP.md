@@ -128,9 +128,33 @@ tied to grid position or vision. Replace with a real per-cell reveal state:
 
 ## Phase 4 -- Line of sight / vision blocking
 
-No walls, no vision radius, no occlusion anywhere in the engine today. This is a bigger lift than
-fog of war (needs wall geometry against the grid, and a visibility algorithm), but its payoff is
-now real too -- the player window (Phase 5) gives it somewhere to actually matter.
+- [x] **Walls + line-of-sight token filtering.** Done 2026-08-03. `state.maps[mapName].walls`
+  -- a plain array of `{x1,y1,x2,y2}` segments in grid VERTEX space (0..columns/0..rows, cell
+  *corners*, distinct from the 1..columns cell-index space tokens use) -- absent/empty (every
+  map that's never had a wall drawn) means no restriction at all, a deliberate fast path that
+  makes this a no-op everywhere until a DM actually uses it. `hasLineOfSight()` (standard
+  orientation-based segment intersection against cell-center points, so a ray can never land
+  exactly on a wall vertex) + `isVisibleToParty()` (visible if it's a hero, or in line of sight
+  of ANY hero on the map -- "if one PC can see it, the table sees it"; no PCs on the map at all
+  = fully visible, nothing to hide from) are new `engine/encounter.js` primitives.
+  `ui/playerView.js` applies this as a second filter alongside (not instead of)
+  `hiddenFromPlayers`. New **Walls** map-toolbar toggle: click-drag between two grid vertices
+  draws a wall, clicking near an existing one (no genuine drag) removes it, **Clear Walls**
+  wipes a map's walls entirely; walls render on the DM's own map unconditionally (real
+  persisted data, not a transient tool overlay like the ruler/template). Straight-line-of-sight
+  only -- no vision radius/darkvision distance limit, no fog-of-war memory of previously-seen
+  area (Phase 3 was explicitly skipped, so there's no tile-reveal state to layer this into
+  yet). No Claude DM bridge action for drawing/removing walls (a DM-only map-prep tool, not
+  something narration would plausibly trigger). 6 new unit tests (331 total) plus a full
+  Playwright pass: draw a wall through real click-drag, confirm the player window hides the
+  now-blocked token within one poll cycle, click-to-delete the wall, confirm the token
+  reappears, redraw + Clear Walls with the confirm dialog. See CLAUDE.md's new "Line of sight /
+  walls" bullet for the full design writeup.
+
+Phase 4 complete (line-of-sight token filtering). Fog of war (Phase 3, a persisted per-cell
+reveal/exploration state) remains unbuilt -- skipped by explicit user choice, revisit if it
+becomes wanted later; the wall data this phase added would be a natural input to it (a cell
+behind a wall and never in any hero's line of sight is a reasonable "never explored" signal).
 
 ## Phase 5 -- Shared/player view (biggest architectural decision on this list)
 

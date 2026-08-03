@@ -450,6 +450,53 @@ See README.md for the full feature list and usage. Notes specific to working on 
     Testing section below describes -- there's no automated suite entry for this (UI/File
     System Access glue, same as the existing request/response flow), just a one-off dev-time
     verification.
+- Line of sight / walls: `state.maps[mapName].walls` is a plain array of `{x1,y1,x2,y2}`
+  segments in **grid VERTEX space** -- integer coordinates `0..columns`/`0..rows`, the corners
+  *between* cells -- not the `1..columns` cell-INDEX space token `x`/`y` use. Absent/empty
+  (the default for every map that's never had a wall drawn on it) means **no line-of-sight
+  restriction at all**, checked as the very first thing in `hasLineOfSight()` -- a deliberate
+  fast path, not just an optimization: it's what makes this feature a no-op for every
+  pre-existing map/encounter that never gets a wall, rather than something that changes
+  behavior everywhere the moment it shipped. `hasLineOfSight(state, mapName, ax, ay, bx, by)`
+  takes CELL coordinates (matching every other coordinate in this file) and internally converts
+  both to their **cell-center** point in vertex space (`index - 0.5`, always a half-integer)
+  before running `segmentsIntersect()` (the textbook orientation-based test) against every
+  wall -- centers landing exactly on an integer wall vertex is therefore *impossible*, which
+  sidesteps the "does a ray touching a wall's endpoint count as blocked" ambiguity for the
+  common case entirely rather than needing to resolve it. This is a **straight-line check
+  only** -- no vision radius/darkvision distance limit, no dim-light gradation, and (since
+  Phase 3/fog-of-war was explicitly not built alongside this) no memory of previously-seen-but-
+  not-currently-visible area either; a token is either in line of sight right now or it isn't.
+  `isVisibleToParty(state, token)` is the actual consumer-facing check: a `hero`-type token is
+  always visible (a PC always sees itself), otherwise it's visible if `hasLineOfSight` succeeds
+  against **any** hero-type token on the same map (union over the whole party, "if any one of
+  you can see it, the table sees it") -- and if there are no hero tokens on the map at all, it
+  returns `true` unconditionally (nothing to hide anything *from*), rather than hiding
+  everything by default. `ui/playerView.js` applies this as a second filter, independent of and
+  layered on top of `hiddenFromPlayers` -- a token can be both in line of sight AND manually
+  hidden, and the manual flag still wins (both filters just `.filter()` in sequence, whichever
+  order; there's no precedence logic to get wrong since they can only ever narrow the set
+  further). `findNearestWallIndex`/`distanceToSegment` are UI hit-testing helpers (perpendicular
+  point-to-segment distance), not part of the line-of-sight check itself -- they exist only so
+  `ui/app.js` can answer "did the DM click near an existing wall" for deletion.
+  `addWall`/`removeWall`/`clearWalls` mutate `state.maps[mapName].walls` directly, same
+  `clone()`-then-assign convention as `setMapGrid`/`setMapView`; `removeWall` with an
+  out-of-range index returns the **same** `state` reference unchanged (the standard "rejected,
+  nothing to log" convention this file uses throughout), not a clone or a thrown error.
+  `ui/app.js`'s Walls tool: `gridVertexFromEvent()` (a NEW helper, distinct from the existing
+  `gridCellFromEvent()` the ruler/template/click-to-move already share) snaps a click to the
+  nearest grid-LINE intersection via `Math.round`, not the nearest cell via `Math.floor` --
+  necessary because wall endpoints live in vertex space, not cell space. A click-drag between
+  two different vertices draws a new wall on release; a click that starts and ends on the SAME
+  vertex (no genuine drag happened) instead searches for and removes the nearest wall within
+  0.35 grid units, via `findNearestWallIndex`. Unlike the ruler/template overlays (transient,
+  UI-only, never persisted), walls are real map data, so they render on the DM's own map
+  **unconditionally** -- `renderWallsOverlay()` doesn't check whether Walls mode is currently
+  toggled on, the same "the grid itself always shows" precedent Map Settings already follows;
+  only drawing/deleting requires the toggle. Unlike `hiddenFromPlayers` (which got a
+  `set_visibility` DM-bridge action alongside its UI toggle), there is currently **no**
+  DM-bridge action for drawing/removing a wall at all -- a DM-only map-prep tool, not something
+  narration would plausibly trigger mid-session; revisit if that gap turns out to matter.
 - Player window: `player.html` + `ui/playerView.js` sync with the DM's `index.html` tab by
   **polling `localStorage.getItem("campaign-os-encounter-state")` once a second and diffing
   the raw JSON string** against the last-seen value -- not `BroadcastChannel`, not the

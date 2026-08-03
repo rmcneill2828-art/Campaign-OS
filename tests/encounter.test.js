@@ -2444,6 +2444,83 @@ test("moveToken's opportunity-attack hint ignores a dead token", () => {
   assert.ok(!/opportunity attack/.test(result.message), "a dead token can't threaten an opportunity attack");
 });
 
+test("addWall/removeWall/clearWalls manage a map's wall list", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addWall(state, "Urskelde", 5, 0, 5, 10);
+  assert.deepEqual(state.maps.Urskelde.walls, [{ x1: 5, y1: 0, x2: 5, y2: 10 }]);
+
+  state = CampaignOS.addWall(state, "Urskelde", 0, 3, 3, 3);
+  assert.equal(state.maps.Urskelde.walls.length, 2);
+
+  const afterRemove = CampaignOS.removeWall(state, "Urskelde", 0);
+  assert.deepEqual(afterRemove.maps.Urskelde.walls, [{ x1: 0, y1: 3, x2: 3, y2: 3 }]);
+
+  const noOp = CampaignOS.removeWall(state, "Urskelde", 99);
+  assert.equal(noOp, state, "removing a nonexistent index is a no-op, same state reference");
+
+  const cleared = CampaignOS.clearWalls(afterRemove, "Urskelde");
+  assert.deepEqual(cleared.maps.Urskelde.walls, []);
+});
+
+test("hasLineOfSight is always true when a map has no walls", () => {
+  const state = stateOnMap("Urskelde");
+  assert.equal(CampaignOS.hasLineOfSight(state, "Urskelde", 1, 1, 20, 20), true);
+});
+
+test("hasLineOfSight is blocked by a wall the line actually crosses, clear otherwise", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addWall(state, "Urskelde", 5, 0, 5, 10); // a vertical wall along grid line x=5
+
+  // Cell (3,3) center (2.5,2.5) to cell (7,3) center (6.5,2.5) crosses x=5 -- blocked.
+  assert.equal(CampaignOS.hasLineOfSight(state, "Urskelde", 3, 3, 7, 3), false);
+
+  // Cell (3,3) to cell (4,3): both stay left of x=5 -- clear.
+  assert.equal(CampaignOS.hasLineOfSight(state, "Urskelde", 3, 3, 4, 3), true);
+
+  // A wall on a different map shouldn't affect this one.
+  assert.equal(CampaignOS.hasLineOfSight(state, "Some Other Map", 3, 3, 7, 3), true);
+});
+
+test("findNearestWallIndex finds the closest wall within the given distance, null beyond it", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addWall(state, "Urskelde", 5, 0, 5, 10);
+  state = CampaignOS.addWall(state, "Urskelde", 0, 8, 10, 8);
+
+  // (5, 5) sits exactly ON the first wall (distance 0), and far from the second (distance 3).
+  assert.equal(CampaignOS.findNearestWallIndex(state, "Urskelde", 5, 5, 0.5), 0);
+  // (2, 8) sits exactly ON the second wall (distance 0), and 3 units from the first.
+  assert.equal(CampaignOS.findNearestWallIndex(state, "Urskelde", 2, 8, 0.5), 1);
+  // Far from everything.
+  assert.equal(CampaignOS.findNearestWallIndex(state, "Urskelde", 50, 50, 0.5), null);
+});
+
+test("isVisibleToParty: a hero is always visible, a monster depends on line of sight to any hero", () => {
+  let state = stateOnMap("Urskelde");
+  const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero" });
+  state = CampaignOS.setTokenPosition(hero.state, hero.token.id, 3, 3);
+  const nearGoblin = CampaignOS.addToken(state, { name: "Goblin 1", type: "monster" });
+  state = CampaignOS.setTokenPosition(nearGoblin.state, nearGoblin.token.id, 4, 3);
+  const farGoblin = CampaignOS.addToken(state, { name: "Goblin 2", type: "monster" });
+  state = CampaignOS.setTokenPosition(farGoblin.state, farGoblin.token.id, 7, 3);
+  state = CampaignOS.addWall(state, "Urskelde", 5, 0, 5, 10); // blocks Darkhawk <-> Goblin 2
+
+  const hp = state.tokens.find((t) => t.name === "Darkhawk");
+  const near = state.tokens.find((t) => t.name === "Goblin 1");
+  const far = state.tokens.find((t) => t.name === "Goblin 2");
+
+  assert.equal(CampaignOS.isVisibleToParty(state, hp), true, "a hero is always visible");
+  assert.equal(CampaignOS.isVisibleToParty(state, near), true, "unblocked line of sight to a hero");
+  assert.equal(CampaignOS.isVisibleToParty(state, far), false, "blocked by the wall");
+});
+
+test("isVisibleToParty treats a map with no PCs on it as fully visible (nothing to hide anything from)", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Goblin 1", type: "monster" }).state;
+  state = CampaignOS.addWall(state, "Urskelde", 0, 0, 100, 100);
+  const goblin = state.tokens.find((t) => t.name === "Goblin 1");
+  assert.equal(CampaignOS.isVisibleToParty(state, goblin), true);
+});
+
 test("castSpell (leveled) consumes the caster's action, rejecting a second leveled cast the same turn", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Sael", initiative: 20, spellSlots: { 1: { max: 4, current: 4 } } }).state;

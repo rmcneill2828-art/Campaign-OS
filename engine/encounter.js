@@ -1710,6 +1710,131 @@
     };
   }
 
+  // Walls (for line-of-sight -- see hasLineOfSight below) are stored per map as a plain array
+  // of {x1,y1,x2,y2} segments in GRID VERTEX space -- integer coordinates 0..columns/0..rows,
+  // the corners between cells, NOT the 1..columns cell-index space token x/y use. A wall runs
+  // along cell boundaries (or across them, for a diagonal wall), never through a cell's
+  // interior. Absent/empty is the common case (no walls drawn for this map yet) and
+  // deliberately means "no line-of-sight restriction at all" -- see hasLineOfSight.
+  function addWall(state, mapName, x1, y1, x2, y2) {
+    const nextState = clone(state);
+    nextState.maps = nextState.maps || {};
+    const current = nextState.maps[mapName] || {};
+    const walls = Array.isArray(current.walls) ? current.walls.slice() : [];
+    walls.push({ x1, y1, x2, y2 });
+    nextState.maps[mapName] = { ...current, walls };
+    return nextState;
+  }
+
+  function removeWall(state, mapName, index) {
+    const nextState = clone(state);
+    const current = nextState.maps?.[mapName];
+    if (!current || !Array.isArray(current.walls) || !current.walls[index]) return state;
+    nextState.maps[mapName] = { ...current, walls: current.walls.filter((_, i) => i !== index) };
+    return nextState;
+  }
+
+  function clearWalls(state, mapName) {
+    const nextState = clone(state);
+    const current = nextState.maps?.[mapName];
+    if (!current || !Array.isArray(current.walls) || !current.walls.length) return state;
+    nextState.maps[mapName] = { ...current, walls: [] };
+    return nextState;
+  }
+
+  // Standard orientation-based segment intersection test (cross-product sign comparison) --
+  // the textbook algorithm, not something bespoke to this file. Returns true for a proper
+  // crossing OR a collinear overlap; two segments that only touch at a shared endpoint may
+  // resolve either way depending on floating-point rounding, which is fine for a line-of-sight
+  // check (see hasLineOfSight's own comment on why token positions never land exactly on a
+  // wall vertex in practice).
+  function orientation(a, b, c) {
+    const val = (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+    if (val === 0) return 0;
+    return val > 0 ? 1 : 2;
+  }
+  function onSegment(a, b, c) {
+    return Math.min(a.x, c.x) <= b.x && b.x <= Math.max(a.x, c.x)
+      && Math.min(a.y, c.y) <= b.y && b.y <= Math.max(a.y, c.y);
+  }
+  function segmentsIntersect(p1, p2, p3, p4) {
+    const o1 = orientation(p1, p2, p3);
+    const o2 = orientation(p1, p2, p4);
+    const o3 = orientation(p3, p4, p1);
+    const o4 = orientation(p3, p4, p2);
+    if (o1 !== o2 && o3 !== o4) return true;
+    if (o1 === 0 && onSegment(p1, p3, p2)) return true;
+    if (o2 === 0 && onSegment(p1, p4, p2)) return true;
+    if (o3 === 0 && onSegment(p3, p1, p4)) return true;
+    if (o4 === 0 && onSegment(p3, p2, p4)) return true;
+    return false;
+  }
+
+  // Perpendicular distance from point p to segment a-b (0 if p is on the segment) -- used only
+  // to hit-test "which wall did the DM click near" for deletion; not part of the line-of-sight
+  // check itself.
+  function distanceToSegment(p, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared));
+    const closestX = a.x + t * dx;
+    const closestY = a.y + t * dy;
+    return Math.hypot(p.x - closestX, p.y - closestY);
+  }
+
+  // Index of the closest wall on `mapName` to vertex-space point (x, y), within `maxDistance`
+  // (in grid units, e.g. 0.5 = half a cell) -- null if none are that close. Used by the UI to
+  // decide "the DM clicked near an existing wall, remove it" vs. "start drawing a new one."
+  function findNearestWallIndex(state, mapName, x, y, maxDistance) {
+    const walls = state.maps?.[mapName]?.walls;
+    if (!Array.isArray(walls) || !walls.length) return null;
+    let bestIndex = null;
+    let bestDistance = maxDistance;
+    walls.forEach((wall, index) => {
+      const distance = distanceToSegment({ x, y }, { x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 });
+      if (distance <= bestDistance) {
+        bestDistance = distance;
+        bestIndex = index;
+      }
+    });
+    return bestIndex;
+  }
+
+  // True if nothing on `mapName`'s wall list blocks the straight line between grid CELL
+  // coordinates (ax, ay) and (bx, by) -- both converted to their cell-center point in the same
+  // vertex space walls are stored in (a cell's center sits at (index - 0.5), always a
+  // half-integer, so it can never land exactly on an integer wall vertex -- side-steps the
+  // "does a ray touching a wall's endpoint count as blocked" ambiguity for the common case
+  // entirely, rather than needing to resolve it). No walls drawn for this map at all (the
+  // overwhelmingly common case -- most maps never get any) is a fast path that skips the
+  // geometry entirely and always returns true: absence of walls means no restriction, not an
+  // opaque map. This is a straight-line check only -- no vision RADIUS/darkvision distance
+  // limit, no "dim light" gradation; a token can see infinitely far as long as nothing drawn
+  // is in the way, a deliberate first-cut simplification.
+  function hasLineOfSight(state, mapName, ax, ay, bx, by) {
+    const walls = state.maps?.[mapName]?.walls;
+    if (!Array.isArray(walls) || !walls.length) return true;
+    const p1 = { x: ax - 0.5, y: ay - 0.5 };
+    const p2 = { x: bx - 0.5, y: by - 0.5 };
+    return !walls.some((wall) => segmentsIntersect(p1, p2, { x: wall.x1, y: wall.y1 }, { x: wall.x2, y: wall.y2 }));
+  }
+
+  // A token is "visible to the party" if it's itself a hero (a PC always sees itself/is always
+  // shown, regardless of line of sight to its own square) or within line of sight of at least
+  // one hero-type token on the same map -- the union of every player character's vision, the
+  // standard tabletop convention ("if any one of you can see it, the table sees it"). Used by
+  // the player window (ui/playerView.js) to filter tokens on top of the manual
+  // hiddenFromPlayers flag, not instead of it -- a token can be both technically in line of
+  // sight AND manually hidden (not yet meant to be revealed even if walls would allow seeing
+  // it), and the manual flag always wins in that case (checked separately by the caller).
+  function isVisibleToParty(state, token) {
+    if (token.type === "hero") return true;
+    const heroes = tokensOnCurrentMap({ ...state, mapName: token.mapName }).filter((other) => other.type === "hero");
+    if (!heroes.length) return true; // no PCs on the map at all -- nothing to hide anything from
+    return heroes.some((hero) => hasLineOfSight(state, token.mapName, hero.x, hero.y, token.x, token.y));
+  }
+
   // The real-world scale of one grid square on the current map, in feet. Defaults to the
   // standard 5 ft/square (used for both distance-based movement and the diagonal-cost rule).
   function feetPerSquare(state) {
@@ -2358,12 +2483,14 @@
     abilityModifier,
     addExhaustion,
     addLogEntry,
+    addWall,
     applyDamage,
     applyHealing,
     attack,
     addToken,
     castAreaSpell,
     castSpell,
+    clearWalls,
     conditionList,
     createState,
     DAMAGE_TYPE_LIST,
@@ -2372,9 +2499,12 @@
     currentGrid,
     effectiveSpeed,
     feetPerSquare,
+    findNearestWallIndex,
     gridMoveCost,
     hasCondition,
+    hasLineOfSight,
     hasRealMapData,
+    isVisibleToParty,
     longRest,
     moveToken,
     nextTurn,
@@ -2393,6 +2523,7 @@
     useLegendaryAction,
     useRechargeAbility,
     useResource,
+    removeWall,
     setActiveMap,
     setMapGrid,
     setMapImage,

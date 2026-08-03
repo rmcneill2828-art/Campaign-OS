@@ -67,6 +67,8 @@
   const toggleRuler = document.querySelector("#toggleRuler");
   const toggleTemplate = document.querySelector("#toggleTemplate");
   const templateRadiusInput = document.querySelector("#templateRadius");
+  const toggleWalls = document.querySelector("#toggleWalls");
+  const clearWallsButton = document.querySelector("#clearWalls");
   const clearMapImage = document.querySelector("#clearMapImage");
   const mapSettingsToggle = document.querySelector("#mapSettingsToggle");
   const mapToolbarSecondary = document.querySelector("#mapToolbarSecondary");
@@ -579,6 +581,7 @@
 
     renderGridHandles();
     renderTemplateOverlay();
+    renderWallsOverlay();
   }
 
   let lastRenderedMapImageValue = undefined;
@@ -2044,6 +2047,121 @@
       templateCenter = null;
       renderTemplateOverlay();
     }
+  });
+
+  // Walls: click-drag between two grid VERTICES (not cells -- see gridVertexFromEvent) draws
+  // a wall while toggleWalls is active; clicking near an existing wall without dragging
+  // removes it instead (start/end vertex land on the same spot, so no genuine drag happened).
+  // Unlike the ruler/template overlays, walls are real persisted map data (state.maps[name]
+  // .walls, via engine/encounter.js's addWall/removeWall/clearWalls) that feeds line-of-sight
+  // in the player window -- so they're always visible on the DM's own map (renderWallsOverlay
+  // doesn't check wallsModeOn), the same way the grid itself always shows regardless of
+  // whether Map Settings is open; only DRAWING/DELETING requires the toggle to be on.
+  let wallsModeOn = false;
+  let wallDragStart = null;
+  let wallDragPreviewEl = null;
+  let wallsOverlayEl = null;
+
+  function gridVertexFromEvent(event) {
+    const rect = map.getBoundingClientRect();
+    const grid = currentGrid();
+    const fracX = ((event.clientX - rect.left) / rect.width) * grid.columns;
+    const fracY = ((event.clientY - rect.top) / rect.height) * grid.rows;
+    return {
+      x: Math.min(grid.columns, Math.max(0, Math.round(fracX))),
+      y: Math.min(grid.rows, Math.max(0, Math.round(fracY)))
+    };
+  }
+
+  function vertexPercent(vertex, grid) {
+    return { xPct: (vertex.x / grid.columns) * 100, yPct: (vertex.y / grid.rows) * 100 };
+  }
+
+  function wallsSvg(className, segments) {
+    const overlay = document.createElement("div");
+    overlay.className = className;
+    overlay.innerHTML = `
+      <svg class="walls-shape" viewBox="0 0 100 100" preserveAspectRatio="none">
+        ${segments.map(([p1, p2]) => `<line x1="${p1.xPct}" y1="${p1.yPct}" x2="${p2.xPct}" y2="${p2.yPct}"></line>`).join("")}
+      </svg>
+    `;
+    return overlay;
+  }
+
+  // Called at the end of renderMap() (like renderGridHandles/renderTemplateOverlay) so
+  // persisted walls survive the innerHTML wipe every re-render does.
+  function renderWallsOverlay() {
+    wallsOverlayEl?.remove();
+    wallsOverlayEl = null;
+    const walls = state.maps?.[state.mapName]?.walls;
+    if (!Array.isArray(walls) || !walls.length) return;
+    const grid = currentGrid();
+    const segments = walls.map((wall) => [
+      vertexPercent({ x: wall.x1, y: wall.y1 }, grid),
+      vertexPercent({ x: wall.x2, y: wall.y2 }, grid)
+    ]);
+    wallsOverlayEl = wallsSvg("walls-overlay", segments);
+    map.appendChild(wallsOverlayEl);
+  }
+
+  function updateWallDragPreview(start, current) {
+    wallDragPreviewEl?.remove();
+    const grid = currentGrid();
+    wallDragPreviewEl = wallsSvg(
+      "walls-overlay walls-drag-preview",
+      [[vertexPercent(start, grid), vertexPercent(current, grid)]]
+    );
+    map.appendChild(wallDragPreviewEl);
+  }
+
+  function startWallDrag(event) {
+    if (!wallsModeOn || event.button !== 0 || event.target.closest(".token") || !state.mapName) return;
+    event.preventDefault();
+    wallDragStart = gridVertexFromEvent(event);
+    updateWallDragPreview(wallDragStart, wallDragStart);
+    window.addEventListener("mousemove", dragWall);
+    window.addEventListener("mouseup", endWallDrag);
+  }
+
+  function dragWall(event) {
+    if (!wallDragStart) return;
+    updateWallDragPreview(wallDragStart, gridVertexFromEvent(event));
+  }
+
+  function endWallDrag(event) {
+    const start = wallDragStart;
+    wallDragStart = null;
+    wallDragPreviewEl?.remove();
+    wallDragPreviewEl = null;
+    window.removeEventListener("mousemove", dragWall);
+    window.removeEventListener("mouseup", endWallDrag);
+    if (!start) return;
+
+    const end = gridVertexFromEvent(event);
+    if (start.x === end.x && start.y === end.y) {
+      const index = window.CampaignOS.findNearestWallIndex(state, state.mapName, start.x, start.y, 0.35);
+      if (index === null) return;
+      updateState(window.CampaignOS.removeWall(state, state.mapName, index));
+      commandResult.textContent = "Wall removed.";
+      return;
+    }
+    updateState(window.CampaignOS.addWall(state, state.mapName, start.x, start.y, end.x, end.y));
+    commandResult.textContent = "Wall added -- blocks line of sight in the player window.";
+  }
+
+  map.addEventListener("mousedown", startWallDrag);
+
+  toggleWalls.addEventListener("click", () => {
+    wallsModeOn = !wallsModeOn;
+    toggleWalls.textContent = wallsModeOn ? "Walls On" : "Walls";
+    toggleWalls.classList.toggle("active-toggle", wallsModeOn);
+  });
+
+  clearWallsButton.addEventListener("click", () => {
+    if (!state.mapName) return;
+    if (!window.confirm(`Remove every wall drawn on ${state.mapName}? This can't be undone.`)) return;
+    updateState(window.CampaignOS.clearWalls(state, state.mapName));
+    commandResult.textContent = "Walls cleared.";
   });
 
   commandForm.addEventListener("submit", async (event) => {

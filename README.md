@@ -298,6 +298,16 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Player window: a read-only, player-facing view of the board (map, tokens, initiative,
   combat log) in a second browser tab or window -- a second monitor or TV a table can look at
   -- kept in sync automatically while the DM's tab is open (see below)
+- Line of sight / walls: a **Walls** toggle in the map toolbar lets you click-drag a wall
+  segment onto the map (click near an existing one, without dragging, to remove it instead);
+  **Clear Walls** removes every wall on the current map at once. Walls block line of sight in
+  the player window only -- a token not in line of sight of any hero-type token is left out of
+  the player window's map and initiative list entirely (on top of, not instead of, manually
+  hiding a token -- see Player window below), the same "if any PC can see it, the table sees
+  it" convention a real table uses. A map with no walls drawn has no line-of-sight restriction
+  at all -- draw a wall only where you actually want one to matter. Straight-line-of-sight only
+  (no vision radius/darkvision distance limit, no fog-of-war memory of previously seen areas) --
+  a deliberate first-cut simplification.
 
 Local command examples (works with or without the Claude DM bridge connected):
 
@@ -538,6 +548,10 @@ A few things worth knowing:
   completely, not just visually obscured. This does **not** retroactively (or prospectively)
   scrub the token's name out of combat log text -- avoid naming it in narration if the point
   is to keep it a surprise.
+- A token behind a drawn wall (see Line of sight / walls above), out of every hero-type
+  token's line of sight, is also left out of the player window -- automatically, on top of the
+  manual hide/reveal toggle above, not instead of it. Draw walls only on maps where you
+  actually want this to matter; a map with none behaves exactly as before.
 - It's a separate browser tab/window, not a new device -- for now this only helps a table sharing
   one physical screen setup (a laptop plus a second monitor/TV), not players joining remotely
   from their own devices. That would need real multiplayer (a server or sync service), a much
