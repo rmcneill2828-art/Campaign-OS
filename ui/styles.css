@@ -245,12 +245,17 @@ h1 {
 .map-toggle,
 .range-input,
 .fit-input,
-.template-radius-input {
+.template-radius-input,
+.template-shape-input {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.template-shape-input select {
+  min-height: 32px;
 }
 
 .map-toggle input {
@@ -364,7 +369,8 @@ h1 {
   overflow: visible;
 }
 
-.template-shape ellipse {
+.template-shape ellipse,
+.template-shape polygon {
   fill: rgba(207, 113, 96, 0.22);
   stroke: var(--monster);
   stroke-width: 2;

@@ -241,20 +241,32 @@ Phase 6 complete.
 
 ## Phase 7 -- Finish AoE templates (medium)
 
-- [ ] **Cone and line template shapes.** The AoE template tool only draws a circle today
-  (`renderTemplateOverlay()` in `ui/app.js`) -- cone (Burning Hands, a dragon's breath) and line
-  (Lightning Bolt) are common enough spell shapes to be worth the same treatment. Needs real
-  shape math (a cone needs an origin + direction + angle; a line needs an origin + direction +
-  length/width) and a UI decision for how the DM sets direction/angle (drag-to-aim is the natural
-  extension of the existing click-to-place-radius interaction). Circle was deliberately built
-  first and scoped to skip this -- see its own roadmap entry above.
-- [ ] **AoE auto-target-detection.** Once a template shape exists on the grid (circle today,
-  cone/line after the item above), compute which tokens fall inside it and feed that straight
-  into `cast_area_spell`'s `targetIds` instead of the DM reading them off by eye. This was
-  explicitly scoped out when the circle template shipped ("doesn't need to feed targetIds
-  automatically at first... even just 'show me the circle so I can pick targets by eye' is the
-  real win") -- worth doing now that the shape math from the item above will exist anyway, since
-  "is this token's cell inside the shape" is most of what target-detection needs.
+- [x] **Cone and line template shapes.** Done 2026-08-03. A **Shape** dropdown
+  (Circle/Cone/Line) in the map toolbar. Circle keeps its original plain-click placement; Cone
+  and Line need a click-drag instead (mousedown sets the origin, mousemove continuously updates
+  the aim angle from live cursor position, matching the roadmap's own suggested "drag-to-aim"
+  UX). Cone follows the SRD's literal geometry ("width at a given point equals that point's
+  distance from the origin") -- a true triangle, not a circular sector/"pie slice." **Caught a
+  real bug before shipping**: the first implementation tested distance-from-apex + a fixed
+  angle constant, which describes a sector, a genuinely wider shape than the RAW triangle for
+  any off-centerline point -- a unit test written against the RAW text directly caught the
+  mismatch. Fixed with the same rotated-frame technique `pointInLine` already used. Also fixed
+  a real, previously-shipped bug found along the way: `handleMapClick()` was missing a
+  `wallsModeOn` guard, so clicking near a wall to delete it could also silently move whichever
+  token was currently selected.
+- [x] **AoE auto-target-detection.** Done 2026-08-03 (built alongside the item above, using its
+  shape math directly). The template's label now lists every token currently inside the shape
+  (e.g. "20 ft cone — Goblin 1, Goblin 2"), computed via new pure `engine/encounter.js`
+  primitives (`pointInCircle`/`pointInCone`/`pointInLine`). Deliberately stops at "tell the DM
+  who's covered," not "auto-fill `cast_area_spell`'s `targetIds`" -- the DM/Claude still issues
+  the actual cast; this closes the "reading it off by eye" pain point without building a
+  parallel casting UI that would mostly duplicate what typing the cast command already does.
+  9 new unit tests (345 total) plus a full Playwright pass: circle regression check, cone/line
+  placement and live target-detection through a real drag, shape-switch clearing stale
+  placement, and the `wallsModeOn` bug fix. See CLAUDE.md's new "AoE templates" bullet for the
+  full design writeup, including the sector-vs-triangle bug.
+
+Phase 7 complete.
 
 ## Phase 8 -- Save/session ergonomics (small-medium)
 

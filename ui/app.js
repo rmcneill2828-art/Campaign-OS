@@ -66,6 +66,9 @@
   const toggleRuler = document.querySelector("#toggleRuler");
   const toggleTemplate = document.querySelector("#toggleTemplate");
   const templateRadiusInput = document.querySelector("#templateRadius");
+  const templateShapeSelect = document.querySelector("#templateShapeSelect");
+  const templateWidthField = document.querySelector("#templateWidthField");
+  const templateWidthInput = document.querySelector("#templateWidth");
   const toggleWalls = document.querySelector("#toggleWalls");
   const clearWallsButton = document.querySelector("#clearWalls");
   const clearMapImage = document.querySelector("#clearMapImage");
@@ -1928,11 +1931,17 @@
   }
 
   function handleMapClick(event) {
-    if (rulerModeOn) return;
+    if (rulerModeOn || wallsModeOn) return;
     if (event.target.closest(".token")) return;
     if (templateModeOn) {
-      templateCenter = gridCellFromEvent(event);
-      renderTemplateOverlay();
+      // Circle is the only shape a plain click can place -- Cone/Line need a direction, which
+      // only a drag can express (see startTemplateDrag below). Still swallow the click either
+      // way so a cone/line click (or the click that follows a completed drag) never falls
+      // through to moveSelectedToken.
+      if (templateShape === "circle") {
+        templateOrigin = gridCellFromEvent(event);
+        renderTemplateOverlay();
+      }
       return;
     }
     const { x, y } = gridCellFromEvent(event);
@@ -1998,57 +2007,205 @@
 
   map.addEventListener("mousedown", startRulerDrag);
 
-  // AoE template: while toggleTemplate is active, clicking the map centers a circular
-  // template there at the radius set in templateRadiusInput -- a visual aid for eyeballing
-  // cast_area_spell targets, not an automatic target list (see the roadmap for why:
-  // resolving targetIds from the shape needs real geometry work this is deliberately not
-  // doing yet). Unlike the ruler, this persists across renders once placed (until moved or
-  // toggled off), so renderTemplateOverlay() is also called from the end of renderMap()
-  // itself, the same "survives the innerHTML wipe" pattern renderGridHandles() already uses
-  // -- a plain click handler alone would lose it the moment anything else re-renders the map.
+  // AoE template: while toggleTemplate is active, Circle is placed with a plain click
+  // (unchanged from the original circle-only version); Cone and Line instead need a
+  // click-DRAG, since a direction has to come from somewhere (see startTemplateDrag below --
+  // the roadmap's own suggestion, "drag-to-aim is the natural extension of the existing
+  // click-to-place-radius interaction"). Persists across renders once placed (until moved or
+  // toggled off), so renderTemplateOverlay() is also called from the end of renderMap() itself,
+  // the same "survives the innerHTML wipe" pattern renderGridHandles() already uses -- a plain
+  // click/drag handler alone would lose it the moment anything else re-renders the map. The
+  // label also lists which tokens the shape currently covers (engine/encounter.js's
+  // pointInCircle/pointInCone/pointInLine) -- the roadmap's "auto-target-detection" follow-up
+  // to the original circle-only template, which only showed the shape, not who it hit.
   let templateModeOn = false;
-  let templateCenter = null;
+  let templateShape = "circle";
+  let templateOrigin = null; // grid cell -- circle's center, cone's apex, line's origin end
+  let templateAngleDeg = 0; // cone/line only, degrees, 0 = +x/east, screen-space clockwise
+  let templateDragStart = null; // grid cell, set only while actively dragging a cone/line
   let templateOverlayEl = null;
+
+  // Same "vertex-space unit" convention gridVertexFromEvent/vertexPercent (see the Walls tool
+  // below) already use for wall coordinates -- a cell's own center sits at (index - 0.5, index
+  // - 0.5) in this space, so reusing vertexPercent to convert a cone/line polygon's vertices
+  // (built in this same unit system) to render percentages needs no separate conversion
+  // function of its own.
+  function templateShapeCells() {
+    const originCell = { x: templateOrigin.x - 0.5, y: templateOrigin.y - 0.5 };
+    const feetPerSquare = window.CampaignOS.feetPerSquare(state);
+    const lengthCells = Math.max(0, Number(templateRadiusInput.value) || 0) / feetPerSquare;
+    if (templateShape === "circle") return { kind: "circle", center: originCell, radiusCells: lengthCells };
+
+    const angleRad = templateAngleDeg * (Math.PI / 180);
+    const dirX = Math.cos(angleRad);
+    const dirY = Math.sin(angleRad);
+    const perpX = -Math.sin(angleRad);
+    const perpY = Math.cos(angleRad);
+    const farX = originCell.x + dirX * lengthCells;
+    const farY = originCell.y + dirY * lengthCells;
+
+    if (templateShape === "cone") {
+      // RAW: width at a given point along the cone's length equals that point's distance along
+      // the length -- so at the far end (distance = lengthCells) the half-width is half that.
+      const halfWidth = lengthCells / 2;
+      return {
+        kind: "polygon",
+        points: [
+          originCell,
+          { x: farX + perpX * halfWidth, y: farY + perpY * halfWidth },
+          { x: farX - perpX * halfWidth, y: farY - perpY * halfWidth }
+        ]
+      };
+    }
+
+    // line
+    const widthCells = Math.max(0, Number(templateWidthInput.value) || 0) / feetPerSquare;
+    const halfWidth = widthCells / 2;
+    return {
+      kind: "polygon",
+      points: [
+        { x: originCell.x + perpX * halfWidth, y: originCell.y + perpY * halfWidth },
+        { x: farX + perpX * halfWidth, y: farY + perpY * halfWidth },
+        { x: farX - perpX * halfWidth, y: farY - perpY * halfWidth },
+        { x: originCell.x - perpX * halfWidth, y: originCell.y - perpY * halfWidth }
+      ]
+    };
+  }
+
+  // Every active token on the current map whose own cell center falls inside the current
+  // template shape -- purely a display aid (the label lists their names); doesn't write
+  // anywhere or feed an action automatically. The DM/Claude still issues cast_area_spell
+  // themselves, just without having to eyeball which cells the shape actually covers first.
+  function templateCoveredTokenNames(shape) {
+    const CampaignOS = window.CampaignOS;
+    return activeTokens()
+      .filter((token) => {
+        const px = token.x - 0.5;
+        const py = token.y - 0.5;
+        if (shape.kind === "circle") return CampaignOS.pointInCircle(px, py, shape.center.x, shape.center.y, shape.radiusCells);
+        const [p0, p1, p2, p3] = shape.points;
+        const angleRad = templateAngleDeg * (Math.PI / 180);
+        const feetPerSquare = CampaignOS.feetPerSquare(state);
+        const lengthCells = Math.max(0, Number(templateRadiusInput.value) || 0) / feetPerSquare;
+        if (templateShape === "cone") {
+          return CampaignOS.pointInCone(px, py, p0.x, p0.y, angleRad, lengthCells);
+        }
+        const widthCells = Math.max(0, Number(templateWidthInput.value) || 0) / feetPerSquare;
+        // Line's polygon origin corner isn't the origin cell itself (it's offset by half the
+        // width), so pointInLine needs the true origin cell, not p0 -- recomputed the same way
+        // templateShapeCells() derives it, rather than threading it through as a fifth point.
+        const originCell = { x: templateOrigin.x - 0.5, y: templateOrigin.y - 0.5 };
+        return CampaignOS.pointInLine(px, py, originCell.x, originCell.y, angleRad, lengthCells, widthCells);
+      })
+      .map((token) => token.name);
+  }
 
   function renderTemplateOverlay() {
     templateOverlayEl?.remove();
     templateOverlayEl = null;
-    if (!templateModeOn || !templateCenter) return;
+    if (!templateModeOn || !templateOrigin) return;
 
     const grid = currentGrid();
-    const radiusFeet = Math.max(0, Number(templateRadiusInput.value) || 0);
-    const radiusCells = radiusFeet / window.CampaignOS.feetPerSquare(state);
-    const centerPct = cellCenterPercent(templateCenter, grid);
-    // Circle radius expressed directly in the same non-uniform 0-100 coordinate space the
-    // line/center math already uses (see cellCenterPercent) -- looks like a true circle only
-    // when the map's grid is calibrated to square cells, the same assumption the token/grid
-    // rendering already makes everywhere else.
-    const rx = radiusCells * (100 / grid.columns);
-    const ry = radiusCells * (100 / grid.rows);
+    const shape = templateShapeCells();
+    const covered = templateCoveredTokenNames(shape);
+    const sizeLabel = templateShape === "circle"
+      ? `${Math.max(0, Number(templateRadiusInput.value) || 0)} ft radius`
+      : `${Math.max(0, Number(templateRadiusInput.value) || 0)} ft ${templateShape}`;
+    const labelText = covered.length ? `${sizeLabel} — ${covered.join(", ")}` : sizeLabel;
+
+    let shapeSvg;
+    let labelAnchorPct;
+    if (shape.kind === "circle") {
+      const centerPct = vertexPercent(shape.center, grid);
+      // Radius expressed directly in the same non-uniform 0-100 coordinate space the rest of
+      // this file's overlays use -- looks like a true circle only when the map's grid is
+      // calibrated to square cells, the same assumption the token/grid rendering already makes
+      // everywhere else.
+      const rx = shape.radiusCells * (100 / grid.columns);
+      const ry = shape.radiusCells * (100 / grid.rows);
+      shapeSvg = `<ellipse cx="${centerPct.xPct}" cy="${centerPct.yPct}" rx="${rx}" ry="${ry}"></ellipse>`;
+      labelAnchorPct = centerPct;
+    } else {
+      const pointsPct = shape.points.map((point) => vertexPercent(point, grid));
+      shapeSvg = `<polygon points="${pointsPct.map((point) => `${point.xPct},${point.yPct}`).join(" ")}"></polygon>`;
+      // Label anchors on the polygon's centroid (a simple average of its vertices) rather than
+      // the origin -- for a cone/line, the origin sits at one edge of the shape, not its
+      // middle, so anchoring there would push the label off to one side.
+      labelAnchorPct = pointsPct.reduce(
+        (sum, point) => ({ xPct: sum.xPct + point.xPct / pointsPct.length, yPct: sum.yPct + point.yPct / pointsPct.length }),
+        { xPct: 0, yPct: 0 }
+      );
+    }
 
     const overlay = document.createElement("div");
     overlay.className = "template-overlay";
     overlay.innerHTML = `
-      <svg class="template-shape" viewBox="0 0 100 100" preserveAspectRatio="none">
-        <ellipse cx="${centerPct.xPct}" cy="${centerPct.yPct}" rx="${rx}" ry="${ry}"></ellipse>
-      </svg>
-      <span class="template-label" style="left: ${centerPct.xPct}%; top: ${centerPct.yPct}%;">${radiusFeet} ft radius</span>
+      <svg class="template-shape" viewBox="0 0 100 100" preserveAspectRatio="none">${shapeSvg}</svg>
+      <span class="template-label" style="left: ${labelAnchorPct.xPct}%; top: ${labelAnchorPct.yPct}%;">${escapeHtml(labelText)}</span>
     `;
     map.appendChild(overlay);
     templateOverlayEl = overlay;
   }
 
   templateRadiusInput.addEventListener("input", renderTemplateOverlay);
+  templateWidthInput.addEventListener("input", renderTemplateOverlay);
+
+  templateShapeSelect.addEventListener("change", () => {
+    templateShape = templateShapeSelect.value;
+    templateWidthField.hidden = templateShape !== "line";
+    templateOrigin = null; // shape changed -- start fresh rather than reinterpreting stale placement
+    renderTemplateOverlay();
+  });
 
   toggleTemplate.addEventListener("click", () => {
     templateModeOn = !templateModeOn;
     toggleTemplate.textContent = templateModeOn ? "Template On" : "Template";
     toggleTemplate.classList.toggle("active-toggle", templateModeOn);
     if (!templateModeOn) {
-      templateCenter = null;
+      templateOrigin = null;
       renderTemplateOverlay();
     }
   });
+
+  // Cone/Line aiming: mousedown sets the origin/apex cell (unlike Circle's plain click, this
+  // needs the full drag lifecycle -- see the block comment above), mousemove continuously
+  // updates templateAngleDeg from the live cursor position relative to that origin, mouseup
+  // just ends the drag (the placement itself already happened live, there's nothing left to
+  // commit). Angle is computed straight from raw screen-pixel deltas with no unit conversion --
+  // valid specifically because a calibrated (square-cell) grid means pixel-space angles and
+  // real angles already agree, the same assumption every other angled/circular overlay in this
+  // file already leans on.
+  function startTemplateDrag(event) {
+    if (!templateModeOn || templateShape === "circle" || event.button !== 0 || event.target.closest(".token") || !state.mapName) return;
+    event.preventDefault();
+    templateDragStart = gridCellFromEvent(event);
+    templateOrigin = templateDragStart;
+    renderTemplateOverlay();
+    window.addEventListener("mousemove", dragTemplateAim);
+    window.addEventListener("mouseup", endTemplateDrag);
+  }
+
+  function dragTemplateAim(event) {
+    if (!templateDragStart) return;
+    const rect = map.getBoundingClientRect();
+    const grid = currentGrid();
+    const originPxX = rect.left + ((templateDragStart.x - 0.5) / grid.columns) * rect.width;
+    const originPxY = rect.top + ((templateDragStart.y - 0.5) / grid.rows) * rect.height;
+    const dx = event.clientX - originPxX;
+    const dy = event.clientY - originPxY;
+    if (Math.hypot(dx, dy) > 3) { // ignore jitter right at mousedown, before a real direction exists
+      templateAngleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
+    }
+    renderTemplateOverlay();
+  }
+
+  function endTemplateDrag() {
+    templateDragStart = null;
+    window.removeEventListener("mousemove", dragTemplateAim);
+    window.removeEventListener("mouseup", endTemplateDrag);
+  }
+
+  map.addEventListener("mousedown", startTemplateDrag);
 
   // Walls: click-drag between two grid VERTICES (not cells -- see gridVertexFromEvent) draws
   // a wall while toggleWalls is active; clicking near an existing wall without dragging

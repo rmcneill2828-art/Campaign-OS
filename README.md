@@ -99,6 +99,20 @@ dependencies to install for the app itself. See Tests, below, for running the te
   the reaction attack -- it always resolves as one attack (never a full Multiattack, even for a
   monster that has one), and each token gets one reaction back at the start of its own next
   turn, same as a real table.
+- Ruler: a **Ruler** toggle in the map toolbar; while on, click-drag on the map shows live grid
+  distance in feet (using the map's own ft/square scale and the RAW alternating-diagonal rule --
+  the same math a real move would cost) without actually moving anything. Clears on release.
+- AoE templates: a **Template** toggle in the map toolbar with a Circle/Cone/Line shape picker.
+  Circle is placed with a plain click; Cone and Line need a click-drag instead, since they also
+  need a direction -- drag from the origin toward wherever you're aiming. A **Size (ft)** field
+  sets the circle's radius or the cone/line's length; Line also gets a **Width (ft)** field
+  (defaults to 5, the width most line spells use). The cone shape follows the SRD rule
+  literally ("width at a given point equals that point's distance from the origin," a true
+  triangle, not a rounder "cone-ish" wedge). The label on the shape lists which tokens it
+  currently covers (e.g. "20 ft cone — Goblin 1, Goblin 2") so you don't have to eyeball which
+  cells are covered before typing a `cast_area_spell` command -- it's still a visual aid, not
+  an automatic caster/targeting flow; you (or Claude) still issue the actual cast yourselves,
+  naming those tokens.
 - Ability scores and saving throws: every token can carry real STR/DEX/CON/INT/WIS/CHA
   scores -- editable on the token sheet, filled in automatically for the six `spawn`ed
   monsters (real SRD ability scores, not guesses) and for any imported character/NPC sheet

@@ -450,6 +450,49 @@ See README.md for the full feature list and usage. Notes specific to working on 
     Testing section below describes -- there's no automated suite entry for this (UI/File
     System Access glue, same as the existing request/response flow), just a one-off dev-time
     verification.
+- AoE templates (Circle/Cone/Line): entirely a `ui/app.js`-local UI concern, same as when
+  Circle shipped alone -- `templateShape`/`templateOrigin`/`templateAngleDeg` never touch
+  `state`, never persist. The shape MATH, though, lives in `engine/encounter.js`
+  (`pointInCircle`/`pointInCone`/`pointInLine`), pure and unit-tested, for the same reason
+  `segmentsIntersect`/`distanceToSegment` do -- `ui/app.js` calls them both to render the
+  overlay and to auto-detect which tokens the shape currently covers (the roadmap's
+  "auto-target-detection" item: the label lists covered token names, e.g. `"20 ft cone —
+  Goblin 1, Goblin 2"`, so the DM doesn't have to eyeball which cells are covered before typing
+  a `cast_area_spell` command -- it does NOT call `castAreaSpell` itself; the DM/Claude still
+  issues that separately). **`pointInCone` had a real bug caught by its own unit tests before
+  shipping**: the RAW SRD text ("the cone's width at a given point along its length is equal to
+  that point's distance from the point of origin") describes a TRUE TRIANGLE, but the first
+  implementation tested `distance-from-apex <= length AND angle-from-centerline <=
+  atan(0.5)` -- a circular SECTOR ("pie slice"), a genuinely different, wider shape than a
+  triangle for any point off the centerline. The fix uses the same rotated-frame technique
+  `pointInLine` already uses (rotate the point into the shape's own reference frame, apex/
+  origin at (0,0), axis along +x): a cone point is in-shape when its along-axis position
+  (`localX`) is within `[0, length]` and its perpendicular offset (`localY`) satisfies
+  `abs(localY) <= localX / 2` -- literally encoding "half-width at this point equals half this
+  point's distance along the axis," i.e. width = distance, with no separate angle constant
+  needed at all. If you touch this again, re-derive from the RAW text directly rather than
+  reasoning informally about "a cone shape" -- it is more specific (narrower) than the word
+  usually implies. All three shapes' geometry is computed in a **cell-unit coordinate space**
+  (a cell's center sits at `index - 0.5`, the same convention wall vertices already use) so
+  `vertexPercent()` (built for walls) converts template vertices to render percentages too, no
+  separate conversion function needed. **Only Circle is placed with a plain click** (unchanged
+  since it shipped alone); **Cone and Line need a click-drag** instead, since a direction has
+  to come from somewhere -- `startTemplateDrag()`/`dragTemplateAim()`/`endTemplateDrag()` mirror
+  the Ruler/Walls drag lifecycle, computing the aim angle straight from raw screen-pixel deltas
+  (`Math.atan2(dy, dx)`, no unit conversion) -- valid specifically because a calibrated
+  square-cell grid means pixel-space angles and real angles already agree, the same assumption
+  every other angled/circular overlay in this file leans on. Switching the shape dropdown
+  clears any current placement (`templateOrigin = null`) rather than trying to reinterpret a
+  stale circle center as a cone apex or vice versa. **Starting a Cone/Line drag on a token's own
+  cell is excluded** (`event.target.closest(".token")`), the same convention Circle's click and
+  the Ruler tool already use -- a caster aiming a cone from their own square has to start the
+  drag from just beside themselves, a known, consistent (not new) limitation.
+  `handleMapClick()` picked up a real, previously-shipped bug while this work was in progress
+  and got fixed alongside it: it was missing a `wallsModeOn` guard, so clicking near a wall to
+  delete it (Walls tool) would ALSO fall through to `moveSelectedToken()` afterward if a token
+  happened to be selected -- the browser's native mousedown-then-click sequence fires a real
+  `click` event after `endWallDrag()` runs, and nothing had been suppressing it. Now guarded
+  the same way `rulerModeOn` already was.
 - Line of sight / walls: `state.maps[mapName].walls` is a plain array of `{x1,y1,x2,y2}`
   segments in **grid VERTEX space** -- integer coordinates `0..columns`/`0..rows`, the corners
   *between* cells -- not the `1..columns` cell-INDEX space token `x`/`y` use. Absent/empty

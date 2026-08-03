@@ -2493,6 +2493,39 @@ test("findNearestWallIndex finds the closest wall within the given distance, nul
   assert.equal(CampaignOS.findNearestWallIndex(state, "Urskelde", 50, 50, 0.5), null);
 });
 
+test("pointInCircle: inside at or under the radius, outside beyond it", () => {
+  assert.equal(CampaignOS.pointInCircle(0, 0, 0, 0, 5), true, "exactly the center");
+  assert.equal(CampaignOS.pointInCircle(5, 0, 0, 0, 5), true, "exactly at the radius");
+  assert.equal(CampaignOS.pointInCircle(5.1, 0, 0, 0, 5), false);
+});
+
+test("pointInCone matches the RAW 'width equals distance' cone shape", () => {
+  // Apex at origin, pointing along +x (angle 0), 10-cell reach.
+  assert.equal(CampaignOS.pointInCone(0, 0, 0, 0, 0, 10), true, "the apex's own point");
+  assert.equal(CampaignOS.pointInCone(5, 0, 0, 0, 0, 10), true, "straight ahead, well within reach");
+  assert.equal(CampaignOS.pointInCone(15, 0, 0, 0, 0, 10), false, "straight ahead but beyond the cone's length");
+  // RAW: width at a given distance equals that distance -- at distance 10 the cone is 10 wide,
+  // so its edge sits +-5 off the centerline there.
+  assert.equal(CampaignOS.pointInCone(10, 5, 0, 0, 0, 10), true, "exactly on the cone's edge at max range");
+  assert.equal(CampaignOS.pointInCone(10, 5.5, 0, 0, 0, 10), false, "just outside the cone's edge");
+  assert.equal(CampaignOS.pointInCone(-5, 0, 0, 0, 0, 10), false, "directly behind the apex");
+});
+
+test("pointInLine matches a rectangle of the given length/width along the aimed direction", () => {
+  // Origin at (0,0), pointing along +x (angle 0), 20-cell length, 1-cell width.
+  assert.equal(CampaignOS.pointInLine(0, 0, 0, 0, 0, 20, 1), true, "the origin itself");
+  assert.equal(CampaignOS.pointInLine(10, 0.4, 0, 0, 0, 20, 1), true, "well within the strip, halfway down its length");
+  assert.equal(CampaignOS.pointInLine(10, 0.6, 0, 0, 0, 20, 1), false, "outside the 1-cell width (half-width 0.5)");
+  assert.equal(CampaignOS.pointInLine(25, 0, 0, 0, 0, 20, 1), false, "beyond the line's length");
+  assert.equal(CampaignOS.pointInLine(-1, 0, 0, 0, 0, 20, 1), false, "behind the origin");
+
+  // Aimed along +y instead of +x (a 90-degree rotation), to confirm the frame rotation works
+  // in general, not just for the axis-aligned angle-0 case above.
+  const rotated = Math.PI / 2;
+  assert.equal(CampaignOS.pointInLine(0, 10, 0, 0, rotated, 20, 1), true, "ahead of the origin along the rotated direction");
+  assert.equal(CampaignOS.pointInLine(10, 0, 0, 0, rotated, 20, 1), false, "off to the side of the rotated direction");
+});
+
 test("isVisibleToParty: a hero is always visible, a monster depends on line of sight to any hero", () => {
   let state = stateOnMap("Urskelde");
   const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero" });

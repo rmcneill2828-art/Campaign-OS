@@ -40,10 +40,22 @@
                 Grid
               </label>
               <button id="toggleRuler" type="button" title="While on, click-drag on the map to measure grid distance (using the map's ft/square scale and the RAW alternating-diagonal rule) instead of moving the selected token.">Ruler</button>
-              <button id="toggleTemplate" type="button" title="While on, click the map to center a circular AoE template there (radius set below) -- a visual aid for picking cast_area_spell targets by eye, not an automatic target list.">Template</button>
+              <button id="toggleTemplate" type="button" title="While on: for Circle, click the map to center it; for Cone/Line, click-drag from the origin to aim it. A visual aid for picking cast_area_spell targets -- the label also lists which tokens the shape currently covers.">Template</button>
+              <label class="template-shape-input">
+                Shape
+                <select id="templateShapeSelect" aria-label="AoE template shape">
+                  <option value="circle" selected>Circle</option>
+                  <option value="cone">Cone</option>
+                  <option value="line">Line</option>
+                </select>
+              </label>
               <label class="template-radius-input">
-                Radius (ft)
-                <input id="templateRadius" type="number" min="5" step="5" value="20" aria-label="AoE template radius in feet">
+                Size (ft)
+                <input id="templateRadius" type="number" min="5" step="5" value="20" aria-label="AoE template radius (Circle) or length (Cone/Line) in feet">
+              </label>
+              <label class="template-radius-input" id="templateWidthField" hidden>
+                Width (ft)
+                <input id="templateWidth" type="number" min="5" step="5" value="5" aria-label="AoE template width in feet (Line only)">
               </label>
               <button id="toggleWalls" type="button" title="While on, click-drag to draw a wall (blocks line of sight in the player window); click near an existing wall to remove it instead. A map with no walls has no line-of-sight restriction at all.">Walls</button>
               <button id="clearWalls" type="button" title="Removes every wall drawn on this map.">Clear Walls</button>

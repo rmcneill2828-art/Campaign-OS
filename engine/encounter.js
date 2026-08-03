@@ -1815,6 +1815,57 @@
     return bestIndex;
   }
 
+  // AoE template shape geometry -- pure point-in-shape tests, all working in grid CELL units
+  // (not feet, not percent) so callers do the feet<->cells conversion once at the boundary,
+  // same layering as everywhere else distance/geometry math lives in this file. These exist so
+  // ui/app.js's AoE template tool can auto-detect which tokens a drawn circle/cone/line
+  // actually covers (the roadmap's "auto-target-detection" follow-up to the circle-only
+  // template) rather than the DM reading it off by eye -- the template's own placement state
+  // (shape, origin, angle, size) still lives in ui/app.js, not `state` (unchanged from the
+  // circle-only version: purely a local UI concern, never persisted), only the shape math
+  // moved here for the same testability reason segmentsIntersect/distanceToSegment did.
+  function pointInCircle(px, py, centerX, centerY, radiusCells) {
+    return Math.hypot(px - centerX, py - centerY) <= radiusCells;
+  }
+
+  // RAW cone geometry (SRD): "the cone's width at a given point along its length is equal to
+  // that point's distance from the point of origin" -- read literally, this is a TRUE
+  // TRIANGLE (apex + two straight edges), not a circular sector ("pie slice") of some fixed
+  // angle -- those are different shapes: a sector bulges wider than a triangle at the same
+  // along-axis distance for any point off the centerline. The correct, RAW-literal test is the
+  // same rotated-frame technique pointInLine already uses (origin at the apex, axis along +x):
+  // a point is in the cone if its along-axis position (localX) is within [0, length], and its
+  // perpendicular offset (localY) is within half of localX itself -- literally "half-width at
+  // this point along the length equals half this point's distance along the length," i.e.
+  // width = distance. `angleRad` is the cone's own center-line direction (0 = +x/east,
+  // increasing clockwise in screen space, matching Math.atan2(dy, dx) on screen pixel deltas).
+  function pointInCone(px, py, apexX, apexY, angleRad, lengthCells) {
+    const dx = px - apexX;
+    const dy = py - apexY;
+    const cos = Math.cos(-angleRad);
+    const sin = Math.sin(-angleRad);
+    const localX = dx * cos - dy * sin;
+    const localY = dx * sin + dy * cos;
+    if (localX < 0 || localX > lengthCells) return false;
+    return Math.abs(localY) <= localX / 2;
+  }
+
+  // A line "originates from a point ... and extends [length] in a certain direction, with a
+  // total length you choose" (RAW) at some fixed width (5 ft for the overwhelming majority of
+  // line spells, but a caller-supplied `widthCells` rather than a hardcoded 5 ft here, since
+  // it's already a per-spell UI input, not a rules constant the way the cone's angle is).
+  // Tests the point by rotating it into the line's own reference frame (origin at (0,0),
+  // direction along +x) rather than testing against four separately-rotated edges.
+  function pointInLine(px, py, originX, originY, angleRad, lengthCells, widthCells) {
+    const dx = px - originX;
+    const dy = py - originY;
+    const cos = Math.cos(-angleRad);
+    const sin = Math.sin(-angleRad);
+    const localX = dx * cos - dy * sin;
+    const localY = dx * sin + dy * cos;
+    return localX >= 0 && localX <= lengthCells && Math.abs(localY) <= widthCells / 2;
+  }
+
   // True if nothing on `mapName`'s wall list blocks the straight line between grid CELL
   // coordinates (ax, ay) and (bx, by) -- both converted to their cell-center point in the same
   // vertex space walls are stored in (a cell's center sits at (index - 0.5), always a
@@ -2625,6 +2676,9 @@
     moveToken,
     nextTurn,
     parseCommand,
+    pointInCircle,
+    pointInCone,
+    pointInLine,
     removeToken,
     restoreResource,
     rollAbilityCheck,
