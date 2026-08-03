@@ -115,16 +115,28 @@ Phase 2 complete.
 
 ## Phase 3 -- Real fog of war
 
-Current "fog" (`toggleFog`) is cosmetic only -- a CSS `nth-child` pattern in `ui/styles.css`, not
-tied to grid position or vision. Replace with a real per-cell reveal state:
-- [ ] Design the data shape: likely `state.fogTiles` per map, a sparse set/grid of revealed cells
-  (same sparse-map convention the rest of the engine already uses).
-  DM tools to reveal/hide tiles (paint, or reveal-around-token-radius).
-- [ ] Rendering: now that the player window (Phase 5) exists, this is genuinely worth building --
-  hidden tiles need to actually hide something on a screen the DM isn't looking at for it to
-  matter beyond "hide it from myself." `player.html`/`ui/playerView.js` is where fog would need
-  to render (a covering layer over unrevealed `.map-tile`s); the DM's own `index.html` view can
-  keep showing everything, same as any real table's DM screen.
+- [x] **Real per-cell fog of war.** Done 2026-08-03. Replaced the old cosmetic `toggleFog`
+  (a CSS `nth-child` pattern completely disconnected from grid position or vision) outright --
+  `state.fogEnabled`, the button, and the CSS rules were all deleted, not kept alongside the
+  real thing, since a fake toggle surviving next to genuine fog of war would be actively
+  misleading. Turned out not to need a separate "design the data shape / manual paint tools"
+  step at all -- Phase 4's walls + line-of-sight primitives (`hasLineOfSight`,
+  `isVisibleToParty`), built the same day, made fog of war fully **automatic** instead: a new
+  `visibleCellsForParty()` computes every cell any hero currently sees, and
+  `revealVisibleTiles()` merges that into `state.maps[mapName].revealedTiles` (sparse
+  `{"x,y": true}`, once revealed stays revealed) every time the encounter saves -- no manual
+  reveal/hide painting UI needed, since the same walls a DM draws for token-hiding already
+  drive this. `ui/playerView.js` renders the standard three-state model (never explored =
+  hidden entirely, explored-but-not-currently-visible = dimmed, currently visible = normal),
+  gated behind the same "map has walls" check the token filter uses -- a wall-free map has no
+  fog at all, matching every other "no walls = no restriction" default in this feature set.
+  **Reset Fog** (map toolbar, next to Clear Walls) forgets a map's explored memory. Only the
+  player window ever shows fog; the DM's own map is untouched. 9 new unit tests (338 total)
+  plus a full Playwright pass: confirmed the old toggle is gone, and walked the whole
+  unexplored -> visible -> dimmed-and-remembered -> reset cycle live through both browser tabs.
+  See CLAUDE.md's new "Fog of war" bullet for the full design writeup.
+
+Phase 3 complete.
 
 ## Phase 4 -- Line of sight / vision blocking
 
@@ -151,10 +163,8 @@ tied to grid position or vision. Replace with a real per-cell reveal state:
   reappears, redraw + Clear Walls with the confirm dialog. See CLAUDE.md's new "Line of sight /
   walls" bullet for the full design writeup.
 
-Phase 4 complete (line-of-sight token filtering). Fog of war (Phase 3, a persisted per-cell
-reveal/exploration state) remains unbuilt -- skipped by explicit user choice, revisit if it
-becomes wanted later; the wall data this phase added would be a natural input to it (a cell
-behind a wall and never in any hero's line of sight is a reasonable "never explored" signal).
+Phase 4 complete (line-of-sight token filtering). This turned out to be a direct prerequisite
+for Phase 3 (fog of war), built the same day -- see Phase 3 above.
 
 ## Phase 5 -- Shared/player view (biggest architectural decision on this list)
 

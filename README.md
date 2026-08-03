@@ -262,7 +262,6 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Keep token placement scoped to the active map
 - Automatic encounter persistence across reloads
 - Remembered campaign search, filters, and selection
-- Fog tiles
 - Save and load encounter state in the browser
 - Simple command input, including `spawn three goblins`
 - Optional Claude DM bridge for real narration and tool-calling (see below)
@@ -306,8 +305,17 @@ dependencies to install for the app itself. See Tests, below, for running the te
   hiding a token -- see Player window below), the same "if any PC can see it, the table sees
   it" convention a real table uses. A map with no walls drawn has no line-of-sight restriction
   at all -- draw a wall only where you actually want one to matter. Straight-line-of-sight only
-  (no vision radius/darkvision distance limit, no fog-of-war memory of previously seen areas) --
-  a deliberate first-cut simplification.
+  (no vision radius/darkvision distance limit) -- a deliberate first-cut simplification.
+- Fog of war: on any map with walls drawn (see above -- walls are what make this mean anything;
+  a wall-free map has none), the player window automatically tracks which tiles the party has
+  ever seen. A tile is either never explored (hidden entirely), explored but not currently
+  visible (shown dimmed -- terrain the party remembers, but nothing currently happening there),
+  or currently visible (shown in full) -- the standard three-state fog-of-war model. This is
+  fully automatic: there's no painting or manual reveal tool, it's computed from party line of
+  sight (the same mechanism that hides tokens, see above) every time the encounter saves.
+  **Reset Fog** (map toolbar) forgets everything explored on the current map -- for reusing a
+  map for a different area, or deliberately re-hiding terrain. Only the player window ever
+  shows fog -- the DM's own map always shows everything, the same as a real table's DM screen.
 
 Local command examples (works with or without the Claude DM bridge connected):
 
@@ -552,6 +560,10 @@ A few things worth knowing:
   token's line of sight, is also left out of the player window -- automatically, on top of the
   manual hide/reveal toggle above, not instead of it. Draw walls only on maps where you
   actually want this to matter; a map with none behaves exactly as before.
+- On a map with walls, the map itself also fades in and out with fog of war (see Fog of war
+  above) -- unexplored terrain hidden entirely, explored-but-not-currently-visible terrain
+  dimmed. Both the token filtering and the fog shading come from the same underlying line of
+  sight, so they always agree with each other.
 - It's a separate browser tab/window, not a new device -- for now this only helps a table sharing
   one physical screen setup (a laptop plus a second monitor/TV), not players joining remotely
   from their own devices. That would need real multiplayer (a server or sync service), a much

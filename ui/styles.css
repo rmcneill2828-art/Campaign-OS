@@ -305,6 +305,20 @@ h1 {
   background: rgba(215, 181, 109, 0.08);
 }
 
+/* Player-view-only fog of war -- the main app's own map never applies these (the DM sees
+   everything, same convention as exact HP/hidden tokens). Solid enough to fully obscure the
+   map background image beneath (a plain child-over-parent-background paint order, no z-index
+   needed) for a tile never explored; a lighter, translucent version for one explored before
+   but not currently visible. */
+.map-tile-unexplored {
+  background: #0a0c08;
+  border-color: rgba(10, 12, 8, 0.9);
+}
+
+.map-tile-dimmed {
+  background: rgba(10, 12, 8, 0.72);
+}
+
 .ruler-overlay {
   position: absolute;
   inset: 0;
@@ -469,18 +483,6 @@ h1 {
 
 body.grid-dragging {
   user-select: none;
-}
-
-body[data-fog="on"] .map-tile:nth-child(3n) {
-  background: rgba(5, 7, 5, 0.16);
-}
-
-body[data-fog="on"] .map-tile:nth-child(5n) {
-  background: rgba(5, 7, 5, 0.1);
-}
-
-body[data-fog="on"] .map-tile:hover {
-  background: rgba(215, 181, 109, 0.12);
 }
 
 .token {

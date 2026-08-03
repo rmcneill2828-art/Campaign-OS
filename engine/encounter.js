@@ -260,7 +260,6 @@
   const initialState = {
     mapName: "",
     maps: {},
-    fogEnabled: false,
     selectedTokenId: null,
     log: [],
     tokens: [],
@@ -1835,6 +1834,77 @@
     return heroes.some((hero) => hasLineOfSight(state, token.mapName, hero.x, hero.y, token.x, token.y));
   }
 
+  // Every currently-visible cell for the party on `mapName` (union over every hero-type token
+  // there, same convention as isVisibleToParty) -- an array of [x, y] cell coordinates. No
+  // hero tokens on the map returns an EMPTY array, the opposite default from
+  // isVisibleToParty's own "no heroes = show everything": there being no party to compute
+  // visibility for is genuinely "nothing explored yet," not "nothing to hide," so this
+  // shouldn't claim the whole map has been seen.
+  function visibleCellsForParty(state, mapName) {
+    const heroes = tokensOnCurrentMap({ ...state, mapName }).filter((token) => token.type === "hero");
+    if (!heroes.length) return [];
+    const grid = currentGrid({ ...state, mapName });
+    const cells = [];
+    for (let y = 1; y <= grid.rows; y += 1) {
+      for (let x = 1; x <= grid.columns; x += 1) {
+        if (heroes.some((hero) => hasLineOfSight(state, mapName, hero.x, hero.y, x, y))) {
+          cells.push([x, y]);
+        }
+      }
+    }
+    return cells;
+  }
+
+  // Merges every currently-visible cell into `mapName`'s persisted "explored" memory
+  // (state.maps[mapName].revealedTiles, a sparse {"x,y": true} map) -- the standard fog-of-war
+  // three-state model (never seen / explored-but-not-currently-visible / currently visible):
+  // once a tile is marked explored here it stays that way until an explicit resetFog(), even
+  // as the party moves elsewhere and it drops out of current visibility. ui/app.js calls this
+  // from saveEncounter() -- the one choke point virtually every mutation already flows through
+  // (see the Undo bullet above for why that's a reliable hook) -- rather than from each
+  // individual action that could move a hero, so there's no risk of a new movement path
+  // forgetting to trigger a reveal. Skips the whole computation and returns the SAME state
+  // reference for a map with no walls drawn: walls are what make hasLineOfSight (and
+  // therefore visibility) mean anything at all, a wall-free map is already always fully
+  // visible via isVisibleToParty's own fast path, so there's no memory worth tracking for one
+  // -- this is also what keeps calling this on every save a true no-op for every map that's
+  // never had a wall drawn on it (i.e. almost all of them). Also returns the same reference
+  // when nothing NEW was revealed this call, matching every other no-op-means-no-clone
+  // primitive in this file.
+  function revealVisibleTiles(state, mapName) {
+    const walls = state.maps?.[mapName]?.walls;
+    if (!Array.isArray(walls) || !walls.length) return state;
+
+    const visible = visibleCellsForParty(state, mapName);
+    const current = state.maps?.[mapName]?.revealedTiles || {};
+    const merged = { ...current };
+    let changed = false;
+    visible.forEach(([x, y]) => {
+      const key = `${x},${y}`;
+      if (!merged[key]) {
+        merged[key] = true;
+        changed = true;
+      }
+    });
+    if (!changed) return state;
+
+    const nextState = clone(state);
+    nextState.maps[mapName] = { ...nextState.maps[mapName], revealedTiles: merged };
+    return nextState;
+  }
+
+  // Forgets everything a map's revealedTiles has accumulated -- a DM control (Reset Fog) for
+  // reusing a map for a different area, or deliberately re-hiding terrain. Same state
+  // reference, unchanged, if there's nothing to reset (no revealedTiles at all, or already
+  // empty), matching removeWall's own "rejected/no-op" convention.
+  function resetFog(state, mapName) {
+    const current = state.maps?.[mapName];
+    if (!current || !current.revealedTiles || !Object.keys(current.revealedTiles).length) return state;
+    const nextState = clone(state);
+    nextState.maps[mapName] = { ...current, revealedTiles: {} };
+    return nextState;
+  }
+
   // The real-world scale of one grid square on the current map, in feet. Defaults to the
   // standard 5 ft/square (used for both distance-based movement and the diagonal-cost rule).
   function feetPerSquare(state) {
@@ -2506,6 +2576,9 @@
     hasRealMapData,
     isVisibleToParty,
     longRest,
+    resetFog,
+    revealVisibleTiles,
+    visibleCellsForParty,
     moveToken,
     nextTurn,
     parseCommand,

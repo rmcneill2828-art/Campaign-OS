@@ -33,7 +33,6 @@ test("createState returns an empty default state", () => {
   assert.deepEqual(state, {
     mapName: "",
     maps: {},
-    fogEnabled: false,
     selectedTokenId: null,
     log: [],
     tokens: [],
@@ -2519,6 +2518,85 @@ test("isVisibleToParty treats a map with no PCs on it as fully visible (nothing 
   state = CampaignOS.addWall(state, "Urskelde", 0, 0, 100, 100);
   const goblin = state.tokens.find((t) => t.name === "Goblin 1");
   assert.equal(CampaignOS.isVisibleToParty(state, goblin), true);
+});
+
+test("visibleCellsForParty returns nothing when there are no hero tokens on the map", () => {
+  let state = stateOnMap("Urskelde");
+  state.maps.Urskelde = { columns: 5, rows: 4 };
+  state = CampaignOS.addToken(state, { name: "Goblin 1", type: "monster" }).state;
+  assert.deepEqual(CampaignOS.visibleCellsForParty(state, "Urskelde"), []);
+});
+
+test("visibleCellsForParty returns every cell on a wall-free map (hasLineOfSight's own fast path)", () => {
+  let state = stateOnMap("Urskelde");
+  state.maps.Urskelde = { columns: 5, rows: 4 };
+  const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero" });
+  state = CampaignOS.setTokenPosition(hero.state, hero.token.id, 1, 1);
+  assert.equal(CampaignOS.visibleCellsForParty(state, "Urskelde").length, 20); // 5 columns * 4 rows
+});
+
+test("visibleCellsForParty excludes cells a wall blocks from every hero", () => {
+  let state = stateOnMap("Urskelde");
+  state.maps.Urskelde = { columns: 5, rows: 4 };
+  const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero" });
+  state = CampaignOS.setTokenPosition(hero.state, hero.token.id, 1, 2);
+  state = CampaignOS.addWall(state, "Urskelde", 3, 0, 3, 3); // splits columns 1-3 from 4-5
+
+  const cells = CampaignOS.visibleCellsForParty(state, "Urskelde").map(([x, y]) => `${x},${y}`);
+  assert.ok(cells.includes("1,2"), "hero's own cell is visible");
+  assert.ok(cells.includes("2,2"), "same side as the hero");
+  assert.ok(!cells.includes("5,2"), "blocked by the wall");
+});
+
+test("revealVisibleTiles is a no-op on a map with no walls", () => {
+  let state = stateOnMap("Urskelde");
+  const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero" });
+  state = CampaignOS.setTokenPosition(hero.state, hero.token.id, 1, 1);
+  assert.equal(CampaignOS.revealVisibleTiles(state, "Urskelde"), state);
+});
+
+test("revealVisibleTiles merges newly visible cells into revealedTiles, and is a no-op once nothing new is visible", () => {
+  let state = stateOnMap("Urskelde");
+  state.maps.Urskelde = { columns: 5, rows: 4 };
+  const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero" });
+  state = CampaignOS.setTokenPosition(hero.state, hero.token.id, 1, 2);
+  state = CampaignOS.addWall(state, "Urskelde", 3, 0, 3, 3);
+
+  const revealed = CampaignOS.revealVisibleTiles(state, "Urskelde");
+  assert.notEqual(revealed, state, "changed -- new tiles revealed");
+  assert.equal(revealed.maps.Urskelde.revealedTiles["1,2"], true);
+  assert.equal(revealed.maps.Urskelde.revealedTiles["5,2"], undefined, "still blocked by the wall");
+
+  const again = CampaignOS.revealVisibleTiles(revealed, "Urskelde");
+  assert.equal(again, revealed, "same state reference -- nothing newly revealed");
+});
+
+test("revealVisibleTiles remembers a cell even after the hero that revealed it moves away", () => {
+  let state = stateOnMap("Urskelde");
+  state.maps.Urskelde = { columns: 5, rows: 4 };
+  const hero = CampaignOS.addToken(state, { name: "Darkhawk", type: "hero" });
+  state = CampaignOS.setTokenPosition(hero.state, hero.token.id, 1, 1);
+  state = CampaignOS.addWall(state, "Urskelde", 3, 0, 3, 3);
+  state = CampaignOS.revealVisibleTiles(state, "Urskelde");
+  assert.equal(state.maps.Urskelde.revealedTiles["1,1"], true);
+
+  state = CampaignOS.setTokenPosition(state, hero.token.id, 5, 1); // hero now on the far side
+  state = CampaignOS.revealVisibleTiles(state, "Urskelde");
+  assert.equal(state.maps.Urskelde.revealedTiles["1,1"], true, "still remembered even though the hero left");
+  assert.equal(state.maps.Urskelde.revealedTiles["5,1"], true, "newly revealed on the far side");
+});
+
+test("resetFog clears a map's revealedTiles, and is a no-op when there's nothing to reset", () => {
+  let state = stateOnMap("Urskelde");
+  state.maps.Urskelde = { columns: 5, rows: 4, revealedTiles: { "1,1": true } };
+  const reset = CampaignOS.resetFog(state, "Urskelde");
+  assert.deepEqual(reset.maps.Urskelde.revealedTiles, {});
+
+  const noOp = CampaignOS.resetFog(reset, "Urskelde");
+  assert.equal(noOp, reset, "already empty -- same state reference");
+
+  const stateWithNoFogField = stateOnMap("Urskelde");
+  assert.equal(CampaignOS.resetFog(stateWithNoFogField, "Urskelde"), stateWithNoFogField);
 });
 
 test("castSpell (leveled) consumes the caster's action, rejecting a second leveled cast the same turn", () => {

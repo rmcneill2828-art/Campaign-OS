@@ -95,11 +95,29 @@
     map.style.setProperty("--map-aspect-ratio", settings.aspectRatio);
     map.classList.toggle("grid-hidden", !settings.showGrid);
 
+    // Fog of war -- the three-state model: never explored (solid, hides terrain and anything
+    // on it), explored but not currently visible (dimmed -- the party has been here before,
+    // but can't see it right now), currently visible (no overlay at all). Only active on a map
+    // that actually has walls drawn -- engine/encounter.js's revealVisibleTiles() only ever
+    // populates revealedTiles for one (see its own comment for why), and a wall-free map
+    // should render exactly as it always has, with no fog at all, not "everything unexplored."
+    const walls = state.maps?.[state.mapName]?.walls;
+    const fogActive = Array.isArray(walls) && walls.length > 0;
+    const revealedTiles = state.maps?.[state.mapName]?.revealedTiles || {};
+    const currentlyVisible = fogActive
+      ? new Set(window.CampaignOS.visibleCellsForParty(state, state.mapName).map(([x, y]) => `${x},${y}`))
+      : null;
+
     map.innerHTML = "";
     for (let y = 1; y <= settings.rows; y += 1) {
       for (let x = 1; x <= settings.columns; x += 1) {
         const tile = document.createElement("div");
         tile.className = "map-tile";
+        if (fogActive) {
+          const key = `${x},${y}`;
+          if (!revealedTiles[key]) tile.classList.add("map-tile-unexplored");
+          else if (!currentlyVisible.has(key)) tile.classList.add("map-tile-dimmed");
+        }
         map.appendChild(tile);
       }
     }

@@ -63,7 +63,6 @@
   const mapFitMode = document.querySelector("#mapFitMode");
   const tokenSize = document.querySelector("#tokenSize");
   const feetPerSquareInput = document.querySelector("#feetPerSquare");
-  const toggleFog = document.querySelector("#toggleFog");
   const toggleRuler = document.querySelector("#toggleRuler");
   const toggleTemplate = document.querySelector("#toggleTemplate");
   const templateRadiusInput = document.querySelector("#templateRadius");
@@ -331,9 +330,6 @@
     const previousMapName = state.mapName;
     reconcileActiveMap();
     if (state.mapName !== previousMapName) saveEncounter();
-    document.body.dataset.fog = state.fogEnabled ? "on" : "off";
-    toggleFog.textContent = state.fogEnabled ? "Fog On" : "Fog Off";
-    toggleFog.classList.toggle("active-toggle", state.fogEnabled);
     adjustGrid.classList.toggle("active-toggle", gridAdjusting);
     adjustGrid.textContent = gridAdjusting ? "Adjusting Grid" : "Adjust Grid";
     document.querySelector("h1").textContent = state.mapName || "No map loaded";
@@ -2164,6 +2160,13 @@
     commandResult.textContent = "Walls cleared.";
   });
 
+  document.querySelector("#resetFog").addEventListener("click", () => {
+    if (!state.mapName) return;
+    if (!window.confirm(`Forget everything explored on ${state.mapName}? The player window will re-hide it until heroes see it again.`)) return;
+    updateState(window.CampaignOS.resetFog(state, state.mapName));
+    commandResult.textContent = "Fog of war reset.";
+  });
+
   commandForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (dmBridgeDirHandle) {
@@ -2845,12 +2848,6 @@
     render();
   });
 
-  toggleFog.addEventListener("click", () => {
-    state.fogEnabled = !state.fogEnabled;
-    saveEncounter();
-    render();
-  });
-
   toggleRuler.addEventListener("click", () => {
     rulerModeOn = !rulerModeOn;
     toggleRuler.textContent = rulerModeOn ? "Ruler On" : "Ruler";
@@ -2958,6 +2955,15 @@
 
   function saveEncounter() {
     undoSnapshot = localStorage.getItem(storageKey);
+    // Fog-of-war memory: recompute which cells are newly visible to the party and fold them
+    // into the active map's revealedTiles before persisting -- saveEncounter() is the one
+    // choke point virtually every mutation already flows through (same reasoning the Undo
+    // hook above uses), so hooking the reveal in here means no individual action (moveToken,
+    // a DM-bridge move, spawning a monster, anything) has to remember to trigger it itself. A
+    // true no-op (same state reference back) for the overwhelmingly common case -- a map with
+    // no walls drawn, or nothing newly revealed this call -- so this doesn't do real work on
+    // every save in practice.
+    state = window.CampaignOS.revealVisibleTiles(state, state.mapName);
     localStorage.setItem(storageKey, JSON.stringify(state));
     if (dmBridgeDirHandle) {
       writeLiveStateSnapshot().catch((err) => {

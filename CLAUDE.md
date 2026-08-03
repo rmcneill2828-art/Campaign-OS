@@ -497,6 +497,45 @@ See README.md for the full feature list and usage. Notes specific to working on 
   `set_visibility` DM-bridge action alongside its UI toggle), there is currently **no**
   DM-bridge action for drawing/removing a wall at all -- a DM-only map-prep tool, not something
   narration would plausibly trigger mid-session; revisit if that gap turns out to matter.
+- Fog of war: **replaced, not layered onto, the previous "fog" feature** -- `state.fogEnabled`,
+  the `#toggleFog` button, and `ui/styles.css`'s `body[data-fog="on"] .map-tile:nth-child(...)`
+  rules (a purely decorative pattern completely disconnected from grid position or vision) were
+  all deleted outright rather than kept alongside the real system, since a fake "Toggle Fog"
+  button surviving next to genuine fog of war would be actively misleading, not harmless dead
+  weight. `state.maps[mapName].revealedTiles` is a sparse `{"x,y": true}` map (same key format
+  as walls' own vertex/cell coordinates, just cell-index this time, not vertex space) --
+  presence means "the party has ever seen this cell," absence means never explored; there is
+  **no fourth state and no decay** -- once revealed, a cell stays revealed forever until an
+  explicit `resetFog()`. `visibleCellsForParty(state, mapName)` is the live computation (every
+  cell any hero currently has line of sight to, via `hasLineOfSight` -- an O(cells x heroes)
+  scan, cheap for realistic map/party sizes and not worth optimizing preemptively); no heroes on
+  the map returns an **empty** array, the opposite default from `isVisibleToParty`'s own "no
+  heroes = show everything" -- there being no party to compute visibility for is genuinely
+  "nothing explored yet," not "nothing to hide." `revealVisibleTiles(state, mapName)` merges
+  that live computation into the persisted `revealedTiles` memory and is called from
+  **`ui/app.js`'s `saveEncounter()`**, not from any individual action (`moveToken`, a DM-bridge
+  move, spawning a monster, anything) -- the same "hook the one choke point every mutation
+  already flows through" reasoning the Undo bullet above documents, chosen specifically so no
+  future movement path can forget to trigger a reveal. Both `revealVisibleTiles` and
+  `resetFog` short-circuit to the **same state reference** (no clone) when there's nothing to
+  do -- no walls on the map at all (the fast path that makes fog a no-op for every map that's
+  never had one, i.e. almost all of them), nothing newly visible this call, or nothing to reset
+  -- matching every other no-op-means-no-clone primitive in this file.
+  `ui/playerView.js`'s three-tile-state rendering (`map-tile-unexplored` fully opaque,
+  `map-tile-dimmed` translucent, neither class = currently visible) reads `revealedTiles` for
+  the "ever explored" half and calls `visibleCellsForParty` itself for the "currently visible"
+  half, gated behind the identical `fogActive = wall array non-empty` check the token-hiding
+  filter already uses -- a wall-free map renders with **zero** fog classes applied, not "every
+  tile unexplored," the same "absence of walls means absence of the whole mechanism" precedent
+  as everywhere else walls are consumed. This composes for free with the existing token
+  visibility filter rather than needing new logic to coordinate them: every currently-visible
+  cell was, by construction, just merged into `revealedTiles` in the same `saveEncounter()`
+  call that computed it, so "unexplored" implies "not currently visible" implies any token
+  there is already hidden by `isVisibleToParty` on its own. Only the player window ever
+  renders fog -- `index.html`'s own map is untouched by any of this, same "DM sees everything"
+  convention as exact HP and hidden tokens. **Reset Fog** (`ui/app.js`, next to Clear Walls)
+  clears one map's `revealedTiles` via `resetFog()`, behind the same `window.confirm(...)`
+  pattern `clearWallsButton`/the token/map library "Clear All" buttons already use.
 - Player window: `player.html` + `ui/playerView.js` sync with the DM's `index.html` tab by
   **polling `localStorage.getItem("campaign-os-encounter-state")` once a second and diffing
   the raw JSON string** against the last-seen value -- not `BroadcastChannel`, not the
