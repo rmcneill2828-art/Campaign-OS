@@ -2642,6 +2642,13 @@
     render();
   });
 
+  document.querySelector("#openPlayerWindow").addEventListener("click", () => {
+    // A fixed window name (not "_blank") so repeated clicks focus the same already-open
+    // window instead of spawning duplicates -- player.html polls localStorage on its own, so
+    // there's nothing this tab needs to hand it beyond the URL itself.
+    window.open("player.html", "campaignOSPlayerWindow", "noopener");
+  });
+
   document.querySelector("#exportEncounter").addEventListener("click", () => {
     const mapSlug = (state.mapName || "encounter").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const dateStamp = new Date().toISOString().slice(0, 10);

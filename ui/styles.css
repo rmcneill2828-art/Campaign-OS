@@ -469,6 +469,41 @@ body[data-fog="on"] .map-tile:hover {
   border: 2px solid rgba(255, 255, 255, 0.72);
   font-weight: 800;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.token-icon-label {
+  pointer-events: none;
+}
+
+/* Player-view-only: a rough health bar (no exact numbers) along the bottom of each token,
+   clipped to the circle by .token's own overflow:hidden. Not used by the main app -- its
+   token sheet already shows exact HP to the DM. */
+.token-hp-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 5px;
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.token-hp-bar-fill {
+  height: 100%;
+  background: #7fd88f;
+}
+
+.token-hp-bar-fill.token-hp-bar-bloodied {
+  background: var(--accent);
+}
+
+.token-hp-bar-fill.token-hp-bar-critical {
+  background: var(--danger);
 }
 
 .token.hero {

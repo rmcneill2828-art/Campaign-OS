@@ -120,29 +120,42 @@ tied to grid position or vision. Replace with a real per-cell reveal state:
 - [ ] Design the data shape: likely `state.fogTiles` per map, a sparse set/grid of revealed cells
   (same sparse-map convention the rest of the engine already uses).
   DM tools to reveal/hide tiles (paint, or reveal-around-token-radius).
-- [ ] Rendering: only matters visually once there's a genuine player-facing view (see Phase 5) --
-  as a DM-only tool without a separate player screen, real fog of war has limited value beyond
-  "hide it from myself," so consider sequencing this after Phase 5 starts, not before.
+- [ ] Rendering: now that the player window (Phase 5) exists, this is genuinely worth building --
+  hidden tiles need to actually hide something on a screen the DM isn't looking at for it to
+  matter beyond "hide it from myself." `player.html`/`ui/playerView.js` is where fog would need
+  to render (a covering layer over unrevealed `.map-tile`s); the DM's own `index.html` view can
+  keep showing everything, same as any real table's DM screen.
 
 ## Phase 4 -- Line of sight / vision blocking
 
 No walls, no vision radius, no occlusion anywhere in the engine today. This is a bigger lift than
-fog of war (needs wall geometry against the grid, and a visibility algorithm) and its payoff is
-also mostly about the player-facing view. Sequence after Phase 5 is scoped, for the same reason
-as fog of war above -- don't build vision math with no second viewport to make it matter yet.
+fog of war (needs wall geometry against the grid, and a visibility algorithm), but its payoff is
+now real too -- the player window (Phase 5) gives it somewhere to actually matter.
 
 ## Phase 5 -- Shared/player view (biggest architectural decision on this list)
 
-Everything today lives in one browser tab's local storage -- there is no second client, no
-server, no way for players to see the board themselves. This is the one item that changes what
-kind of tool Campaign OS *is* (single-DM tactical tracker vs. a real shared-table VTT), so it's
-worth a deliberate go/no-go conversation rather than just starting:
-- [ ] Decide scope first: a read-only "player window" (second browser tab/window on the same
-  machine, synced via `BroadcastChannel`/`localStorage` events -- no server needed, much smaller
-  lift) vs. real multi-device multiplayer (needs a server or a sync service, a much bigger
-  architecture change touching almost everything). Don't start building until this is picked.
-- [ ] If read-only same-machine player window: likely the highest-value, lowest-effort version of
-  "shared view" available, and a natural prerequisite for Phase 3/4 to actually matter.
+- [x] **Decide scope.** Done 2026-08-03 (user decision): read-only same-machine player window,
+  not real multi-device multiplayer. Multiplayer (a server/sync service) stays out of scope --
+  revisit only if remote play becomes an actual need, since it's a much bigger architecture
+  change touching almost everything (storage model, auth, real-time sync), not an extension of
+  this decision.
+- [x] **Read-only player window.** Done 2026-08-03. New `player.html` + `ui/playerView.js`,
+  opened via `index.html`'s "Open Player Window" button -- map, tokens (a bloodied/critical
+  health bar, not exact HP), initiative order, combat log, no editing, no DM panels. Sync is
+  polling (`localStorage` diffed every 1s), NOT `BroadcastChannel`/the `storage` event -- both
+  were tried and verified NOT to fire across two tabs opened from the same `file://` path in
+  Chrome (this app's normal, documented usage), despite both reporting the same nominal
+  `location.origin`; direct reads DO work across those tabs, which is what makes polling
+  reliable. Verified via Playwright: cross-tab sync of damage/HP-bar-color/turn-advancement
+  within one poll cycle, the empty "waiting for the DM" state, and the "Open Player Window"
+  button itself. See CLAUDE.md's new "Player window" bullet for the full design writeup
+  (including why the origin-matches-but-still-doesn't-work finding matters for any future
+  cross-tab feature). No per-token hide/reveal system yet -- a real gap for secret
+  monsters/unrevealed NPCs, noted as a natural follow-up below.
+
+Phase 5 complete (as scoped). Phase 3 (fog of war) and Phase 4 (line of sight) were sequenced
+after this because a DM-only tool gets little value from either -- both now have a real
+player-facing viewport to matter for, so they're unblocked.
 
 ## Smaller / lower-priority items (park here, revisit if they start to matter)
 

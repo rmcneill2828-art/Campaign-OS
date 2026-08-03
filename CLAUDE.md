@@ -19,10 +19,16 @@ See README.md for the full feature list and usage. Notes specific to working on 
   unit-tested under Node (`npm test`). Keep it that way: no `document`/`window` DOM access, no
   async IndexedDB/File System Access calls here -- those belong in `ui/`.
 - `ui/` -- browser glue: `app.js` (rendering, event wiring), the IndexedDB-backed stores
-  (`imageStore.js`, `tokenLibrary.js`, `mapLibrary.js`, `dmBridgeStore.js`), and the File System
+  (`imageStore.js`, `tokenLibrary.js`, `mapLibrary.js`, `dmBridgeStore.js`), the File System
   Access folder-reference layer (`assetFolders.js` persists picked directory handles,
   `folderAssets.js` indexes/reads them -- this is what the Tokens Folder/Maps Folder
-  connections use to browse a large art pack without bulk-copying it into IndexedDB).
+  connections use to browse a large art pack without bulk-copying it into IndexedDB), and
+  `playerView.js` -- `player.html`'s own script, a much smaller read-only renderer for the
+  player-facing board (see the "Player window" constraint below), independent of `app.js`.
+- `player.html` -- the player-facing counterpart to `index.html`, opened via its "Open Player
+  Window" button. Loads only `engine/encounter.js`, `ui/imageStore.js`, and `ui/playerView.js`
+  -- none of `app.js`'s DM-only machinery (stores, folder connections, the DM bridge, the
+  campaign browser) is loaded here at all.
 - `dm-bridge/watch.js` -- a Node script, run separately (`node dm-bridge/watch.js`), that
   bridges the browser to the local `claude` CLI. Three independent request/response file
   pairs: `request.json`/`response.json` for live combat narration (tools disabled, strict JSON
@@ -444,6 +450,31 @@ See README.md for the full feature list and usage. Notes specific to working on 
     Testing section below describes -- there's no automated suite entry for this (UI/File
     System Access glue, same as the existing request/response flow), just a one-off dev-time
     verification.
+- Player window: `player.html` + `ui/playerView.js` sync with the DM's `index.html` tab by
+  **polling `localStorage.getItem("campaign-os-encounter-state")` once a second and diffing
+  the raw JSON string** against the last-seen value -- not `BroadcastChannel`, not the
+  `storage` event. Both were tried and rejected after verifying directly with Playwright (two
+  pages both navigated to the same `file://` path, the app's normal "just open index.html"
+  usage): neither fires across those two tabs in Chrome, even though `location.origin` reports
+  the identical `"file://"` string for both -- Chrome still treats them as unable to notify
+  each other. Direct `localStorage`/IndexedDB *reads* DO work across those same tabs (same
+  underlying storage partition), which is exactly what makes polling viable and is why it's
+  the one approach actually reliable in this app's real, file://-first deployment. This is the
+  same reasoning (and interval) as every other cross-context channel already in this codebase
+  (`dm-bridge/watch.js`'s request/response polling, `checkLiveActions()`'s 2s poll) -- don't
+  swap this for an event-based mechanism without re-verifying it actually fires over `file://`
+  first, the same way this decision was made. `playerView.js` is deliberately independent of
+  `ui/app.js` -- it re-implements a small, read-only subset of `renderMap()`/
+  `renderMapBackground()`/`renderInitiative()`/`renderCombatLog()` (mirroring their exact CSS
+  classes/DOM shape from `ui/styles.css` so nothing needs new page-specific styling) rather
+  than importing or sharing code with `app.js`, since `app.js`'s render functions are entangled
+  with the DM's own editable `state`/`selectedTokenId`/library stores in ways a read-only
+  mirror shouldn't need or want. Token HP is shown as a color-graded bar (bloodied/critical
+  thresholds at 50%/25%), never the DM's exact numbers -- there is **no per-token hide/reveal
+  system** (a secret monster, an unrevealed NPC) at all yet; the player window mirrors
+  everything on the DM's board except exact HP. `index.html`'s **Open Player Window** button
+  uses a fixed `window.open()` target name (`"campaignOSPlayerWindow"`, not `"_blank"`) so
+  repeated clicks focus the existing window instead of spawning duplicates.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

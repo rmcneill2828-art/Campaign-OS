@@ -295,6 +295,9 @@ dependencies to install for the app itself. See Tests, below, for running the te
 - Character creator: build a new 5e character sheet (computed ability modifiers,
   proficiency bonus, HP, AC, saves, skills, one attack) and write it straight into
   the campaign repo's `characters/` folder (see below)
+- Player window: a read-only, player-facing view of the board (map, tokens, initiative,
+  combat log) in a second browser tab or window -- a second monitor or TV a table can look at
+  -- kept in sync automatically while the DM's tab is open (see below)
 
 Local command examples (works with or without the Claude DM bridge connected):
 
@@ -507,11 +510,44 @@ then on, without re-uploading it per token:
 - Entries are stored in IndexedDB (not localStorage), since portrait images are exactly the kind
   of content that would otherwise blow past localStorage's origin quota.
 
+## Player window
+
+Click **Open Player Window** in the topbar to open `player.html` -- a read-only mirror of the
+board (map, tokens, initiative order, combat log) with no editing controls, no Setup tab, no
+campaign browser, and no Claude DM panel. Point it at a second monitor or a TV for the table to
+follow along, while you keep editing on the main tab.
+
+It stays in sync automatically: the player window polls the same browser storage the main app
+saves to, once a second, and re-renders whenever it changes -- there's no server, no extra setup,
+and no button to click to "push" an update. This works whether you open `index.html` directly as
+a file (the normal way to run this app) or serve it over `http://`; a same-origin push mechanism
+like `BroadcastChannel` was tried first but doesn't actually fire between two tabs both opened
+from a `file://` path in Chrome (verified directly, not assumed), even though both report the
+same nominal origin -- polling is the one approach that's reliably reachable either way, and it's
+already how every other cross-context channel in this app works (the `dm-bridge/watch.js`
+request/response files, the live-actions channel).
+
+A few things worth knowing:
+
+- Each token shows a rough health bar (colored by how bloodied it is) instead of the DM's exact
+  HP numbers -- a middle ground between showing players nothing and showing them everything.
+  There's no way yet to hide a specific token (a secret monster, an NPC not yet revealed) from
+  the player window entirely; it mirrors the full board as the DM sees it, minus exact numbers.
+- It's a separate browser tab/window, not a new device -- for now this only helps a table sharing
+  one physical screen setup (a laptop plus a second monitor/TV), not players joining remotely
+  from their own devices. That would need real multiplayer (a server or sync service), a much
+  bigger change; see the project roadmap if you're curious about that tradeoff.
+- Clicking **Open Player Window** again focuses the already-open window instead of opening a
+  second copy.
+
 ## Project Structure
 
 ```text
 Campaign OS
 |-- index.html      Main app shell (battle map, campaign browser, token sheet, Claude DM)
+|-- player.html     Read-only player-facing board view (map, tokens, initiative, combat log,
+|                   no editing) -- opened from index.html's "Open Player Window" button, kept
+|                   in sync by polling localStorage once a second (see ui/playerView.js)
 |-- character.html  Standalone character sheet viewer, opened from an imported character
 |-- engine/         Pure, unit-tested logic: encounter state, campaign import/parsing, the
 |                   dm-bridge action dispatcher, and the character creator's 5e math/markdown

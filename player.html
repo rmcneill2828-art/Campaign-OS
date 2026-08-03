@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Campaign OS -- Player View</title>
+    <link rel="stylesheet" href="ui/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Campaign OS -- Player View</p>
+          <h1 id="playerMapName">No map loaded</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="playerSyncStatus" class="dm-bridge-status">Waiting for the DM's board...</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="map-panel" aria-label="Encounter map">
+          <div class="map-stage">
+            <div id="battleMap" class="battle-map" aria-live="polite"></div>
+          </div>
+        </section>
+
+        <aside class="side-panel">
+          <section class="panel-section">
+            <h2>Initiative</h2>
+            <div class="turn-tracker">
+              <span id="playerTurnStatus">No active turn</span>
+            </div>
+            <ol id="playerInitiativeList" class="initiative-list"></ol>
+          </section>
+
+          <section class="panel-section">
+            <h2>Combat Log</h2>
+            <ol id="playerCombatLog" class="combat-log"></ol>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script src="engine/encounter.js"></script>
+    <script src="ui/imageStore.js"></script>
+    <script src="ui/playerView.js"></script>
+  </body>
+</html>
