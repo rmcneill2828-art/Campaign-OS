@@ -16,6 +16,11 @@
         <div class="topbar-actions">
           <button id="saveEncounter" type="button">Save</button>
           <button id="loadEncounter" type="button">Load</button>
+          <button id="exportEncounter" type="button" title="Download the current encounter as a .json file -- for backup, or to move it to another machine.">Export</button>
+          <label class="import-encounter-label" title="Load an encounter from a previously exported .json file, replacing the current one.">
+            Import
+            <input id="importEncounterInput" type="file" accept="application/json,.json" aria-label="Import encounter from file">
+          </label>
           <button id="resetEncounter" type="button">Reset</button>
         </div>
       </header>
@@ -130,6 +135,16 @@
                 <span id="sessionReportStatus" class="dm-bridge-status"></span>
               </div>
               <textarea id="sessionReportOutput" class="session-report-output" readonly hidden></textarea>
+            </section>
+
+            <section class="panel-section">
+              <h2>Dice Roller</h2>
+              <p class="library-hint">Not tied to any token -- for traps, random tables, loot, or anything else you'd otherwise have to leave the app to roll. Standard notation only (one dice group): <code>3d6+2</code>, <code>d20</code>, <code>4d6-1</code>.</p>
+              <form id="diceRollerForm" class="dice-roller-form">
+                <input id="diceRollerInput" type="text" placeholder="e.g. 3d6+2" aria-label="Dice notation">
+                <button type="submit">Roll</button>
+              </form>
+              <p id="diceRollerResult" class="command-result"></p>
             </section>
 
             <section class="panel-section">

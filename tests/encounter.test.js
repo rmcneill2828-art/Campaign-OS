@@ -2269,6 +2269,34 @@ test("triggerLairAction defaults to a generic message when no description is giv
   assert.match(result.message, /Lair action: the lair stirs\./);
 });
 
+test("rollFreeform rolls multiple dice plus a positive modifier and logs the breakdown", () => {
+  const state = CampaignOS.createState();
+  const result = withRandom([0], () => CampaignOS.rollFreeform(state, "3d6+2"));
+  assert.equal(result.total, 5);
+  assert.equal(result.message, "Rolled 3d6+2: [1, 1, 1] + 2 = 5.");
+  assert.equal(result.state.log[0], result.message);
+});
+
+test("rollFreeform handles a negative modifier and a bare 'dN' with no leading count", () => {
+  const state = CampaignOS.createState();
+  const result = withRandom([0.999999], () => CampaignOS.rollFreeform(state, "d20-3"));
+  assert.equal(result.total, 17);
+  assert.equal(result.message, "Rolled d20-3: [20] - 3 = 17.");
+});
+
+test("rollFreeform omits the modifier clause entirely when there is none", () => {
+  const state = CampaignOS.createState();
+  const result = withRandom([0], () => CampaignOS.rollFreeform(state, "2d4"));
+  assert.equal(result.message, "Rolled 2d4: [1, 1] = 2.");
+});
+
+test("rollFreeform fails outright, without touching state, for text that isn't dice notation", () => {
+  const state = CampaignOS.createState();
+  const result = CampaignOS.rollFreeform(state, "banana");
+  assert.equal(result.message, "Couldn't parse \"banana\" as dice (expected something like 3d6+2).");
+  assert.equal(result.state, state);
+});
+
 test("parseCommand resolves using a legendary action by token name", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Dracolich", legendaryActions: { max: 3, current: 3 } }).state;

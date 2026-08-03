@@ -434,6 +434,21 @@
     };
   }
 
+  // A freeform, DM-facing roll not tied to any token or action -- a trap, a random table, loot
+  // -- reusing rollDice's own NdM[+-K] parsing rather than a second parser. Unlike the other
+  // self-logging rolls (rollDeathSave, rollSavingThrow, ...) there's no pass/fail or target to
+  // report against, just the breakdown, so the message is the roll itself. Fails outright (same
+  // `state` reference, no clone, no log entry) for anything that doesn't parse as dice notation.
+  function rollFreeform(state, notation) {
+    const result = rollDice(notation);
+    if (!result.rolls.length) {
+      return { state, message: `Couldn't parse "${notation}" as dice (expected something like 3d6+2).` };
+    }
+    const modifierText = result.modifier ? ` ${result.modifier > 0 ? "+" : "-"} ${Math.abs(result.modifier)}` : "";
+    const message = `Rolled ${result.notation}: [${result.rolls.join(", ")}]${modifierText} = ${result.total}.`;
+    return { state: addLogEntry(state, message), message, total: result.total };
+  }
+
   function normalizeAbilityScores(raw) {
     if (!raw || typeof raw !== "object") return undefined;
     const scores = {};
@@ -2180,6 +2195,7 @@
     removeToken,
     restoreResource,
     rollAbilityCheck,
+    rollFreeform,
     setExhaustion,
     spendHitDie,
     shortRest,

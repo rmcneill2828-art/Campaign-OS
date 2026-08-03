@@ -9,6 +9,9 @@
   const nextTurnButton = document.querySelector("#nextTurnButton");
   const lairActionForm = document.querySelector("#lairActionForm");
   const lairActionInput = document.querySelector("#lairActionInput");
+  const diceRollerForm = document.querySelector("#diceRollerForm");
+  const diceRollerInput = document.querySelector("#diceRollerInput");
+  const diceRollerResult = document.querySelector("#diceRollerResult");
   const quickAddTokenForm = document.querySelector("#quickAddTokenForm");
   const quickAddTokenName = document.querySelector("#quickAddTokenName");
   const quickAddTokenType = document.querySelector("#quickAddTokenType");
@@ -2471,6 +2474,37 @@
     render();
   });
 
+  document.querySelector("#exportEncounter").addEventListener("click", () => {
+    const mapSlug = (state.mapName || "encounter").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `campaign-os-${mapSlug || "encounter"}-${dateStamp}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    commandResult.textContent = "Encounter exported.";
+  });
+
+  const importEncounterInput = document.querySelector("#importEncounterInput");
+  importEncounterInput.addEventListener("change", async () => {
+    const file = importEncounterInput.files?.[0];
+    importEncounterInput.value = "";
+    if (!file) return;
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      commandResult.textContent = "Import failed: not a valid encounter file.";
+      return;
+    }
+    state = normalizeEncounter(parsed);
+    saveEncounter();
+    commandResult.textContent = "Encounter imported.";
+    render();
+  });
+
   campaignImport.addEventListener("change", async () => {
     campaignSummary.textContent = "Importing campaign...";
     campaign = await window.CampaignOSCampaign.importMarkdownFiles(campaignImport.files);
@@ -2530,6 +2564,15 @@
     saveEncounter();
     commandResult.textContent = result.message;
     lairActionInput.value = "";
+    render();
+  });
+
+  diceRollerForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const result = window.CampaignOS.rollFreeform(state, diceRollerInput.value.trim());
+    state = result.state;
+    saveEncounter();
+    diceRollerResult.textContent = result.message;
     render();
   });
 
