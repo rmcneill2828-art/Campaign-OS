@@ -1806,17 +1806,34 @@
   // call. If the attacker has an `attacks` array (Multiattack, e.g. a troll's Bite + two
   // Claws), each one resolves in order against the same target, stopping early once this
   // action's own hits leave the target at 0 HP (so a Bite that drops them doesn't also get
-  // followed by two more Claws in the same action). This does NOT block starting an attack
-  // against a target that was already at 0 HP before this call -- that's a real, meaningful
-  // hit against a downed creature (an automatic failed death save, see applyDamage), not a
-  // dead action; only a target removed from the map entirely stops the loop outright.
-  // Exhaustion level 3+ forces disadvantage on the attacker's rolls (RAW), same as
-  // rollSavingThrow -- combined with an explicit options.advantage, they cancel out per RAW
+  // followed by two more Claws in the same action) -- except for a reaction (see below),
+  // which is always exactly one attack regardless of Multiattack. This does NOT block
+  // starting an attack against a target that was already at 0 HP before this call -- that's
+  // a real, meaningful hit against a downed creature (an automatic failed death save, see
+  // applyDamage), not a dead action; only a target removed from the map entirely stops the
+  // loop outright. Exhaustion level 3+ forces disadvantage on the attacker's rolls (RAW), same
+  // as rollSavingThrow -- combined with an explicit options.advantage, they cancel out per RAW
   // rather than exhaustion silently winning. Conditions add more sources on each side of that
   // same cancellation: the attacker's own Blinded/Restrained/Prone/Poisoned or the target's
   // Invisible impose disadvantage; the attacker's own Invisible or the target's
   // Restrained/Prone/Stunned/Paralyzed/Unconscious grant advantage (see ownAttackCondition*/
   // targetGrantsAttack* above).
+  //
+  // options.actionType: "action" (default), "bonusAction", or "reaction" -- a reaction
+  // (an opportunity attack) is gated the OPPOSITE way from action/bonusAction: those are only
+  // restricted on the attacker's own active turn (unrestricted outside it, so narration stays
+  // free); a reaction is by definition taken on someone ELSE's turn, so it's instead gated
+  // whenever turn order is running at all (state.turn.round > 0), regardless of whose turn it
+  // currently is, and reset only at the start of the reacting token's own next turn (see
+  // nextTurn()) -- exactly mirroring how RAW reactions actually work ("you regain your spent
+  // reaction at the start of each of your turns," not at the start of the round). This engine
+  // has no path-stepping between two grid coordinates (see gridMoveCost/moveToken) and so
+  // cannot detect "this token just left that token's reach" on its own -- moveToken() surfaces
+  // a best-effort start-vs-end adjacency hint in its own message (see tokensLeavingReach
+  // below), but calling attack(..., {actionType: "reaction"}) against a specific target is
+  // always a narrative judgment call left to the DM/Claude, the same "no engine-side timing
+  // detection" precedent roll_death_save's "at the start of its turn" and legendary actions'
+  // "at the end of another creature's turn" already use.
   function attack(state, attackerId, targetId, options = {}) {
     let nextState = clone(state);
     const activeTokens = tokensOnCurrentMap(nextState);
@@ -1826,16 +1843,23 @@
       return { state, message: "Attack failed: attacker or target was not found." };
     }
 
-    // Action economy is only enforced on the attacker's own active turn -- same
-    // "unrestricted outside your own turn" carve-out moveToken already uses for speed, so
-    // narration/setup outside formal combat stays free. options.actionType defaults to
+    // Action economy is only enforced on the attacker's own active turn for action/bonusAction
+    // -- same "unrestricted outside your own turn" carve-out moveToken already uses for speed,
+    // so narration/setup outside formal combat stays free. options.actionType defaults to
     // "action"; a Fighter/Barbarian's Extra Attack (token.extraAttacks, sparse, default 0)
     // lets `attack()` itself be called 1 + extraAttacks times before the action is spent --
     // this is the one action-consumer that can legitimately fire more than once, since RAW's
     // Extra Attack is "more attacks as part of the same Attack action," not a second action.
     const isActiveTurn = Boolean(state.turn && state.turn.tokenId === attackerId);
-    const actionType = options.actionType === "bonusAction" ? "bonusAction" : "action";
-    if (isActiveTurn) {
+    const turnOrderRunning = Boolean(state.turn && (state.turn.round || 0) > 0);
+    const actionType = options.actionType === "bonusAction" ? "bonusAction"
+      : options.actionType === "reaction" ? "reaction"
+      : "action";
+    if (actionType === "reaction") {
+      if (turnOrderRunning && attacker.reactionUsed) {
+        return { state, message: `${attacker.name} has already used their reaction since their last turn.` };
+      }
+    } else if (isActiveTurn) {
       if (actionType === "bonusAction") {
         if (attacker.bonusActionUsed) {
           return { state, message: `${attacker.name} has already used a bonus action this turn.` };
@@ -1853,10 +1877,14 @@
     const hasDisadvantage = Boolean(options.disadvantage) || (attacker.exhaustion || 0) >= 3 || conditionDisadvantage;
     const hasAdvantage = Boolean(options.advantage) || conditionAdvantage;
     const mode = hasDisadvantage && hasAdvantage ? null : hasDisadvantage ? "disadvantage" : hasAdvantage ? "advantage" : null;
-    const profiles = Array.isArray(attacker.attacks) && attacker.attacks.length
+    const allProfiles = Array.isArray(attacker.attacks) && attacker.attacks.length
       ? attacker.attacks
       : [{ name: null, attackBonus: attacker.attackBonus, damageDice: attacker.damageDice, damageType: attacker.damageType }];
-    const useLabel = profiles.length > 1;
+    // RAW: an opportunity attack is always exactly one melee attack, never a full Multiattack
+    // action -- use the attacker's first/primary profile only (the same "primary attack"
+    // convention campaign.js's Multiattack-row extraction already documents).
+    const profiles = actionType === "reaction" ? allProfiles.slice(0, 1) : allProfiles;
+    const useLabel = profiles.length > 1 || Boolean(profiles[0]?.name);
 
     const messages = [];
     for (const profile of profiles) {
@@ -1876,9 +1904,11 @@
       if (!updatedTarget || updatedTarget.hp <= 0) break;
     }
 
-    if (isActiveTurn) {
-      const finalAttacker = nextState.tokens.find((token) => token.id === attackerId);
-      if (finalAttacker) {
+    const finalAttacker = nextState.tokens.find((token) => token.id === attackerId);
+    if (finalAttacker) {
+      if (actionType === "reaction") {
+        if (turnOrderRunning) finalAttacker.reactionUsed = true;
+      } else if (isActiveTurn) {
         if (actionType === "bonusAction") {
           finalAttacker.bonusActionUsed = true;
         } else {
@@ -1969,10 +1999,14 @@
       // Action economy resets for the newly active token, same "lives on the token, reset
       // here" convention as movementUsed above (not on state.turn) -- attack()/castSpell()
       // only read these when it's this token's own active turn, so there's nothing to
-      // reset for anyone else.
+      // reset for anyone else. reactionUsed is the one exception to "only read on your own
+      // turn" (a reaction is spent on someone ELSE's turn, see attack()'s own comment) but it
+      // still resets the same way and at the same moment -- RAW: "you regain your spent
+      // reaction at the start of each of your turns."
       delete activeToken.actionUsed;
       delete activeToken.bonusActionUsed;
       delete activeToken.attacksUsedThisTurn;
+      delete activeToken.reactionUsed;
       // RAW: a legendary creature regains all expended legendary actions at the start of
       // its own turn.
       if (activeToken.legendaryActions) activeToken.legendaryActions.current = activeToken.legendaryActions.max;
@@ -2022,6 +2056,33 @@
     return base;
   }
 
+  // A cheap, honest APPROXIMATION of "did this move leave anyone's reach" -- start-vs-end
+  // adjacency only (isAdjacent, the same one-square/5 ft melee-range proxy used elsewhere in
+  // this file), not a real square-by-square leaves-reach-mid-path detection: this engine has
+  // no path-stepping between two grid coordinates at all (gridMoveCost only computes a
+  // distance/cost total, see its own comment), so it genuinely cannot tell whether the mover
+  // passed through and back out of a third token's reach without ending outside it, or the
+  // reverse (ending outside reach without ever technically "leaving" it under a stricter
+  // reading). Returns the names of every living token the mover WAS adjacent to before the
+  // move and ISN'T adjacent to after -- purely informational, folded into moveToken()'s own
+  // message as a hint; never blocks the move or spends anyone's reaction itself. The DM/Claude
+  // still has to decide whether to actually call attack(mover excluded, ..., {actionType:
+  // "reaction"}) against one of the names returned.
+  function tokensLeavingReach(beforeState, afterState, moverId) {
+    const before = tokensOnCurrentMap(beforeState).find((t) => t.id === moverId);
+    const after = tokensOnCurrentMap(afterState).find((t) => t.id === moverId);
+    if (!before || !after) return [];
+    return tokensOnCurrentMap(afterState)
+      .filter((other) => other.id !== moverId && !other.dead && (other.hp || 0) > 0)
+      .filter((other) => isAdjacent(before, other) && !isAdjacent(after, other))
+      .map((other) => other.name);
+  }
+
+  function reachHint(beforeState, afterState, moverId) {
+    const names = tokensLeavingReach(beforeState, afterState, moverId);
+    return names.length ? ` This may provoke an opportunity attack from ${names.join(", ")}.` : "";
+  }
+
   // Speed-limited move for the token whose turn is currently active (per state.turn) --
   // computes the RAW grid cost (see gridMoveCost) against that token's remaining movement
   // this turn and rejects the move (same state reference, like setTokenPosition's occupied-
@@ -2036,7 +2097,7 @@
     if (!isActiveTurn) {
       const moved = setTokenPosition(state, tokenId, x, y);
       if (moved === state) return { state, message: `${token.name} could not move to (${x}, ${y}) -- tile occupied.` };
-      return { state: moved, message: `${token.name} moves to (${x}, ${y}).` };
+      return { state: moved, message: `${token.name} moves to (${x}, ${y}).${reachHint(state, moved, tokenId)}` };
     }
 
     const speed = effectiveSpeed(token);
@@ -2060,7 +2121,7 @@
     movedToken.diagonalStepsThisTurn = diagonalUsed + cost.diagonalSteps;
     return {
       state: moved,
-      message: `${token.name} moves to (${x}, ${y}) -- ${cost.feet} ft (${remaining - cost.feet} ft left this turn).`
+      message: `${token.name} moves to (${x}, ${y}) -- ${cost.feet} ft (${remaining - cost.feet} ft left this turn).${reachHint(state, moved, tokenId)}`
     };
   }
 
@@ -2328,6 +2389,7 @@
     setMapView,
     setTokenPosition,
     sortByInitiative,
+    tokensLeavingReach,
     tokensOnCurrentMap,
     toggleCondition,
     updateToken

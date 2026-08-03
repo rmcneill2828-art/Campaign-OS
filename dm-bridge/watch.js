@@ -66,7 +66,7 @@ const SYSTEM_PROMPT = [
   "",
   "Each action is one of:",
   `{"type": "spawn_monster", "monster": "${MONSTER_LIST.join("|")}", "count": <integer>}`,
-  '{"type": "attack", "attacker": "<exact token name>", "target": "<exact token name>", "advantage": <optional true>, "disadvantage": <optional true>, "actionType": "<optional \'action\' (default) or \'bonusAction\'>"}',
+  '{"type": "attack", "attacker": "<exact token name>", "target": "<exact token name>", "advantage": <optional true>, "disadvantage": <optional true>, "actionType": "<optional \'action\' (default), \'bonusAction\', or \'reaction\' (an opportunity attack)>"}',
   `{"type": "apply_damage", "target": "<exact token name>", "amount": <integer>, "damageType": "<optional ${DAMAGE_TYPE_LIST.join("|")}>"}`,
   '{"type": "apply_healing", "target": "<exact token name>", "amount": <integer>}',
   `{"type": "toggle_condition", "target": "<exact token name>", "condition": "${CONDITION_LIST.join("|")}"}`,
@@ -123,8 +123,25 @@ const SYSTEM_PROMPT = [
   "called 1 + N times before the action is spent -- issue one attack action per swing for a",
   "Fighter/Barbarian with Extra Attack, not a single call. Set actionType: \"bonusAction\" for a",
   "genuine bonus-action use (an off-hand attack, Misty Step, Healing Word) -- it has its own",
-  "separate one-per-turn budget from the action. Reactions (opportunity attacks) are NOT",
-  "modeled at all -- this engine has no \"leaves reach\" trigger to key one off.",
+  "separate one-per-turn budget from the action.",
+  "",
+  "Reactions (opportunity attacks) are supported via actionType: \"reaction\" on attack -- but",
+  "this engine has no way to detect \"a token just left another's reach\" on its own (no",
+  "square-by-square path tracking between two grid coordinates), so YOU decide when one is",
+  "warranted, the same judgment call as roll_death_save's \"start of its turn\" timing. The",
+  "signal to watch for: move_token's own result message ends with \"This may provoke an",
+  "opportunity attack from <names>\" whenever the mover's move leaves an adjacent token's reach",
+  "(a start-vs-end adjacency check, not a full path trace -- treat it as a strong hint, not a",
+  "certainty). When that fires and it's narratively sensible (a hostile creature would actually",
+  "take the opening), issue attack with attacker set to the token whose reach was left and",
+  "actionType: \"reaction\" -- it always resolves as exactly ONE melee attack using that",
+  "attacker's primary weapon (never their full Multiattack, even if they have one), and fails",
+  "outright if they've already used their reaction since their own last turn (each token's line",
+  "below won't show anything extra for this -- there's no persistent \"reaction available\"",
+  "indicator the way legendary actions or hit dice get one, so rely on whether you've already",
+  "issued a reaction for that token this round). A reaction can be taken on ANY creature's turn",
+  "except the reactor's own, unlike action/bonusAction which only restrict on the actor's own",
+  "turn -- don't gate it on whose turn it currently is.",
   "",
   "Conditions now carry real mechanical weight, applied automatically by the engine -- you set",
   "them with toggle_condition, but you do NOT need to also set advantage/disadvantage for these:",
@@ -328,7 +345,7 @@ function isValidAction(action) {
       return typeof action.attacker === "string" && typeof action.target === "string"
         && (action.advantage === undefined || typeof action.advantage === "boolean")
         && (action.disadvantage === undefined || typeof action.disadvantage === "boolean")
-        && (action.actionType === undefined || action.actionType === "action" || action.actionType === "bonusAction");
+        && (action.actionType === undefined || action.actionType === "action" || action.actionType === "bonusAction" || action.actionType === "reaction");
     case "apply_damage":
       return typeof action.target === "string" && Number.isFinite(action.amount)
         && (action.damageType === undefined || DAMAGE_TYPE_LIST.includes(String(action.damageType).toLowerCase()));

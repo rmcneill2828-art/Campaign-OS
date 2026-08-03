@@ -2302,6 +2302,128 @@ test("attack tracks a bonus-action attack separately from the action budget", ()
   assert.match(secondBonus.message, /already used a bonus action this turn\./);
 });
 
+test("attack's reaction is gated once turn order is running, regardless of whose turn it is, and resets at the reactor's own next turn", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 10, initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, hp: 999, maxHp: 999, initiative: 10 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  state = CampaignOS.nextTurn(state); // Darkhawk's turn -- Goblin 1 is NOT active
+
+  // Goblin 1 reacts to Darkhawk leaving its reach, mid-Darkhawk's-turn.
+  const first = withRandom([0.9], () => CampaignOS.attack(state, goblin.id, darkhawk.id, { actionType: "reaction" }));
+  assert.ok(!/already used their reaction/.test(first.message));
+  assert.equal(first.state.tokens.find((t) => t.id === goblin.id).reactionUsed, true);
+
+  const second = CampaignOS.attack(first.state, goblin.id, darkhawk.id, { actionType: "reaction" });
+  assert.match(second.message, /Goblin 1 has already used their reaction since their last turn\./);
+  assert.equal(second.state, first.state, "a rejected reaction should not change state");
+
+  // Round trips back to Goblin 1's own turn -- reaction should be available again.
+  const backToGoblin = CampaignOS.nextTurn(first.state);
+  assert.equal(backToGoblin.tokens.find((t) => t.id === goblin.id).reactionUsed, undefined);
+});
+
+test("attack's reaction is unrestricted when turn order isn't running at all", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 10 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, hp: 999, maxHp: 999 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  // No nextTurn() call -- turn order never started.
+
+  const first = withRandom([0.9], () => CampaignOS.attack(state, goblin.id, darkhawk.id, { actionType: "reaction" }));
+  const second = withRandom([0.9], () => CampaignOS.attack(first.state, goblin.id, darkhawk.id, { actionType: "reaction" }));
+  assert.ok(!/already used their reaction/.test(second.message), "unrestricted before turn order actually starts, same as action/bonusAction");
+});
+
+test("a reaction attack resolves exactly one attack, even for a Multiattack creature", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Troll 1", hp: 84, maxHp: 84,
+    attacks: [
+      { name: "Bite", attackBonus: 50, damageDice: "1d1", damageType: "piercing" },
+      { name: "Claw", attackBonus: 50, damageDice: "1d1", damageType: "slashing" },
+      { name: "Claw", attackBonus: 50, damageDice: "1d1", damageType: "slashing" }
+    ]
+  }).state;
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 20, maxHp: 20, initiative: 20 }).state;
+  const troll = state.tokens.find((t) => t.name === "Troll 1");
+  const darkhawk = state.tokens.find((t) => t.name === "Darkhawk");
+  state = CampaignOS.nextTurn(state); // Darkhawk's turn -- Troll reacts
+
+  const result = withRandom([0.9], () => CampaignOS.attack(state, troll.id, darkhawk.id, { actionType: "reaction" }));
+  assert.equal(result.state.tokens.find((t) => t.id === darkhawk.id).hp, 19, "exactly one 1-damage attack, not all three Multiattack profiles");
+  assert.match(result.message, /Troll 1's Bite attacks Darkhawk/, "should use the first/primary profile and name it");
+});
+
+test("nextTurn clears reactionUsed only for the newly active token", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 10, initiative: 20 }).state;
+  state = CampaignOS.addToken(state, { name: "Goblin 1", attackBonus: 0, hp: 999, maxHp: 999, initiative: 10 }).state;
+  const [darkhawk, goblin] = state.tokens;
+  state = CampaignOS.nextTurn(state); // Darkhawk active
+
+  const reacted = withRandom([0.9], () => CampaignOS.attack(state, goblin.id, darkhawk.id, { actionType: "reaction" })).state;
+  assert.equal(reacted.tokens.find((t) => t.id === goblin.id).reactionUsed, true);
+
+  const stillDarkhawksIfSomehowCalledAgain = CampaignOS.nextTurn(reacted); // now Goblin 1's turn
+  assert.equal(stillDarkhawksIfSomehowCalledAgain.tokens.find((t) => t.id === goblin.id).reactionUsed, undefined);
+});
+
+// addToken() always places a new token via findOpenTile() -- it has no x/y draft field, so
+// every test below that needs exact starting coordinates places tokens with setTokenPosition
+// explicitly afterward rather than trusting addToken's own placement.
+test("moveToken's message hints at an opportunity attack when the move leaves an adjacent token's reach", () => {
+  let state = stateOnMap("Urskelde");
+  const darkhawk = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 10, initiative: 20 });
+  state = CampaignOS.setTokenPosition(darkhawk.state, darkhawk.token.id, 5, 5);
+  const goblin = CampaignOS.addToken(state, { name: "Goblin 1", hp: 10, maxHp: 10, initiative: 10 });
+  state = CampaignOS.setTokenPosition(goblin.state, goblin.token.id, 6, 5); // adjacent to Darkhawk
+  state = CampaignOS.nextTurn(state); // Darkhawk's turn
+
+  const result = CampaignOS.moveToken(state, darkhawk.token.id, 10, 5); // walks away from Goblin 1
+  assert.match(result.message, /This may provoke an opportunity attack from Goblin 1\./);
+});
+
+test("moveToken's opportunity-attack hint does not fire when the mover stays adjacent", () => {
+  let state = stateOnMap("Urskelde");
+  const darkhawk = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 10, initiative: 20 });
+  state = CampaignOS.setTokenPosition(darkhawk.state, darkhawk.token.id, 5, 5);
+  const goblin = CampaignOS.addToken(state, { name: "Goblin 1", hp: 10, maxHp: 10, initiative: 10 });
+  state = CampaignOS.setTokenPosition(goblin.state, goblin.token.id, 6, 5);
+  state = CampaignOS.nextTurn(state);
+
+  // (5,5) -> (5,6) stays within one square of Goblin 1 at (6,5) -- reach was never left.
+  const result = CampaignOS.moveToken(state, darkhawk.token.id, 5, 6);
+  assert.ok(!/opportunity attack/.test(result.message));
+});
+
+test("moveToken's opportunity-attack hint does not fire when the mover was never in reach to begin with", () => {
+  let state = stateOnMap("Urskelde");
+  const darkhawk = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 10, initiative: 20 });
+  state = CampaignOS.setTokenPosition(darkhawk.state, darkhawk.token.id, 1, 1);
+  const goblin = CampaignOS.addToken(state, { name: "Goblin 1", hp: 10, maxHp: 10, initiative: 10 });
+  state = CampaignOS.setTokenPosition(goblin.state, goblin.token.id, 10, 10);
+  state = CampaignOS.nextTurn(state);
+
+  const result = CampaignOS.moveToken(state, darkhawk.token.id, 5, 5); // still nowhere near Goblin 1
+  assert.ok(!/opportunity attack/.test(result.message));
+});
+
+test("moveToken's opportunity-attack hint ignores a dead token", () => {
+  let state = stateOnMap("Urskelde");
+  const darkhawk = CampaignOS.addToken(state, { name: "Darkhawk", hp: 10, maxHp: 10, initiative: 20 });
+  state = CampaignOS.setTokenPosition(darkhawk.state, darkhawk.token.id, 5, 5);
+  const goblin = CampaignOS.addToken(state, { name: "Goblin 1", hp: 10, maxHp: 10, initiative: 10 });
+  state = CampaignOS.setTokenPosition(goblin.state, goblin.token.id, 6, 5);
+  // addToken has no `dead` draft field (a token only ever dies through real play) -- flip it
+  // directly here, the only way to get a dead-but-still-on-the-map token for this setup.
+  state.tokens.find((t) => t.name === "Goblin 1").dead = true;
+  state = CampaignOS.nextTurn(state);
+
+  const result = CampaignOS.moveToken(state, darkhawk.token.id, 10, 5);
+  assert.ok(!/opportunity attack/.test(result.message), "a dead token can't threaten an opportunity attack");
+});
+
 test("castSpell (leveled) consumes the caster's action, rejecting a second leveled cast the same turn", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Sael", initiative: 20, spellSlots: { 1: { max: 4, current: 4 } } }).state;

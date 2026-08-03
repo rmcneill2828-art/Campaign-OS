@@ -42,7 +42,9 @@
         const result = window.CampaignOS.attack(state, attacker.id, target.id, {
           advantage: Boolean(action.advantage),
           disadvantage: Boolean(action.disadvantage),
-          actionType: action.actionType === "bonusAction" ? "bonusAction" : "action"
+          actionType: action.actionType === "bonusAction" ? "bonusAction"
+            : action.actionType === "reaction" ? "reaction"
+            : "action"
         });
         return { state: result.state, message: result.message, alreadyLogged: true };
       }

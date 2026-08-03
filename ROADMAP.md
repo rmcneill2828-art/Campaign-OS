@@ -94,10 +94,24 @@ conventions, the Windows argv-escaping rule in dm-bridge/watch.js).
   real attack through the local command parser (not just a raw API call) correctly resists.
   See CLAUDE.md's new "Damage types / resistance / vulnerability / immunity" bullet for the
   full design writeup.
-- [ ] **Reactions / opportunity attacks.** Needs a "left this token's reach" trigger, which the
-  engine currently has no notion of (movement is just a speed budget, not adjacency-tracked over
-  a path). Design the trigger detection before writing the action -- this is more of an
-  open design question than a mechanical one.
+- [x] **Reactions / opportunity attacks.** Done 2026-08-03. Design decision: no automatic
+  geometric trigger (this engine has no path-stepping between two grid coordinates to detect
+  square-by-square reach-leaving with), so `moveToken()` instead surfaces a best-effort
+  start-vs-end adjacency hint in its own result message ("This may provoke an opportunity
+  attack from Goblin 1.") and the DM/Claude decides whether to act on it -- same "narrative
+  judgment call, no engine-side timing detection" precedent `roll_death_save`/legendary actions
+  already use. `attack()` gained a third `options.actionType`, `"reaction"`: gated on
+  `state.turn.round > 0` (turn order running at all) rather than "the actor's own turn" (a
+  reaction is definitionally taken on someone ELSE's turn), tracked via a new sparse
+  `token.reactionUsed` cleared by `nextTurn()` alongside the existing action/bonusAction flags,
+  and always resolves as exactly one attack even against a Multiattack creature (RAW). Wired
+  through `dmBridge.js`/`dm-bridge/watch.js` the same way `bonusAction` already is -- no
+  dedicated UI button, same as `bonusAction` has never had one. 8 new unit tests (322 total)
+  plus Playwright verification of both the dmBridge-level reaction wiring and the hint
+  appearing through real click-to-move. See CLAUDE.md's new "Reactions / opportunity attacks"
+  bullet for the full design writeup.
+
+Phase 2 complete.
 
 ## Phase 3 -- Real fog of war
 

@@ -318,10 +318,11 @@ See README.md for the full feature list and usage. Notes specific to working on 
   an action-type `attack()` share the same `actionUsed` flag, so casting a spell blocks a
   follow-up attack the same turn and vice versa; `attacksUsedThisTurn > 0` alone (even below the
   Extra Attack cap) is enough to block a leveled cast, since starting to attack already commits
-  the turn's action to attacking. Reactions (opportunity attacks) are explicitly **NOT**
-  modeled -- this engine has no "a token left another's reach" trigger to key one off, same
-  spirit as the lair-action/legendary-action timing judgment calls already left to the DM/
-  Claude. **`attack()`'s and `castSpell()`'s own return shapes are unchanged** by any of this
+  the turn's action to attacking. Reactions (opportunity attacks) are modeled as a third
+  `options.actionType` value, `"reaction"` -- see the dedicated bullet below for the full
+  shape; it's deliberately NOT gated the same way action/bonusAction are (own-active-turn-only)
+  since a reaction is by definition taken on someone else's turn. **`attack()`'s and
+  `castSpell()`'s own return shapes are unchanged** by any of this
   (still `{state, message}`); only the gate check (an early return) and the flag-set-on-success
   logic are new. `castAreaSpell()` is deliberately **not** gated by this -- scoped out to limit
   this phase's blast radius, since it's a newer, less common action; revisit if that gap causes
@@ -381,6 +382,40 @@ See README.md for the full feature list and usage. Notes specific to working on 
   a Multiattack profile's per-row type isn't editable there, same limitation as those two
   fields; the three list fields are plain comma-separated text inputs submitted as strings,
   which `normalizeDamageTypeList` accepts directly (no pre-parsing needed in `ui/app.js`).
+- Reactions / opportunity attacks: `attack()`'s `options.actionType` gained a third value,
+  `"reaction"`, alongside `"action"`/`"bonusAction"`. **Deliberately NOT auto-detected** --
+  this engine has no square-by-square path tracking between two grid coordinates
+  (`gridMoveCost`/`moveToken` only compute a distance/cost total, never a real path), so it
+  cannot know whether a token passed through and back out of another's reach mid-move, or
+  which exact square "leaving reach" happened on. Rather than build real path-stepping
+  (a much bigger feature) or silently do nothing, `moveToken()` gained a cheap, honest
+  *approximation*: `tokensLeavingReach(beforeState, afterState, moverId)` (start-vs-end
+  `isAdjacent()` only) and its message-building wrapper `reachHint()`, folded into both of
+  `moveToken()`'s own return messages (the free-movement branch and the speed-gated branch)
+  as a trailing `" This may provoke an opportunity attack from <names>."` clause -- purely
+  informational, never blocks the move or spends anyone's reaction itself. Calling
+  `attack(reactorId, moverId, {actionType: "reaction"})` off the back of that hint is a
+  narrative judgment call left to the DM/Claude, the exact same "no engine-side timing
+  detection" precedent `roll_death_save`'s "at the start of its turn" and legendary actions'
+  "at the end of another creature's turn" already use -- don't try to make the hint
+  auto-trigger the action. Gating is the OPPOSITE of action/bonusAction's "only restricted on
+  the actor's own active turn": a reaction is by definition taken on someone ELSE's turn, so
+  it's instead gated whenever `state.turn.round > 0` (turn order running at all) regardless of
+  whose turn it currently is, tracked via a new sparse `token.reactionUsed` boolean cleared by
+  `nextTurn()` for the newly active token alongside `actionUsed`/`bonusActionUsed`/
+  `attacksUsedThisTurn` -- matching RAW's actual rule ("you regain your spent reaction at the
+  start of each of your turns," not at the start of the round). A reaction ALWAYS resolves as
+  exactly one attack, even for a Multiattack creature -- `attack()` slices `attacker.attacks`
+  down to just its first entry (or the usual single-profile fallback) when
+  `actionType === "reaction"`, since RAW opportunity attacks are never a full Multiattack
+  action; `useLabel` (whether to prefix the message with the attack's name, e.g. "Bite") was
+  changed from `profiles.length > 1` to `profiles.length > 1 || Boolean(profiles[0]?.name)` so
+  a named single-profile reaction still shows which attack was used. `dmBridge.js`'s `attack`
+  case and `dm-bridge/watch.js`'s `isValidAction`/`SYSTEM_PROMPT` accept `actionType:
+  "reaction"` the same way they already accept `"bonusAction"` -- there is deliberately no
+  dedicated UI button for it (same as `bonusAction`, which has never had one either); it's
+  reachable through the DM bridge action field and, for a live Claude Code session, the
+  live-actions channel.
 - Live-session control contract: if you (a live Claude Code session working in this repo, not
   the `dm-bridge/watch.js` subprocess) are asked to control the board directly, this is the
   channel -- no `claude -p` call, no editing `watch.js`.

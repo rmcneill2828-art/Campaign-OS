@@ -90,9 +90,15 @@ dependencies to install for the app itself. See Tests, below, for running the te
   one attack per swing, not one call covering all of them, for a Fighter/Barbarian with it. Set
   `actionType: "bonusAction"` (the Claude DM bridge's `attack`/`cast_spell` actions) for a
   genuine bonus-action use (an off-hand attack, Misty Step, Healing Word) -- it has its own
-  separate one-per-turn budget, independent of the action. Reactions (opportunity attacks)
-  aren't modeled at all -- this engine has no "left another token's reach" trigger to key one
-  off.
+  separate one-per-turn budget, independent of the action. Reactions (opportunity attacks) are
+  supported via `actionType: "reaction"` on the Claude DM bridge's `attack` action, but not
+  auto-detected -- this engine has no way to track a token's exact path between two squares, so
+  it can't tell on its own when a move actually leaves someone's reach. Instead, whenever a
+  move ends adjacent tokens becoming non-adjacent, the move's own result message says so (e.g.
+  "This may provoke an opportunity attack from Goblin 1.") so you can decide whether to issue
+  the reaction attack -- it always resolves as one attack (never a full Multiattack, even for a
+  monster that has one), and each token gets one reaction back at the start of its own next
+  turn, same as a real table.
 - Ability scores and saving throws: every token can carry real STR/DEX/CON/INT/WIS/CHA
   scores -- editable on the token sheet, filled in automatically for the six `spawn`ed
   monsters (real SRD ability scores, not guesses) and for any imported character/NPC sheet
