@@ -816,6 +816,79 @@ body.grid-dragging {
   padding: 0 8px;
 }
 
+.dice-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.die-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 54px;
+  height: 54px;
+  min-height: 0;
+  padding: 4px;
+}
+
+.die-icon {
+  width: 28px;
+  height: 28px;
+  fill: rgba(215, 181, 109, 0.14);
+  stroke: var(--accent);
+  stroke-width: 4;
+  stroke-linejoin: round;
+}
+
+.die-button:hover .die-icon {
+  fill: rgba(215, 181, 109, 0.28);
+}
+
+.die-face {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* The actual roll happens instantly and synchronously (rollFreeform() is the single source
+   of truth, same as every other roll in this app) -- .rolling is purely a cosmetic delay on
+   REVEALING that already-known result, driven by app.js's own setInterval/setTimeout pair, not
+   a second, separate animation-only number. See app.js's dice-tray click handler. */
+.die-button.rolling {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(215, 181, 109, 0.35), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.die-button.rolling .die-icon {
+  animation: die-tumble 0.6s ease-in-out;
+}
+
+.die-button.rolling .die-face {
+  color: var(--text);
+}
+
+@keyframes die-tumble {
+  0%   { transform: rotate(0deg) scale(1); }
+  20%  { transform: rotate(-22deg) scale(1.12); }
+  40%  { transform: rotate(16deg) scale(0.92); }
+  60%  { transform: rotate(-12deg) scale(1.08); }
+  80%  { transform: rotate(6deg) scale(0.96); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+/* A user who's set "reduce motion" at the OS level gets the real result immediately (see
+   prefersReducedMotion in app.js, which skips the setInterval flicker loop entirely on this
+   same query) -- this rule only has to cancel the CSS side, the tumble keyframes themselves. */
+@media (prefers-reduced-motion: reduce) {
+  .die-button.rolling .die-icon {
+    animation: none;
+  }
+}
+
 .token-sheet.empty {
   color: var(--muted);
 }

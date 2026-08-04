@@ -13,6 +13,7 @@
   const diceRollerForm = document.querySelector("#diceRollerForm");
   const diceRollerInput = document.querySelector("#diceRollerInput");
   const diceRollerResult = document.querySelector("#diceRollerResult");
+  const diceTray = document.querySelector("#diceTray");
   const quickAddTokenForm = document.querySelector("#quickAddTokenForm");
   const quickAddTokenName = document.querySelector("#quickAddTokenName");
   const quickAddTokenType = document.querySelector("#quickAddTokenType");
@@ -3048,6 +3049,53 @@
     saveEncounter();
     diceRollerResult.textContent = result.message;
     render();
+  });
+
+  // Quick single-die rolls (the dice-tray buttons above the notation field) -- rollFreeform()
+  // is still the one and only source of the actual number, called synchronously the instant
+  // the button is clicked, exactly like the form submit above; a die-face's rapid random
+  // flicker during .rolling is purely cosmetic and never the value that gets logged/saved --
+  // it's cleared and replaced with the real result the moment the reveal fires. State/log/
+  // result-text commit is deliberately held until that same reveal moment (not applied
+  // immediately, unlike every other button in this file) so the combat log entry and the
+  // result text land in sync with the die visually settling, rather than the log jumping
+  // ahead of a still-spinning icon.
+  const DICE_TRAY_FLICKER_MS = 60;
+  const DICE_TRAY_REVEAL_MS = 600;
+  const prefersReducedMotion = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+
+  diceTray?.addEventListener("click", (event) => {
+    const button = event.target.closest(".die-button");
+    if (!button || button.classList.contains("rolling")) return;
+    const die = Number(button.dataset.die);
+    if (!Number.isFinite(die) || die <= 0) return;
+
+    const result = window.CampaignOS.rollFreeform(state, `1d${die}`);
+    const face = button.querySelector(".die-face");
+
+    const reveal = () => {
+      state = result.state;
+      saveEncounter();
+      diceRollerResult.textContent = result.message;
+      face.textContent = result.total;
+      button.classList.remove("rolling");
+      render();
+    };
+
+    if (prefersReducedMotion) {
+      reveal();
+      return;
+    }
+
+    button.classList.add("rolling");
+    const flicker = setInterval(() => {
+      face.textContent = 1 + Math.floor(Math.random() * die);
+    }, DICE_TRAY_FLICKER_MS);
+
+    setTimeout(() => {
+      clearInterval(flicker);
+      reveal();
+    }, DICE_TRAY_REVEAL_MS);
   });
 
   mapSettingsToggle.addEventListener("click", () => {

@@ -161,7 +161,37 @@
 
             <section class="panel-section">
               <h2>Dice Roller</h2>
-              <p class="library-hint">Not tied to any token -- for traps, random tables, loot, or anything else you'd otherwise have to leave the app to roll. Standard notation only (one dice group): <code>3d6+2</code>, <code>d20</code>, <code>4d6-1</code>.</p>
+              <p class="library-hint">Not tied to any token -- for traps, random tables, loot, or anything else you'd otherwise have to leave the app to roll. Click a die for a quick single roll, or enter custom notation below for a group with a modifier, e.g. <code>3d6+2</code>, <code>4d6-1</code>.</p>
+              <div id="diceTray" class="dice-tray" role="group" aria-label="Quick dice roll">
+                <button type="button" class="die-button" data-die="4" aria-label="Roll a d4">
+                  <svg viewBox="0 0 100 100" class="die-icon" aria-hidden="true"><polygon points="50,6 88,72 12,72"></polygon></svg>
+                  <span class="die-face">d4</span>
+                </button>
+                <button type="button" class="die-button" data-die="6" aria-label="Roll a d6">
+                  <svg viewBox="0 0 100 100" class="die-icon" aria-hidden="true"><polygon points="15,15 85,15 85,85 15,85"></polygon></svg>
+                  <span class="die-face">d6</span>
+                </button>
+                <button type="button" class="die-button" data-die="8" aria-label="Roll a d8">
+                  <svg viewBox="0 0 100 100" class="die-icon" aria-hidden="true"><polygon points="50,6 94,50 50,94 6,50"></polygon></svg>
+                  <span class="die-face">d8</span>
+                </button>
+                <button type="button" class="die-button" data-die="10" aria-label="Roll a d10">
+                  <svg viewBox="0 0 100 100" class="die-icon" aria-hidden="true"><polygon points="50,4 78,40 50,96 22,40"></polygon></svg>
+                  <span class="die-face">d10</span>
+                </button>
+                <button type="button" class="die-button" data-die="12" aria-label="Roll a d12">
+                  <svg viewBox="0 0 100 100" class="die-icon" aria-hidden="true"><polygon points="50,6 92,36 76,86 24,86 8,36"></polygon></svg>
+                  <span class="die-face">d12</span>
+                </button>
+                <button type="button" class="die-button" data-die="20" aria-label="Roll a d20">
+                  <svg viewBox="0 0 100 100" class="die-icon" aria-hidden="true"><polygon points="50,6 88,28 88,72 50,94 12,72 12,28"></polygon></svg>
+                  <span class="die-face">d20</span>
+                </button>
+                <button type="button" class="die-button" data-die="100" aria-label="Roll a d100 (percentile)">
+                  <svg viewBox="0 0 100 100" class="die-icon" aria-hidden="true"><polygon points="91,67 67,91 33,91 9,67 9,33 33,9 67,9 91,33"></polygon></svg>
+                  <span class="die-face">d%</span>
+                </button>
+              </div>
               <form id="diceRollerForm" class="dice-roller-form">
                 <input id="diceRollerInput" type="text" placeholder="e.g. 3d6+2" aria-label="Dice notation">
                 <button type="submit">Roll</button>
