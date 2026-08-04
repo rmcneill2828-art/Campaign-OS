@@ -1261,7 +1261,13 @@
   //     token is already flagged dead, which shouldn't normally coincide with hp > 0 anyway).
   //   - Already at 0 HP and takes MORE damage: that's an automatic failed death save per RAW
   //     (not a roll) -- two failures instead of one if `options.critical` is set, same as a
-  //     real critical hit against a downed creature. Three failures kills outright.
+  //     real critical hit against a downed creature. Three failures kills outright. This
+  //     applies whether or not the token is currently stable: RAW ("if a stable creature
+  //     takes damage, it starts making death saving throws again") means a stabilized token
+  //     taking a hit un-stabilizes and resumes dying, not that the damage is silently
+  //     absorbed for free -- successes/failures reset to 0 first (a genuine restart, not a
+  //     resume from wherever the count was when it stabilized), then this hit's automatic
+  //     failure(s) apply on top, same as the non-stable case below.
   // Every token type is treated the same here (RAW technically reserves death saves for PCs,
   // leaving monsters to the DM's judgment) -- a deliberate simplification; a monster the DM
   // just wants to treat as dead at 0 HP can simply be left alone or edited directly.
@@ -1344,10 +1350,17 @@
           messages.push(`${rollText} Loses concentration on ${spellName}.`);
         }
       }
-    } else if (token.dying && !token.dying.stable) {
+    } else if (token.dying) {
+      const wasStable = token.dying.stable;
+      if (wasStable) {
+        token.dying.stable = false;
+        token.dying.successes = 0;
+        token.dying.failures = 0;
+      }
       const failCount = options.critical ? 2 : 1;
       token.dying.failures += failCount;
-      messages.push(`${token.name} takes damage while down: ${failCount > 1 ? "2 automatic failed death saves (critical hit)" : "1 automatic failed death save"} (${token.dying.failures}/3 failures).`);
+      const resumeNote = wasStable ? ` ${token.name} is no longer stable and resumes making death saves.` : "";
+      messages.push(`${token.name} takes damage while down: ${failCount > 1 ? "2 automatic failed death saves (critical hit)" : "1 automatic failed death save"} (${token.dying.failures}/3 failures).${resumeNote}`);
       if (token.dying.failures >= 3) {
         delete token.dying;
         token.dead = true;

@@ -1457,6 +1457,42 @@ test("applyDamage does nothing death-save-related once a token is already dead",
   assert.equal(result.message, null);
 });
 
+test("applyDamage un-stabilizes a stable token and resumes death saves, resetting the count", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state; // down, 0/0
+  const tokenId = state.tokens[0].id;
+  // 3 successful death saves (0.6 -> d20 13, a success) stabilizes.
+  state = withRandom([0.6], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+  state = withRandom([0.6], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+  state = withRandom([0.6], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+  assert.deepEqual(state.tokens[0].dying, { successes: 3, failures: 0, stable: true });
+
+  const result = CampaignOS.applyDamage(state, tokenId, 5);
+  assert.match(result.message, /1 automatic failed death save \(1\/3 failures\)\./);
+  assert.match(result.message, /no longer stable and resumes making death saves/);
+  // A genuine restart, not a resume from the 3 successes it stabilized with -- otherwise the
+  // very next successful roll would instantly re-stabilize it off the old count.
+  assert.deepEqual(result.state.tokens[0].dying, { successes: 0, failures: 1, stable: false });
+});
+
+test("applyDamage can kill a token outright from a critical hit that un-stabilizes it", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;
+  state = CampaignOS.applyDamage(state, state.tokens[0].id, 1).state;
+  const tokenId = state.tokens[0].id;
+  state = withRandom([0.6], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+  state = withRandom([0.6], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+  state = withRandom([0.6], () => CampaignOS.rollDeathSave(state, tokenId)).state;
+  assert.equal(state.tokens[0].dying.stable, true);
+
+  state = CampaignOS.applyDamage(state, tokenId, 5).state; // 1/3 failures, un-stabilized
+  const result = CampaignOS.applyDamage(state, tokenId, 5, { critical: true }); // +2 -> 3/3
+  assert.match(result.message, /Darkhawk dies\./);
+  assert.equal(result.state.tokens[0].dead, true);
+  assert.equal(result.state.tokens[0].dying, undefined);
+});
+
 test("applyHealing clears the death-save tracker and a dead flag when it brings a token back above 0 HP", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Darkhawk", hp: 1, maxHp: 100 }).state;

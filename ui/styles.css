@@ -1,3 +1,24 @@
+/* Cinzel (SIL Open Font License -- full text in ui/fonts/OFL.txt), self-hosted rather than
+   pulled from a CDN: this app's whole selling point is "grab it and open index.html, no build
+   step, no dependencies" (see CLAUDE.md/README) -- a DM might genuinely be relying on that at
+   a table with no wifi, and a Google Fonts <link> would silently lose the fantasy typography
+   (after stalling on a request) the moment there's no connection. It's shipped as a single
+   variable-font file covering the whole 400-700 weight range (confirmed against Google's own
+   CSS: every discrete weight they serve points at the identical file), so one @font-face with
+   a weight range covers every heading weight this stylesheet uses below -- not one file per
+   weight. Reserved for actual headings/titles/labels (see --font-display's use sites) --
+   Cinzel's inscriptional-capitals style reads beautifully at heading sizes but slows reading
+   down at body-text sizes, and this app's body copy is dense game-state data a DM needs to
+   scan fast mid-combat, not prose to read for its own sake -- so the body font stays untouched.
+*/
+@font-face {
+  font-family: "Cinzel";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("fonts/cinzel.woff2") format("woff2");
+}
+
 :root {
   color-scheme: dark;
   --bg: #11140f;
@@ -10,6 +31,17 @@
   --danger: #b9534c;
   --hero: #6fb7d8;
   --monster: #cf7160;
+  --font-display: "Cinzel", "Cambria", Georgia, serif;
+  /* A slight, consistent corner-softening applied to panels/controls/tokens-of-art below --
+     just enough to read as "worn/crafted" rather than the stock-sharp rectangles of a form UI,
+     while staying far short of the rounded-bubble look a modern web app usually reaches for. */
+  --radius: 3px;
+  /* A faint, uniform grain -- an inline SVG feTurbulence filter, not an image asset to fetch or
+     track in git -- layered under a flat fill wherever a surface wants to read as aged
+     parchment/leather rather than a flat CSS color. Kept low-opacity (5% black) specifically so
+     it never competes with foreground text contrast; used as an extra background-image layer,
+     never a replacement for the color underneath it. */
+  --noise: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%20width%3D%27240%27%20height%3D%27240%27%3E%3Cfilter%20id%3D%27n%27%3E%3CfeTurbulence%20type%3D%27fractalNoise%27%20baseFrequency%3D%270.85%27%20numOctaves%3D%272%27%20stitchTiles%3D%27stitch%27/%3E%3CfeColorMatrix%20type%3D%27matrix%27%20values%3D%270%200%200%200%200%200%200%200%200%200%200%200%200%200%200%200%200%200%200.05%200%27/%3E%3C/filter%3E%3Crect%20width%3D%27100%25%27%20height%3D%27100%25%27%20filter%3D%27url%28%23n%29%27/%3E%3C/svg%3E");
 }
 
 * {
@@ -19,7 +51,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg);
+  background: var(--noise), var(--bg);
   color: var(--text);
   font-family: "Segoe UI", system-ui, sans-serif;
 }
@@ -38,7 +70,14 @@ button,
 select,
 input {
   border: 1px solid var(--line);
-  background: #171b15;
+  /* A faint top-to-bottom gradient instead of a flat fill -- reads as a slightly worn/carved
+     surface (wood, stone, old metal) rather than a flat web-form rectangle -- plus a very
+     subtle border-radius (--radius) softening the stock-sharp corner without going rounded.
+     Kept this understated on purpose: these controls are dense and load-bearing (many
+     multi-button toolbars, resource rows, etc.), so anything louder than this starts fighting
+     legibility rather than adding character. */
+  background: linear-gradient(180deg, #1c211a, #14170f);
+  border-radius: var(--radius);
   color: var(--text);
 }
 
@@ -46,10 +85,25 @@ button {
   min-height: 36px;
   padding: 0 12px;
   cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 button:hover {
   border-color: var(--accent);
+  /* A soft candlelit glow rather than a hard highlight -- an outer box-shadow in the accent
+     color, low-opacity and unblurred-radius-forward, plus a 1px lift. */
+  box-shadow: 0 0 0 1px rgba(215, 181, 109, 0.25), 0 2px 6px rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(215, 181, 109, 0.35);
 }
 
 button:disabled {
@@ -61,11 +115,13 @@ button:disabled {
 
 button:disabled:hover {
   border-color: var(--line);
+  box-shadow: none;
+  transform: none;
 }
 
 button.active-toggle {
   border-color: var(--accent);
-  background: #2a2417;
+  background: linear-gradient(180deg, #362c18, #241d10);
   color: #fff2ce;
 }
 
@@ -87,20 +143,33 @@ input {
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
+  padding-bottom: 14px;
+  /* A fading hairline instead of a flat border -- reads as a worn banner rule under the
+     title rather than a plain form-section divider. border-image lets the gradient itself
+     draw the 1px line (a plain border-bottom can't gradient without it). */
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(90deg, var(--accent), transparent 70%) 1;
 }
 
 .eyebrow {
   margin: 0 0 4px;
   color: var(--accent);
+  font-family: var(--font-display);
   font-size: 0.8rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  /* A faint carved-stone/engraving cue on the app's own name -- one dark offset shadow, no
+     blur, so it stays crisp at this small a size rather than reading as a smudge. */
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
 }
 
 h1,
 h2,
 h3 {
   margin: 0;
-  letter-spacing: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 h1 {
@@ -124,12 +193,16 @@ h1 {
   min-height: 36px;
   padding: 0 12px;
   border: 1px solid var(--line);
-  background: #171b15;
+  background: linear-gradient(180deg, #1c211a, #14170f);
+  border-radius: var(--radius);
   cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .import-encounter-label:hover {
   border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(215, 181, 109, 0.25), 0 2px 6px rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
 }
 
 .import-encounter-label input {
@@ -152,12 +225,48 @@ h1 {
 }
 
 .map-panel {
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
 }
 
+/* Small corner brackets on the app's single most prominent panel -- a cheap, self-drawn
+   (two-border-only, no image asset) cue that this is a "framed" surface, in the same spirit
+   as a map case or a bordered plate in an old rulebook. Deliberately reserved for just this
+   one panel and .panel-section-primary below, not applied to every .panel-section -- the
+   sidebar has a couple dozen of those, and corner brackets on all of them would read as
+   visual noise rather than ornament. */
+.map-panel::before,
+.map-panel::after,
+.panel-section-primary::before,
+.panel-section-primary::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.map-panel::before,
+.panel-section-primary::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.map-panel::after,
+.panel-section-primary::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
 .side-panel {
-  background: var(--bg);
+  background: var(--noise), var(--bg);
   border: 1px solid var(--line);
 }
 
@@ -222,7 +331,13 @@ h1 {
   width: min(100cqw, calc(100cqh * (var(--map-aspect-ratio, 12 / 8))));
   height: min(100cqh, calc(100cqw / (var(--map-aspect-ratio, 12 / 8))));
   border: 1px solid #52614a;
+  /* --noise as the top background-image layer -- purely decorative, doesn't touch the
+     gradients or any of the sizing math above (aspect-ratio/width/height), so it's safe on
+     every map regardless of scale. Only actually visible on the "no map image yet" placeholder
+     look: the moment a DM sets a real map image, app.js applies it via this same element's
+     inline style, which wins over every one of these CSS background-image layers outright. */
   background:
+    var(--noise),
     radial-gradient(circle at 22% 35%, rgba(215, 181, 109, 0.16), transparent 20%),
     linear-gradient(135deg, #2a3627, #172315 55%, #2d3528);
   background-position: center;
@@ -542,11 +657,22 @@ body.grid-dragging {
 .token.hero {
   background: var(--hero);
   color: #071016;
+  /* A brass-toned ring instead of the generic .token white one, plus a faint matching glow
+     layered onto the existing drop shadow (box-shadow doesn't accumulate across separate
+     rules, so both live in this one declaration) -- a small, cheap way to make a hero token
+     read as "consecrated/blessed metal" at a glance, distinct from a monster's ring below. */
+  border-color: #f0dca0;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(240, 220, 160, 0.35);
 }
 
 .token.monster {
   background: var(--monster);
   color: #190705;
+  /* A darker iron/rust ring, same treatment as .token.hero above but tuned toward "worn
+     metal" rather than "brass" -- the two together give the initiative list's color-coding
+     (--hero/--monster) a second, ring-level cue beyond just the fill color. */
+  border-color: #6b4a3f;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(107, 74, 63, 0.5);
 }
 
 .token.selected {
@@ -580,11 +706,20 @@ body.grid-dragging {
   background: var(--panel-strong);
   color: var(--accent);
   font-size: 0.82rem;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+/* A small leading sigil rather than plain text -- cheap (one glyph, no image/icon font) but
+   enough to make every panel header read as a labeled plate/nameplate instead of a form
+   fieldset legend. */
+.panel-section h2::before {
+  content: "\25c6  ";
+  font-size: 0.8em;
+}
+
 .panel-section-primary {
+  position: relative;
   border-color: var(--accent);
 }
 
@@ -1501,9 +1636,9 @@ body.grid-dragging {
 }
 
 .combat-log li {
-  padding: 8px;
+  padding: 8px 10px;
   border-left: 3px solid var(--accent);
-  background: #171b15;
+  background: linear-gradient(90deg, rgba(215, 181, 109, 0.06), transparent 40%), #171b15;
   color: var(--muted);
   font-size: 0.86rem;
   line-height: 1.35;

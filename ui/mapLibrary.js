@@ -17,44 +17,21 @@
   const IMAGE_STORE = "images";
   const DB_VERSION = 2;
 
-  let dbPromise = null;
-
-  function openDB() {
-    if (dbPromise) return dbPromise;
-    dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        // v1 kept metadata and image bytes in one "maps" store. Dropped rather than
-        // migrated on upgrade -- see tokenLibrary.js's identical note for why. Re-add maps
-        // through the (now size-capped) add form or a connected Maps folder.
-        if (db.objectStoreNames.contains("maps")) db.deleteObjectStore("maps");
-        if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE, { keyPath: "key" });
-        if (!db.objectStoreNames.contains(IMAGE_STORE)) db.createObjectStore(IMAGE_STORE);
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    return dbPromise;
-  }
+  const openDB = window.CampaignOSIdb.openDatabase(DB_NAME, DB_VERSION, (db) => {
+    // v1 kept metadata and image bytes in one "maps" store. Dropped rather than
+    // migrated on upgrade -- see tokenLibrary.js's identical note for why. Re-add maps
+    // through the (now size-capped) add form or a connected Maps folder.
+    if (db.objectStoreNames.contains("maps")) db.deleteObjectStore("maps");
+    if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE, { keyPath: "key" });
+    if (!db.objectStoreNames.contains(IMAGE_STORE)) db.createObjectStore(IMAGE_STORE);
+  });
 
   function normalizeName(name) {
     return String(name || "").trim().toLowerCase();
   }
 
   function runTransaction(storeName, mode, work) {
-    return openDB().then((db) => new Promise((resolve, reject) => {
-      const tx = db.transaction(storeName, mode);
-      const store = tx.objectStore(storeName);
-      const request = work(store);
-      tx.onerror = () => reject(tx.error);
-      if (request) {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      } else {
-        tx.oncomplete = () => resolve();
-      }
-    }));
+    return window.CampaignOSIdb.runTransaction(openDB, storeName, mode, work);
   }
 
   // Metadata only -- safe to call over an arbitrarily large library, since it never touches

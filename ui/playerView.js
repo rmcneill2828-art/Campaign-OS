@@ -14,6 +14,7 @@
   // app's real deployment environment -- the same reasoning (and the same interval) as every
   // other cross-context channel in this codebase (dm-bridge/watch.js's request/response
   // polling, ui/app.js's live-actions polling).
+  const escapeHtml = window.CampaignOSDom.escapeHtml;
   const storageKey = "campaign-os-encounter-state";
   const map = document.querySelector("#battleMap");
   const mapNameEl = document.querySelector("#playerMapName");
@@ -31,15 +32,6 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
     return Math.min(max, Math.max(min, Math.round(number)));
-  }
-
-  function escapeHtml(value) {
-    return String(value ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
   }
 
   function currentMapSettings(state) {

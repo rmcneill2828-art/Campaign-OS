@@ -1,12 +1,14 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { loadScript } = require("./load-script");
+const { loadScriptsInto } = require("./load-script");
 
-// mapLibrary.js only touches `indexedDB` inside functions that are called lazily (openDB),
-// so loading the script in Node -- which has no indexedDB global -- is safe as long as we
-// only exercise the pure, synchronous normalizeName() here. The actual IndexedDB read/write
-// round trip is covered by a real-browser test instead, same as tokenLibrary.js.
-const { CampaignOSMapLibrary } = loadScript("ui/mapLibrary.js");
+// mapLibrary.js only touches `indexedDB` inside functions that are called lazily (openDB,
+// via idbUtils.js's openDatabase()), so loading the scripts in Node -- which has no
+// indexedDB global -- is safe as long as we only exercise the pure, synchronous
+// normalizeName() here. The actual IndexedDB read/write round trip is covered by a
+// real-browser test instead, same as tokenLibrary.js. idbUtils.js still has to be loaded
+// first: mapLibrary.js calls window.CampaignOSIdb.openDatabase(...) at the top level.
+const { CampaignOSMapLibrary } = loadScriptsInto({}, ["ui/idbUtils.js", "ui/mapLibrary.js"]);
 
 test("normalizeName trims and lowercases a map name", () => {
   assert.equal(CampaignOSMapLibrary.normalizeName("  The Standing Ring  "), "the standing ring");

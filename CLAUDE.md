@@ -25,10 +25,45 @@ See README.md for the full feature list and usage. Notes specific to working on 
   connections use to browse a large art pack without bulk-copying it into IndexedDB), and
   `playerView.js` -- `player.html`'s own script, a much smaller read-only renderer for the
   player-facing board (see the "Player window" constraint below), independent of `app.js`.
+  `idbUtils.js` (the shared `openDatabase()`/`runTransaction()` promise-wrapping around
+  indexedDB's callback API) and `domUtils.js` (the shared `escapeHtml()`) are small,
+  dependency-free utility scripts that must load before anything that calls them -- see each
+  HTML entry point's own `<script>` order. Each IndexedDB-backed store still owns its own
+  database name/version/schema; `idbUtils.js` only de-duplicates the wrapper code, not the
+  data -- no store's persisted content or database identity changed when this was factored
+  out (five near-identical copies of this exact code existed before). `domUtils.js` exists
+  because those five-going-on-eight-plus copies of small boilerplate had already produced one
+  real bug: `app.js`'s own `renderInitiative()` had a second, separately-hand-copied
+  initiative-list render (mirrored in `playerView.js`) that turned out to skip calling
+  `escapeHtml()` on a token's name entirely -- unescaped free text into `innerHTML`. Token
+  names are DM-editable and can come from an imported character/NPC sheet, so this was a real
+  (if low-severity, single-user, `file://`-origin) XSS vector, not just a style nit. Fixed by
+  escaping that call site and consolidating to one `escapeHtml()` so there's exactly one
+  implementation to get right instead of three.
 - `player.html` -- the player-facing counterpart to `index.html`, opened via its "Open Player
   Window" button. Loads only `engine/encounter.js`, `ui/imageStore.js`, and `ui/playerView.js`
   -- none of `app.js`'s DM-only machinery (stores, folder connections, the DM bridge, the
   campaign browser) is loaded here at all.
+- `ui/styles.css` -- shared by all three HTML entry points (`index.html`, `player.html`,
+  `character.html`), so a change here is felt everywhere at once; there's no per-page
+  stylesheet to keep in sync. `--font-display` (Cinzel, self-hosted -- see the fonts bullet
+  below) is applied only to `h1`/`h2`/`h3`/`.eyebrow`, i.e. structural headings and labels, not
+  body copy -- this app's body text is dense game-state data (HP, ability scores, resource
+  counts) a DM needs to scan fast mid-combat, and Cinzel's inscriptional-capitals style is
+  built for short heading text, not paragraphs of numbers. Two things worth knowing before
+  touching either: Cinzel has no true lowercase (its "lowercase" glyphs are drawn as small
+  caps, by design, mirroring Roman inscriptional lettering that never had one) -- so `h3`
+  picking up `--font-display` means a token/character NAME (e.g. `.token-heading h3`) renders
+  as visual small-caps regardless of how the DM actually typed it (`Wolf 1` reads as `WOLF 1`)
+  -- a deliberate call, not a bug, but worth re-examining if a future change wants a name to
+  keep its literal casing. Second, `--noise` (a self-contained inline-SVG `feTurbulence` data
+  URI, no image asset) is layered as an *extra* `background-image` on top of, never in place
+  of, whatever solid/gradient fill a surface already had -- see `body`/`.side-panel`/
+  `.battle-map`'s own rules for the pattern (`background: var(--noise), <existing fill>;`).
+  Corner-bracket ornament (`::before`/`::after` on `.map-panel`/`.panel-section-primary`) is
+  deliberately NOT applied to every `.panel-section` -- there are a couple dozen of those in
+  the sidebar, and brackets on all of them would read as noise rather than ornament; it's
+  reserved for the single map panel and the one "primary" panel (currently the token sheet).
 - `dm-bridge/watch.js` -- a Node script, run separately (`node dm-bridge/watch.js`), that
   bridges the browser to the local `claude` CLI. Three independent request/response file
   pairs: `request.json`/`response.json` for live combat narration (tools disabled, strict JSON
@@ -44,6 +79,16 @@ See README.md for the full feature list and usage. Notes specific to working on 
   See the "Live-session control contract" constraint below for the exact shape.
 
 ## Constraints that aren't obvious from reading the code
+- `ui/fonts/cinzel.woff2` is self-hosted on purpose, not pulled from a Google Fonts `<link>` --
+  this app's whole selling point is "grab it and open index.html, no build step, no
+  dependencies" (see README), which a DM might genuinely be relying on at a table with no wifi;
+  a CDN font would silently regress to the system fallback (after stalling on a request) the
+  moment there's no connection. It's the SIL Open Font License variable-font file Google Fonts
+  itself serves (license text at `ui/fonts/OFL.txt`), fetched once and committed rather than
+  built/vendored via any tooling -- confirmed it's the same file for every weight 400-700
+  Google's own CSS references, so one `@font-face` with a weight range in `ui/styles.css`
+  covers every heading weight used, no separate file per weight needed. Don't reintroduce a
+  `fonts.googleapis.com`/`fonts.gstatic.com` reference anywhere without re-reading this.
 - `api.anthropic.com` rejects CORS from arbitrary origins (verified against the live API) --
   there is no way to call the Anthropic API directly from this browser app. All AI features go
   through `dm-bridge/watch.js` shelling out to the local `claude` CLI instead.
@@ -152,7 +197,12 @@ See README.md for the full feature list and usage. Notes specific to working on 
   treats further damage to an already-0-HP token as an automatic failed death save -- two on a
   critical hit (pass `{critical: true}` -- `attack()`/`castSpell()` already do, from
   `resolveOneAttack()`'s own `isCritical`) -- rather than a roll, killing it outright at 3
-  failures. `rollDeathSave()` is the actual d20 roll (10+ succeeds, a natural 1 is two
+  failures. This applies even if the token is currently `stable`: RAW ("if a stable creature
+  takes damage, it starts making death saving throws again") means the hit un-stabilizes it
+  rather than being silently absorbed for free -- `applyDamage()` resets `successes`/`failures`
+  to 0 first (a genuine restart, not a resume from wherever the count sat when it stabilized),
+  then applies this hit's own automatic failure(s) on top, and the message says so explicitly
+  ("is no longer stable and resumes making death saves"). `rollDeathSave()` is the actual d20 roll (10+ succeeds, a natural 1 is two
   failures at once, a natural 20 revives at 1 HP outright), self-logging like
   `rollSavingThrow()`/`useResource()` since it's its own atomic event; a no-op if the token
   isn't currently making death saves (not down, already stable, or already dead) rather than

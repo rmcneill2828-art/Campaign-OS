@@ -8,37 +8,17 @@
   const DB_NAME = "campaign-os-asset-folders";
   const STORE_NAME = "handles";
 
-  let dbPromise = null;
-
-  function openDB() {
-    if (dbPromise) return dbPromise;
-    dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
-      request.onupgradeneeded = () => {
-        request.result.createObjectStore(STORE_NAME);
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    return dbPromise;
-  }
+  const openDB = window.CampaignOSIdb.openDatabase(DB_NAME, 1, (db) => {
+    db.createObjectStore(STORE_NAME);
+  });
 
   function saveHandle(kind, handle) {
-    return openDB().then((db) => new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      tx.objectStore(STORE_NAME).put(handle, kind);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    }));
+    return window.CampaignOSIdb.runTransaction(openDB, STORE_NAME, "readwrite", (store) => store.put(handle, kind));
   }
 
   function loadHandle(kind) {
-    return openDB().then((db) => new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const request = tx.objectStore(STORE_NAME).get(kind);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    }));
+    return window.CampaignOSIdb.runTransaction(openDB, STORE_NAME, "readonly", (store) => store.get(kind))
+      .then((result) => result || null);
   }
 
   window.CampaignOSAssetFolders = { saveHandle, loadHandle };

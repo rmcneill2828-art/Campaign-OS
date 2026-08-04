@@ -1,4 +1,10 @@
 (function () {
+  // Must be assigned before any code below runs, not just before its own first use --
+  // unlike the `function escapeHtml() {...}` this replaced, a `const` isn't hoisted with its
+  // value, only its binding (TDZ): sheet.innerHTML = renderMarkdown(...) a few lines down
+  // calls this (via inline()) as soon as the IIFE executes, well before this file's own
+  // function declarations further down are ever invoked.
+  const escapeHtml = window.CampaignOSDom.escapeHtml;
   const campaignStorageKey = "campaign-os-campaign-import";
   const title = document.querySelector("#sheetTitle");
   const path = document.querySelector("#sheetPath");
@@ -120,14 +126,5 @@
     return escapeHtml(value)
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.+?)\*/g, "<em>$1</em>");
-  }
-
-  function escapeHtml(value) {
-    return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
   }
 })();

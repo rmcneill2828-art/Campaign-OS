@@ -1,4 +1,5 @@
 (function () {
+  const escapeHtml = window.CampaignOSDom.escapeHtml;
   const storageKey = "campaign-os-encounter-state";
   const campaignStorageKey = "campaign-os-campaign-import";
   const preferencesStorageKey = "campaign-os-preferences";
@@ -683,7 +684,7 @@
         : token.dying
           ? `<small class="death-badge death-badge-dying">${token.dying.stable ? "STABLE" : "DYING"}</small>`
           : "";
-      item.innerHTML = `<button type="button" data-id="${token.id}"><span>${token.name}</span>${deathBadge}${movementNote}<strong>${token.initiative}</strong></button>`;
+      item.innerHTML = `<button type="button" data-id="${token.id}"><span>${escapeHtml(token.name)}</span>${deathBadge}${movementNote}<strong>${token.initiative}</strong></button>`;
       item.querySelector("button").addEventListener("click", () => selectToken(token.id));
       initiativeList.appendChild(item);
     });
@@ -1833,15 +1834,6 @@
     });
     mapSelect.disabled = false;
     mapSelect.value = state.mapName;
-  }
-
-  function escapeHtml(value) {
-    return String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
   }
 
   function escapeAttribute(value) {

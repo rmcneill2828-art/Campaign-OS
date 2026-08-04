@@ -7,34 +7,12 @@
   const DB_NAME = "campaign-os-image-store";
   const STORE_NAME = "images";
 
-  let dbPromise = null;
-
-  function openDB() {
-    if (dbPromise) return dbPromise;
-    dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
-      request.onupgradeneeded = () => {
-        request.result.createObjectStore(STORE_NAME, { keyPath: "key" });
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    return dbPromise;
-  }
+  const openDB = window.CampaignOSIdb.openDatabase(DB_NAME, 1, (db) => {
+    db.createObjectStore(STORE_NAME, { keyPath: "key" });
+  });
 
   function runTransaction(mode, work) {
-    return openDB().then((db) => new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, mode);
-      const store = tx.objectStore(STORE_NAME);
-      const request = work(store);
-      tx.onerror = () => reject(tx.error);
-      if (request) {
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      } else {
-        tx.oncomplete = () => resolve();
-      }
-    }));
+    return window.CampaignOSIdb.runTransaction(openDB, STORE_NAME, mode, work);
   }
 
   function generateKey(prefix) {
