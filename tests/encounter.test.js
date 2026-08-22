@@ -119,6 +119,49 @@ test("parseCommand spawning a ghoul gives it Multiattack (Bite + Claws)", () => 
   assert.deepEqual(ghoul.attacks.map((a) => a.name), ["Bite", "Claws"]);
 });
 
+// Phase 13 additions (2026-08-22) -- one test per new mechanical shape introduced, not
+// one per monster, matching this file's existing density (see e.g. giant spider above for
+// the multi-word-name case, skeleton above for the vulnerability case).
+test("parseCommand spawns a real dire wolf stat block, matching the multi-word monster name", () => {
+  // "wolf" pluralizes irregularly ("wolves"), which monsterPattern's trailing s? doesn't
+  // cover -- a pre-existing limitation of the plain "wolf" entry too, not new here, so
+  // this uses the explicit spawn-count phrasing (singular noun) rather than "dire wolves".
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn two dire wolf"));
+  const wolves = result.state.tokens.filter((t) => t.name.startsWith("Dire wolf"));
+  assert.equal(wolves.length, 2);
+  assert.equal(wolves[0].hp, 37);
+  assert.equal(wolves[0].ac, 14);
+  assert.equal(wolves[0].damageDice, "2d6+3");
+});
+
+test("parseCommand spawning a brown bear gives it Multiattack (Bite + Claws)", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one brown bear"));
+  const [bear] = result.state.tokens;
+  assert.equal(bear.hp, 34);
+  assert.deepEqual(bear.attacks.map((a) => a.name), ["Bite", "Claws"]);
+});
+
+test("parseCommand spawning a veteran gives it Multiattack (two Longswords)", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one veteran"));
+  const [veteran] = result.state.tokens;
+  assert.equal(veteran.hp, 58);
+  assert.equal(veteran.ac, 17);
+  assert.deepEqual(veteran.attacks.map((a) => a.name), ["Longsword", "Longsword"]);
+});
+
+test("parseCommand spawning a specter gives it its real resistances and immunities", () => {
+  const state = stateOnMap("Urskelde");
+  const result = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one specter"));
+  const [specter] = result.state.tokens;
+  assert.equal(specter.hp, 22);
+  assert.equal(specter.damageType, "necrotic");
+  assert.deepEqual(specter.damageResistances, ["acid", "cold", "fire", "lightning", "thunder"]);
+  assert.deepEqual(specter.damageImmunities, ["necrotic", "poison"]);
+});
+
 test("addToken clamps HP/AC/attackBonus into their valid ranges and defaults missing fields", () => {
   const state = stateOnMap("Urskelde");
   const { token } = CampaignOS.addToken(state, { name: "Test Hero", hp: 9001, maxHp: 20 });

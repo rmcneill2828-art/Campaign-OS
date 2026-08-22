@@ -33,7 +33,10 @@ const systemPromptPath = path.join(os.tmpdir(), "campaign-os-dm-bridge-system-pr
 
 const MONSTER_LIST = [
   "goblin", "orc", "troll", "bandit", "wolf", "hellhound",
-  "skeleton", "zombie", "ghoul", "ogre", "owlbear", "worg", "giant spider", "cultist", "guard", "priest"
+  "skeleton", "zombie", "ghoul", "ogre", "owlbear", "worg", "giant spider", "cultist", "guard", "priest",
+  // Phase 13 additions (2026-08-22) -- keep in sync with engine/encounter.js's STAT_BLOCKS
+  // and monsterPattern; see that file's own comment for where these came from.
+  "brown bear", "dire wolf", "bugbear", "hobgoblin", "gnoll", "specter", "imp", "veteran"
 ];
 const CONDITION_LIST = [
   "Blinded", "Charmed", "Frightened", "Grappled", "Invisible", "Paralyzed", "Poisoned",

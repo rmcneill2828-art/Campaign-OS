@@ -247,6 +247,76 @@
     priest: {
       hp: 27, ac: 13, attackBonus: 2, damageDice: "1d6", damageType: "bludgeoning", initiativeMod: 0, speed: 30,
       abilityScores: { STR: 10, DEX: 10, CON: 12, INT: 13, WIS: 16, CHA: 13 }
+    },
+    // The eight below (Phase 13, 2026-08-22) were transcribed directly from the System
+    // Reference Document PDF at I:\DND\Core Rulebooks\SRD (page-checked, not guessed --
+    // see ROADMAP.md's Phase 13 for the "extract as needed, verify against a real page"
+    // approach this follows), chosen to fill real gaps in the original 16 rather than as a
+    // bulk dump: a raider tier above goblin/orc (bugbear, hobgoblin, gnoll), the first
+    // incorporeal undead (specter -- skeleton/zombie/ghoul are all corporeal), the first
+    // low-tier fiend distinct from Malphestor's own custom-authored NPC sheet (imp), a
+    // generic elite humanoid NPC (veteran, the natural step up from guard/cultist/priest),
+    // and a bear (brown bear/dire wolf -- thematically relevant to this campaign's
+    // bear-kin/bear-spirit motif per the paired DnD repo's session log, and a genuine gap:
+    // no beast-type monster existed in STAT_BLOCKS at all before these two).
+    "brown bear": {
+      hp: 34, ac: 11, attackBonus: 5, damageDice: "1d8+4", damageType: "piercing", initiativeMod: 0, speed: 40,
+      abilityScores: { STR: 19, DEX: 10, CON: 16, INT: 2, WIS: 13, CHA: 7 },
+      attacks: [
+        { name: "Bite", attackBonus: 5, damageDice: "1d8+4", damageType: "piercing" },
+        { name: "Claws", attackBonus: 5, damageDice: "2d6+4", damageType: "slashing" }
+      ]
+    },
+    "dire wolf": {
+      hp: 37, ac: 14, attackBonus: 5, damageDice: "2d6+3", damageType: "piercing", initiativeMod: 2, speed: 50,
+      abilityScores: { STR: 17, DEX: 15, CON: 15, INT: 3, WIS: 12, CHA: 7 }
+    },
+    bugbear: {
+      hp: 27, ac: 16, attackBonus: 4, damageDice: "2d8+2", damageType: "piercing", initiativeMod: 2, speed: 30,
+      abilityScores: { STR: 15, DEX: 14, CON: 13, INT: 8, WIS: 11, CHA: 9 }
+    },
+    hobgoblin: {
+      hp: 11, ac: 18, attackBonus: 3, damageDice: "1d8+1", damageType: "slashing", initiativeMod: 1, speed: 30,
+      abilityScores: { STR: 13, DEX: 12, CON: 12, INT: 10, WIS: 10, CHA: 9 }
+    },
+    gnoll: {
+      hp: 22, ac: 15, attackBonus: 4, damageDice: "1d4+2", damageType: "piercing", initiativeMod: 1, speed: 30,
+      abilityScores: { STR: 14, DEX: 12, CON: 11, INT: 6, WIS: 10, CHA: 7 }
+    },
+    // Incorporeal Movement and Sunlight Sensitivity aren't modeled (same "no per-attack/
+    // per-trait mechanic to hook into yet" spirit as Ghoul's paralysis rider above) --
+    // apply them by hand. Speed is a flat 50 (its only real movement -- 0 ft. ground, fly
+    // 50 ft. hover -- this engine has one speed field, not a per-mode set, same
+    // simplification every other flier here already uses).
+    specter: {
+      hp: 22, ac: 12, attackBonus: 4, damageDice: "3d6", damageType: "necrotic", initiativeMod: 2, speed: 50,
+      abilityScores: { STR: 1, DEX: 14, CON: 11, INT: 10, WIS: 10, CHA: 11 },
+      damageResistances: ["acid", "cold", "fire", "lightning", "thunder"],
+      damageImmunities: ["necrotic", "poison"]
+    },
+    // Sting also deals 10 (3d6) poison damage on a failed DC 11 CON save (half on success)
+    // on top of the flat piercing hit modeled here -- not automated, same unmodeled-rider
+    // convention as Ghoul's paralysis/Giant Spider's poison above. Shapechanger/
+    // Invisibility (its other real tools) aren't modeled either, same "melee stat line
+    // only" simplification the SRD Priest note above already documents.
+    imp: {
+      hp: 10, ac: 13, attackBonus: 5, damageDice: "1d4+3", damageType: "piercing", initiativeMod: 3, speed: 20,
+      abilityScores: { STR: 6, DEX: 17, CON: 13, INT: 11, WIS: 12, CHA: 14 },
+      damageResistances: ["cold"],
+      damageImmunities: ["fire", "poison"]
+    },
+    // Multiattack is RAW two Longsword hits, plus an optional third Shortsword attack
+    // "if it has a shortsword drawn" -- an equipment-state choice this engine has no
+    // notion of, so only the guaranteed two-Longsword baseline is modeled here, same
+    // "model the default Multiattack, not every optional variant" precedent Troll/Ghoul/
+    // Owlbear already set.
+    veteran: {
+      hp: 58, ac: 17, attackBonus: 5, damageDice: "1d8+3", damageType: "slashing", initiativeMod: 1, speed: 30,
+      abilityScores: { STR: 16, DEX: 13, CON: 14, INT: 10, WIS: 11, CHA: 10 },
+      attacks: [
+        { name: "Longsword", attackBonus: 5, damageDice: "1d8+3", damageType: "slashing" },
+        { name: "Longsword", attackBonus: 5, damageDice: "1d8+3", damageType: "slashing" }
+      ]
     }
   };
   // Safety net for a monster name that reaches spawnMonster without a STAT_BLOCKS entry
@@ -2455,7 +2525,7 @@
     const normalized = command.toLowerCase();
     const countWords = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
     const countPattern = "(one|two|three|four|five|six|\\d+)";
-    const monsterPattern = "(goblin|orc|troll|bandit|wolf|hellhound|skeleton|zombie|ghoul|ogre|owlbear|worg|giant spider|cultist|guard|priest)s?";
+    const monsterPattern = "(goblin|orc|troll|bandit|wolf|hellhound|skeleton|zombie|ghoul|ogre|owlbear|worg|giant spider|cultist|guard|priest|brown bear|dire wolf|bugbear|hobgoblin|gnoll|specter|imp|veteran)s?";
     const actionFirst = new RegExp(`(?:spawn|summon|emerge|appear|add).*?${countPattern}\\s+${monsterPattern}`);
     const countFirst = new RegExp(`${countPattern}\\s+${monsterPattern}.*?(?:spawn|summon|emerge|appear|add)`);
     const spawnMatch = normalized.match(actionFirst) || normalized.match(countFirst);

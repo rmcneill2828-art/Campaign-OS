@@ -412,26 +412,41 @@ Phase 11 complete.
 
 Phase 12 complete.
 
-## Phase 13 -- Monster compendium expansion (medium)
+## Phase 13 -- Monster compendium expansion (medium, ongoing -- not a one-shot item)
 
-- [ ] **`spawn` is hardcoded to 16 SRD stat blocks** (`STAT_BLOCKS` in `engine/encounter.js`,
-  mirrored in `dm-bridge/watch.js`'s `MONSTER_LIST`). Fine for the campaign's early sessions but a
-  real ceiling on variety this far in. **Reassessed 2026-08-22: a local rulebook library exists at
-  `I:\DND` (Core Rulebooks/Monster Manual [11th Print], Supplements/Volo's Guide to Monsters,
-  Supplements/Mordenkainen's Tome of Foes, among others) -- a real, owned source of hundreds of
-  accurate published stat blocks, not just the 16 SRD-license monsters this file was scoped to.**
-  This changes the shape of the item: rather than a DM hand-authoring homebrew numbers (guesswork,
-  the thing `STAT_BLOCKS`'s own comments are explicit about avoiding -- "no other monster below
-  got resistances/immunities invented for it"), the real work is extracting real stat blocks from
-  those PDFs into the same `{hp, ac, attackBonus, damageDice, damageType, initiativeMod, speed,
-  resistances/vulnerabilities/immunities, regeneration/rechargeAbilities where relevant}` shape
-  `STAT_BLOCKS` already uses -- same rigor as the existing 16, just a much bigger source pool.
-  Practically: pick monsters as they're actually needed for upcoming sessions (pull from the
-  Monster Manual/Volo's/Tome of Foes PDF, transcribe into `STAT_BLOCKS` the same way the SRD 16
-  were done) rather than trying to bulk-import the whole Monster Manual in one pass -- keeps each
-  addition verified against a real page rather than turning into a large, hard-to-review dump.
-  A DM-authored custom-monster path (JSON add-on, no source-code edit) is still worth doing
-  separately for anything genuinely homebrew that won't be in any of those books.
+- [x] **First batch: 8 monsters added, 2026-08-22 (16 -> 24).** `STAT_BLOCKS` in
+  `engine/encounter.js` (mirrored in `dm-bridge/watch.js`'s `MONSTER_LIST` and
+  `monsterPattern`'s spawn-phrasing regex) gained `brown bear`, `dire wolf`, `bugbear`,
+  `hobgoblin`, `gnoll`, `specter`, `imp`, `veteran` -- picked to fill real gaps rather than as
+  a bulk dump: a raider tier above goblin/orc (bugbear/hobgoblin/gnoll), the first incorporeal
+  undead (specter -- skeleton/zombie/ghoul were all corporeal), a low-tier fiend distinct from
+  Malphestor's own custom-authored NPC sheet (imp), a generic elite humanoid NPC (veteran, the
+  natural step up from guard/cultist/priest), and the first beast-type entries at all
+  (brown bear/dire wolf -- also thematically relevant to this campaign's bear-kin/bear-spirit
+  motif per the paired DnD repo's session log). Source: the System Reference Document PDF at
+  `I:\DND\Core Rulebooks\SRD` (not the full Monster Manual -- SRD content matches the existing
+  16's own license tier, so nothing about this batch changes what license class `STAT_BLOCKS`
+  draws from). Extraction method worth recording: this PDF's two-column layout badly scrambles
+  `pdftotext -layout`'s column-interleaved output (numbers from unrelated stat blocks end up on
+  the same line) -- `pdftotext -raw` instead preserves the PDF's real content-stream reading
+  order and came out clean and directly transcribable; page numbers were found reliably by
+  building an index from every line matching a size+type header (`Large beast`, `Medium
+  humanoid`, etc.) rather than trusting a plain name search, since several names are also
+  narrative-mentioned elsewhere in the document (a Wild Shape example, a class feature) on
+  pages that aren't the real stat block at all. Each entry got a smoke-tested spawn (values
+  compared 1:1 against the transcribed SRD text) plus a unit test for each new mechanical shape
+  introduced (multi-word name, Multiattack, resistances/immunities) -- not one test per monster,
+  matching this suite's existing density. Unmodeled riders (Imp's Sting poison-on-save, Specter's
+  Incorporeal Movement/Sunlight Sensitivity, Veteran's optional third Shortsword attack) are
+  commented in place, same "known gap, apply by hand" convention as Ghoul's paralysis rider.
+- [ ] **Next batches, as actually needed for upcoming sessions** -- this item is intentionally
+  never "done": pull the next few monsters from the SRD (or, once SRD coverage is exhausted for
+  something the campaign needs, the full Monster Manual/Volo's Guide/Tome of Foes also in
+  `I:\DND`) when a real encounter calls for something not yet in `STAT_BLOCKS`, verified against
+  a real page the same way as above -- not a bulk import in one pass, which would turn into a
+  large, hard-to-review dump. A DM-authored custom-monster path (JSON add-on, no source-code
+  edit) is still worth doing separately for anything genuinely homebrew that won't be in any of
+  those books.
 
 ## Phase 14 -- Encounter difficulty / XP-budget calculator (medium)
 

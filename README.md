@@ -32,9 +32,10 @@ dependencies to install for the app itself. See Tests, below, for running the te
   effect) -- their real RAW consequences need a tracked "source" token this engine doesn't model,
   so handle those by hand the same way as Troll's Regeneration.
 - Remove defeated or accidental tokens
-- Dice-backed attacks, rules-as-written: SRD-accurate stat blocks for the 16 monsters
+- Dice-backed attacks, rules-as-written: SRD-accurate stat blocks for the 24 monsters
   `spawn` recognizes (goblin, orc, wolf, bandit, troll, hellhound, skeleton, zombie, ghoul,
-  ogre, owlbear, worg, giant spider, cultist, guard, priest), a critical hit that
+  ogre, owlbear, worg, giant spider, cultist, guard, priest, brown bear, dire wolf, bugbear,
+  hobgoblin, gnoll, specter, imp, veteran), a critical hit that
   doubles only the damage dice (not a flat modifier), advantage/disadvantage on any attack
   (manual attack-control dropdown, `attacks Y with advantage`/`at disadvantage` phrasing, or
   the Claude DM bridge's `advantage`/`disadvantage` action flags), and automatic Multiattack
