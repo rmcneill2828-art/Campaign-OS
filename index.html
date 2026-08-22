@@ -240,6 +240,13 @@
                 <button type="submit">Add</button>
               </form>
               <div id="libraryList" class="library-list"></div>
+              <div class="library-backup-actions">
+                <button id="libraryExport" type="button" title="Download every saved token library entry (name + art) as a .json file -- for backup, or to move it to another machine.">Export</button>
+                <label class="import-encounter-label" title="Add entries from a previously exported token library .json file -- merges by name (an imported name matching an existing entry replaces its art), doesn't remove anything else already saved.">
+                  Import
+                  <input id="libraryImportInput" type="file" accept="application/json,.json" aria-label="Import token library from file">
+                </label>
+              </div>
               <button id="libraryClearAll" type="button" class="danger-button library-clear-all">Clear All</button>
             </section>
 
@@ -263,6 +270,13 @@
                 <button type="submit">Add</button>
               </form>
               <div id="mapLibraryList" class="library-list map-library-list"></div>
+              <div class="library-backup-actions">
+                <button id="mapLibraryExport" type="button" title="Download every saved map library entry (name + art) as a .json file -- for backup, or to move it to another machine.">Export</button>
+                <label class="import-encounter-label" title="Add entries from a previously exported map library .json file -- merges by name (an imported name matching an existing entry replaces its art), doesn't remove anything else already saved.">
+                  Import
+                  <input id="mapLibraryImportInput" type="file" accept="application/json,.json" aria-label="Import map library from file">
+                </label>
+              </div>
               <button id="mapLibraryClearAll" type="button" class="danger-button library-clear-all">Clear All</button>
             </section>
 

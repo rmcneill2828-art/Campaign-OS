@@ -44,11 +44,15 @@
   const libraryImageInput = document.querySelector("#libraryImageInput");
   const libraryList = document.querySelector("#libraryList");
   const libraryClearAll = document.querySelector("#libraryClearAll");
+  const libraryExport = document.querySelector("#libraryExport");
+  const libraryImportInput = document.querySelector("#libraryImportInput");
   const mapLibraryAddForm = document.querySelector("#mapLibraryAddForm");
   const mapLibraryName = document.querySelector("#mapLibraryName");
   const mapLibraryImageInput = document.querySelector("#mapLibraryImageInput");
   const mapLibraryList = document.querySelector("#mapLibraryList");
   const mapLibraryClearAll = document.querySelector("#mapLibraryClearAll");
+  const mapLibraryExport = document.querySelector("#mapLibraryExport");
+  const mapLibraryImportInput = document.querySelector("#mapLibraryImportInput");
   const tokenFolderConnect = document.querySelector("#tokenFolderConnect");
   const tokenFolderStatus = document.querySelector("#tokenFolderStatus");
   const tokenFolderSearch = document.querySelector("#tokenFolderSearch");
@@ -2428,6 +2432,117 @@
       commandResult.textContent = "Map library cleared.";
       renderMapLibrary();
     });
+  });
+
+  // Library backup: unlike Encounter Export/Import (state only, no images), these two
+  // libraries hold the actual portrait/battle-map image bytes -- the one piece of this
+  // app's persisted data that had no backup path at all before this. Export bundles every
+  // entry's metadata AND image (as its already-stored data URL) into one self-contained
+  // .json file; Import reads it back through the same saveEntry() every other add path
+  // uses, so a re-imported entry gets the exact same normalized key an upload would --
+  // deliberately a MERGE (overwrite-by-name), not a replace-everything like Encounter
+  // Import, since restoring a library is meant to fill it back in, not risk wiping
+  // whatever's already there if the wrong file gets picked.
+  function downloadLibraryExport(filenamePrefix, payload, count) {
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    return count;
+  }
+
+  libraryExport.addEventListener("click", async () => {
+    const entries = await window.CampaignOSTokenLibrary.listEntries();
+    const withImages = await Promise.all(entries.map(async (entry) => ({
+      displayName: entry.displayName,
+      image: await window.CampaignOSTokenLibrary.getImage(entry.key)
+    })));
+    downloadLibraryExport("campaign-os-token-library", {
+      type: "campaign-os-token-library",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      entries: withImages
+    });
+    commandResult.textContent = `Exported ${withImages.length} token library ${withImages.length === 1 ? "entry" : "entries"}.`;
+  });
+
+  libraryImportInput.addEventListener("change", async () => {
+    const file = libraryImportInput.files?.[0];
+    libraryImportInput.value = "";
+    if (!file) return;
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || !Array.isArray(parsed.entries)) {
+      commandResult.textContent = "Import failed: not a valid token library file.";
+      return;
+    }
+    let imported = 0;
+    let skipped = 0;
+    for (const entry of parsed.entries) {
+      if (!entry || typeof entry.displayName !== "string" || !entry.displayName.trim() || typeof entry.image !== "string") {
+        skipped++;
+        continue;
+      }
+      await window.CampaignOSTokenLibrary.saveEntry(entry.displayName, entry.image);
+      imported++;
+    }
+    commandResult.textContent = skipped
+      ? `Imported ${imported} token library ${imported === 1 ? "entry" : "entries"} (${skipped} skipped -- missing name or image).`
+      : `Imported ${imported} token library ${imported === 1 ? "entry" : "entries"}.`;
+    renderTokenLibrary();
+  });
+
+  mapLibraryExport.addEventListener("click", async () => {
+    const entries = await window.CampaignOSMapLibrary.listEntries();
+    const withImages = await Promise.all(entries.map(async (entry) => ({
+      displayName: entry.displayName,
+      aspectRatio: entry.aspectRatio,
+      image: await window.CampaignOSMapLibrary.getImage(entry.key)
+    })));
+    downloadLibraryExport("campaign-os-map-library", {
+      type: "campaign-os-map-library",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      entries: withImages
+    });
+    commandResult.textContent = `Exported ${withImages.length} map library ${withImages.length === 1 ? "entry" : "entries"}.`;
+  });
+
+  mapLibraryImportInput.addEventListener("change", async () => {
+    const file = mapLibraryImportInput.files?.[0];
+    mapLibraryImportInput.value = "";
+    if (!file) return;
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || !Array.isArray(parsed.entries)) {
+      commandResult.textContent = "Import failed: not a valid map library file.";
+      return;
+    }
+    let imported = 0;
+    let skipped = 0;
+    for (const entry of parsed.entries) {
+      if (!entry || typeof entry.displayName !== "string" || !entry.displayName.trim() || typeof entry.image !== "string") {
+        skipped++;
+        continue;
+      }
+      await window.CampaignOSMapLibrary.saveEntry(entry.displayName, entry.image, entry.aspectRatio);
+      imported++;
+    }
+    commandResult.textContent = skipped
+      ? `Imported ${imported} map library ${imported === 1 ? "entry" : "entries"} (${skipped} skipped -- missing name or image).`
+      : `Imported ${imported} map library ${imported === 1 ? "entry" : "entries"}.`;
+    renderMapLibrary();
   });
 
   function nameFromFileName(fileName) {

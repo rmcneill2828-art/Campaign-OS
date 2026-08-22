@@ -320,3 +320,105 @@ Both of these are big enough, and open-ended enough, that they deserve the same
   playback controls, and a decision about scope (looping ambience per map? one-shot stingers?
   music tied to combat state?). The most speculative, highest-effort item on this whole list --
   last for a reason.
+
+Phase 10 still open (both items need the scoping conversation before starting) -- not resolved by
+the review below.
+
+---
+
+# Work plan: what's next (2026-08-22 review)
+
+Full-project review after a ~2.5 week gap (last commit fa64982, 2026-08-04). Health check first:
+347/347 tests passing, CI green on every commit since Phase 9, zero open issues/PRs, working tree
+clean, zero TODO/FIXME markers left in source. A subagent cross-checked the codebase against every
+non-obvious convention CLAUDE.md documents (effectiveSpeed() usage, deleteTokenImageIfUnshared(),
+escapeHtml() coverage on every innerHTML site, applyDamage()'s {state, message} shape, the four
+duplicated lookup lists between engine/encounter.js and dm-bridge/watch.js) plus a fresh
+accessibility/error-handling/dead-code pass -- zero convention violations found, which is the real
+headline: nothing has drifted since the last pass. What follows is organized the same way the
+2026-08-03 work plan was -- cheap/high-value first, speculative last.
+
+## Phase 11 -- Data safety (small, high-value, addresses a real risk that's been quietly growing)
+
+- [x] **Token Library / Map Library export/import.** Done 2026-08-22. New Export/Import controls
+  next to each library's existing Clear All button (`index.html`, wired in `ui/app.js`). Export
+  bundles every entry's metadata AND image bytes (the already-stored data URL, not just a
+  reference to it) into one self-contained `.json` file -- `campaign-os-token-library-<date>.json`
+  / `campaign-os-map-library-<date>.json` -- via `CampaignOSTokenLibrary.listEntries()` +
+  `getImage()` / `CampaignOSMapLibrary`'s equivalents, same download-a-Blob pattern the existing
+  Encounter Export button already uses. Import reads the file back through the exact same
+  `saveEntry()` every other add path (manual upload, folder connect) already uses, so a restored
+  entry gets the same normalized key an upload would. Deliberately a **merge** (overwrite only an
+  imported name that collides with an existing one), not a wipe-then-replace like Encounter
+  Import -- restoring a library is meant to fill it back in, not risk losing whatever's already
+  there if the wrong file gets picked; verified this explicitly (seed a local-only entry, import a
+  file that doesn't mention it, confirm it survives untouched alongside the imported ones).
+  Malformed JSON and well-formed-but-wrong-shape JSON (e.g. an Encounter export fed into the
+  library importer) both fail cleanly with a "not a valid ... library file" message and leave the
+  library completely unchanged, matching Encounter Import's own "degrade safely" convention rather
+  than inventing a new one. No engine change -- `ui/app.js`/`index.html`/`ui/styles.css` only.
+  Verified with a one-off Playwright script (seed both libraries -> export each -> Clear All ->
+  import each back through the real file input -> images and aspect ratios match; merge-not-wipe
+  semantics; both bad-file cases) rather than the committed suite, per this repo's existing
+  UI-testing convention -- 347/347 existing tests still pass, untouched by this change.
+
+Phase 11 complete.
+
+## Phase 12 -- Small fixes surfaced by this review (self-contained, no design decisions needed)
+
+- [ ] **DM-bridge disconnect is silent.** `checkDMBridgeResponse()`/`checkLiveActions()`
+  (`ui/app.js`) catch a lost File System Access permission (folder access revoked mid-session)
+  with only `console.warn` and keep polling forever -- the status bar still claims "Connected"
+  indefinitely. Should flip `dmBridgeStatus` to a visible "connection lost -- reconnect" state and
+  stop the poll timers, the same reconnect-prompt treatment `tryRestoreDMBridge()` already gives a
+  fresh page load, just triggered mid-session instead of only at load.
+- [ ] **Keyboard activation of a map tile doesn't move the token to the right cell.** Map tiles are
+  real, tab-reachable `<button>`s, but `handleMapClick()` derives the destination purely from the
+  mouse event's `clientX`/`clientY`, never the activated button's own coordinates -- a
+  keyboard-triggered click (Enter/Space) reports zeroed coordinates and resolves to the wrong
+  cell. Fix: read the cell from the event target's own data (already present in its `aria-label`
+  generation) when pixel coordinates aren't meaningful, rather than only trusting pointer position.
+- [ ] **Toggle buttons don't expose pressed state.** Ruler/Template/Walls toggles communicate
+  on/off purely via an `active-toggle` CSS class -- add `aria-pressed` alongside it so a
+  screen-reader user (or anyone using a11y tooling to sanity-check the app) can tell which mode is
+  active.
+- [ ] **Disabled-button text contrast is low** (~3.1:1, opacity stacked on `--muted`) -- bump it
+  enough to stay legible at a table without losing the "clearly disabled" visual cue.
+
+## Phase 13 -- Monster compendium expansion (medium)
+
+- [ ] **`spawn` is hardcoded to 16 SRD stat blocks** (`STAT_BLOCKS` in `engine/encounter.js`,
+  mirrored in `dm-bridge/watch.js`'s `MONSTER_LIST`). Fine for the campaign's early sessions but a
+  real ceiling on variety this far in. **Reassessed 2026-08-22: a local rulebook library exists at
+  `I:\DND` (Core Rulebooks/Monster Manual [11th Print], Supplements/Volo's Guide to Monsters,
+  Supplements/Mordenkainen's Tome of Foes, among others) -- a real, owned source of hundreds of
+  accurate published stat blocks, not just the 16 SRD-license monsters this file was scoped to.**
+  This changes the shape of the item: rather than a DM hand-authoring homebrew numbers (guesswork,
+  the thing `STAT_BLOCKS`'s own comments are explicit about avoiding -- "no other monster below
+  got resistances/immunities invented for it"), the real work is extracting real stat blocks from
+  those PDFs into the same `{hp, ac, attackBonus, damageDice, damageType, initiativeMod, speed,
+  resistances/vulnerabilities/immunities, regeneration/rechargeAbilities where relevant}` shape
+  `STAT_BLOCKS` already uses -- same rigor as the existing 16, just a much bigger source pool.
+  Practically: pick monsters as they're actually needed for upcoming sessions (pull from the
+  Monster Manual/Volo's/Tome of Foes PDF, transcribe into `STAT_BLOCKS` the same way the SRD 16
+  were done) rather than trying to bulk-import the whole Monster Manual in one pass -- keeps each
+  addition verified against a real page rather than turning into a large, hard-to-review dump.
+  A DM-authored custom-monster path (JSON add-on, no source-code edit) is still worth doing
+  separately for anything genuinely homebrew that won't be in any of those books.
+
+## Phase 14 -- Encounter difficulty / XP-budget calculator (medium)
+
+- [ ] Nothing in this app currently helps gauge whether a planned encounter is appropriately hard
+  for the party -- a common piece of session-prep tooling it doesn't have yet. Would need a real
+  design pass on where it lives (a Setup-tab panel reading the active party's levels from imported
+  characters, most likely) and how strictly to follow the DMG's budget math vs. a looser
+  approximation -- not started here, just identified as a real gap.
+
+## Known, deliberately-deferred gaps (unchanged by this review -- already documented honestly)
+
+Re-confirmed still open, still low-priority, still intentional: Charmed/Frightened remain tag-only
+(need a tracked "source" token this engine doesn't model), a ghoul's paralyze/a giant spider's
+poison/a zombie's Undead Fortitude riders aren't automated, exhaustion level 4's halved HP max
+isn't applied automatically, and Blinded doesn't auto-fail a sight-dependent check. None of these
+block real play -- same "handle it by hand" spirit as Troll's Regeneration before it got wired up.
+Not promoted to a phase above; revisit only if one of them causes real friction at the table.

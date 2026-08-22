@@ -1512,6 +1512,19 @@ body.grid-dragging {
   overflow-y: auto;
 }
 
+.library-backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.library-backup-actions button,
+.library-backup-actions .import-encounter-label {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
 .library-empty {
   margin: 0;
   color: var(--muted);
