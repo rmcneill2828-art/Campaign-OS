@@ -307,22 +307,51 @@ Phase 9 complete.
 Both of these are big enough, and open-ended enough, that they deserve the same
 "decide-before-building" treatment Phase 5 got -- don't start either from this bullet list alone.
 
-- [ ] **Player-editable character sheets.** `character.html` is currently a read-only DM-side
-  viewer opened from an imported sheet. Making it genuinely player-editable raises real questions
-  this roadmap hasn't answered yet: who has access (only via the DM's machine, or should the
-  player window -- Phase 5 -- expose an edit path)? Where do edits actually go (the campaign
-  repo's markdown directly? A separate persisted layer)? Is this even the right layer for it, given
-  campaign markdown is otherwise DM/Claude-authored? Needs a real design conversation, not just an
-  implementation pass.
+- [x] **Player-editable character sheets -- scoped and built, 2026-08-22.** Scoping
+  conversation (user decision) settled all three open questions: **access** is same-machine
+  only, no new sync/server -- extends Phase 5's own "not real multi-device multiplayer"
+  decision rather than reopening it; **save target** is straight into the campaign repo's
+  `.md` file, through the same DM-bridge write-back Create Character/End Session already
+  use; **field scope** was originally going to be every "living/in-play" field (HP, spell
+  slots, resources, hit dice, inventory, conditions), then narrowed hard after actually
+  reading the real character files rather than assuming: every one of them (Darkhawk,
+  Wren, ...) has a `## Current Status` section that mixes simple trackers
+  ("HP: 91/91 (full)", "Spell slots: 4/4 1st...") line-by-line with real, irreplaceable
+  narrative prose (session milestones, ongoing character arcs like Darkhawk's "the count,
+  newly felt") -- there's no safe boundary a blind regex patch could rely on there without
+  real risk of corrupting or displacing story content. **Shipped scope: current/max HP
+  only**, patched on the one line that's both consistently formatted and genuinely free of
+  narrative prose on every sheet checked -- `**HP:** current / max` under a sheet's own
+  `## Combat` heading (note: some real sheets' Current Status section carries a *second*,
+  separately-drifted "HP: X/Y" narrative bullet already, confirmed against actual files,
+  not a hypothetical -- this feature deliberately does not read, write, or reconcile that
+  one). `dm-bridge/watch.js` gained a third plain-file-write channel
+  (`update-character-request/response.json`, same pattern as Create Character -- no Claude
+  call, deterministic read/find/replace/write), scoped explicitly to the `## Combat`
+  section's line range (not just "first match in the whole file") so it can never touch
+  Current Status even coincidentally. `character.html` gained its own small, independent
+  DM-bridge connection (reuses the same saved folder handle `ui/dmBridgeStore.js` already
+  persists from `index.html`, just re-grants permission) and a **Hit Points** panel above
+  the sheet; a successful save updates the rendered sheet and the cached campaign import
+  immediately, no re-import needed. NPCs (`npcs/` sheets) don't get this -- player sheets
+  only. Verified two ways: the Node-side file patch was run for real (a running
+  `dm-bridge/watch.js`, pointed at *copies* of the actual Darkhawk/Wren character files,
+  never the live repo) and confirmed exactly one line changed per file, Current Status
+  untouched, missing-file and duplicate-request-id paths both handled correctly; the
+  browser side was driven end to end via Playwright (prefill, the connect-required gate,
+  the full request -> poll -> response -> re-render cycle) using an OPFS directory as a
+  same-interface stand-in for a picked folder with a manually-written response simulating
+  watch.js's reply, the same technique this file's own Live-session-control section
+  already documents. Caught one real bug before shipping: `character.js`'s new
+  `HP_LINE_PATTERN` constant was declared textually below the code path that calls it,
+  the exact TDZ (`const` vs. hoisted `function`) footgun this very file's own top-of-file
+  comment already warns about for `escapeHtml` -- moved up next to it.
 - [ ] **Audio/ambience/music layer.** No existing precedent anywhere in this codebase to extend
   -- would be a wholly new subsystem: an asset-management layer for audio files (something like
   the Token/Map Library's IndexedDB pattern, or a folder connection like Tokens/Maps Folder),
   playback controls, and a decision about scope (looping ambience per map? one-shot stingers?
   music tied to combat state?). The most speculative, highest-effort item on this whole list --
-  last for a reason.
-
-Phase 10 still open (both items need the scoping conversation before starting) -- not resolved by
-the review below.
+  last for a reason, and still needs its own scoping conversation before starting.
 
 ---
 

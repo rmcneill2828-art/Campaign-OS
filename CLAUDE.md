@@ -748,6 +748,56 @@ See README.md for the full feature list and usage. Notes specific to working on 
   a live-board panel belongs with the other combat-state panels, not the Setup tab) calls
   this fresh on every `render()`; there's no separate persisted state for it, the whole
   thing is derived.
+- Player-editable HP (Phase 10, 2026-08-22): `character.html`'s one editable field --
+  current/max HP -- deliberately excludes everything else on a real character sheet,
+  including spell slots/resources/hit dice/conditions that were originally in scope for
+  this feature before actually reading the real files: every character sheet's
+  `## Current Status` section mixes simple trackers ("HP: 91/91 (full)",
+  "Spell slots: 4/4 1st...") line-by-line with real, irreplaceable narrative prose
+  (session milestones, ongoing character arcs) with no safe boundary a blind regex patch
+  could rely on -- see `dm-bridge/watch.js`'s own block comment above its
+  `handleUpdateCharacterRequest` for the full reasoning. Only the `## Combat` section's
+  `**HP:** current / max` line is touched -- consistently formatted and free of narrative
+  prose on every sheet checked. **Note the closing `**` falls AFTER the colon in this
+  campaign's real convention** (`- **HP:** 182 / 182`, confirmed against actual character
+  files), not after "HP" the way a first read of `engine/campaign.js`'s own
+  `extractFields()` regex might suggest -- `HP_LINE_PATTERN` in both `dm-bridge/watch.js`
+  and `ui/character.js` (duplicated, not shared, same no-bundler convention as
+  `MONSTER_LIST`/`CONDITION_LIST`/`DAMAGE_TYPE_LIST` elsewhere) is written against the
+  real format, not the naive one. `findCombatSectionRange()`/`findCombatHpLine()` scope
+  the search explicitly to the `## Combat` section's own line range (start heading to the
+  next `##` or end of file) rather than trusting `HP_LINE_PATTERN`'s first match in the
+  whole document -- `## Current Status` can carry its own separately-drifted "HP: X / Y"
+  bullet on a real sheet (confirmed, not hypothetical: Darkhawk's own file has 182/182 in
+  Combat and 176/176 in Current Status at the same time), so relying on document order or
+  incidental format differences to avoid matching it there would be fragile. This feature
+  does not read, write, or reconcile that second line at all -- the DM/Claude still owns
+  keeping Current Status accurate via the existing End Session write-back (a full Claude
+  call, actually equipped to merge into freeform prose safely, unlike this deterministic
+  patcher). `dm-bridge/watch.js` gained a third plain-file-write channel
+  (`update-character-request.json`/`update-character-response.json`), same
+  no-Claude-needed/`primeLastProcessedId`/`path.basename()`-sanitized pattern
+  `handleCreateCharacterRequest` already uses, except this one requires the target file to
+  already exist (an update, not a create) and fails loud with a clear message if the
+  Combat/HP line can't be found rather than guessing where to insert one.
+  `character.html`/`ui/character.js` are their own page, entirely outside `ui/app.js`'s
+  scope -- `setUpHpEditor()` therefore keeps its own small, independent DM-bridge
+  connection (reusing the SAME saved folder handle `ui/dmBridgeStore.js` already persists
+  from `index.html`'s own connect flow, just re-requesting permission, the identical
+  restore pattern `tryRestoreDMBridge()` uses) rather than a scaled-down reimplementation
+  of `app.js`'s full DM-bridge feature set (no live-actions, no combat narration, no End
+  Session -- just this one request/response pair). A successful save patches
+  `item.text`/the cached `localStorage` campaign import in place and re-renders
+  immediately, rather than telling the DM to re-import to see it (unlike Create Character,
+  which really does need a re-import since it's a brand new file the browser's cached
+  index has never seen). Gated to `characters/` sheets only (`isNpc` check) -- this is a
+  PLAYER's own sheet, not an NPC's. **Caught a real bug before shipping**: `HP_LINE_PATTERN`
+  was originally declared textually below `setUpHpEditor()`'s own call site -- the exact
+  TDZ (`const` isn't hoisted with its value the way a `function` declaration is) footgun
+  this very file's own top-of-file comment already warns about for `escapeHtml`, caught by
+  a live Playwright run throwing `ReferenceError: Cannot access 'HP_LINE_PATTERN' before
+  initialization` rather than by inspection -- moved next to `escapeHtml` at the top of the
+  file, same fix.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

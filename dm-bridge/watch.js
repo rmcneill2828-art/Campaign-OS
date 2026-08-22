@@ -859,11 +859,162 @@ function pollCreateCharacter() {
   });
 }
 
+// Player-editable character sheets (Phase 10, 2026-08-22) -- character.html's own,
+// independent DM-bridge connection writes here. Deliberately narrow: only the single
+// `**HP:** current / max` line under a sheet's `## Combat` heading is ever touched.
+// Everything else on a real sheet (backstory, ability scores, and critically the
+// `## Current Status` section) is DM/Claude-authored freeform prose that mixes simple
+// trackers with irreplaceable narrative content line-by-line (session milestones, ongoing
+// character arcs) -- see a real sheet like characters/Darkhawk Blondin.md's Current Status
+// for why a blind regex patch has no safe way to touch that section without real risk of
+// corrupting or displacing story content. The `**HP:**` line under Combat is the one
+// field that's genuinely safe: present, consistently formatted, and free of narrative
+// prose on every character sheet checked. Not a Claude call -- deterministic file
+// read/find/replace/write, same "no LLM needed, the browser already knows the values"
+// reasoning Create Character above uses. Restricted to characters/ (not npcs/) by
+// character.js's own UI -- this is a PLAYER's own sheet edit, not an NPC one.
+//
+// Known, deliberate limitation: some real sheets' `## Current Status` section carries its
+// own separate "HP: X / Y" narrative bullet that can already disagree with Combat's line
+// (confirmed against this campaign's own real files -- not a hypothetical edge case). This
+// feature does not read, write, or reconcile that second line; the DM/Claude still owns
+// keeping Current Status accurate via the existing End Session write-back, which -- unlike
+// this deterministic patcher -- is a full Claude call actually equipped to merge a change
+// into freeform prose sensibly.
+const updateCharacterRequestPath = path.join(bridgeDir, "update-character-request.json");
+const updateCharacterResponsePath = path.join(bridgeDir, "update-character-response.json");
+let lastProcessedUpdateCharacterId = primeLastProcessedId(updateCharacterRequestPath);
+
+// Matches a "- **HP:** 182 / 182" line -- note the closing ** falls AFTER the colon in
+// this campaign's real convention (confirmed against actual character files), not after
+// "HP" the way it might read at a glance -- with two capture groups so current/max can be
+// replaced independently while every other character of the line (bullet style, bold
+// markers, whitespace) is preserved exactly.
+const HP_LINE_PATTERN = /^(\s*(?:[-*]\s*)?\*{0,2}HP\s*:\s*\*{0,2}\s*)(-?\d+)(\s*\/\s*)(-?\d+)(\s*)$/im;
+
+// Scoped explicitly to the ## Combat section (its own line range, up to the next ## or
+// end of file) rather than just taking HP_LINE_PATTERN's first match in the whole
+// document -- ## Current Status also carries its own "HP: X / Y" line on a real sheet
+// (see the block comment above), and while it currently only happens to fail
+// HP_LINE_PATTERN's own shape (a trailing "(full)" the pattern's end anchor rejects), that
+// specific text format is not something this code should rely on staying true forever.
+// Returns {startLine, endLine} (both indices into a lines array) or null if there's no
+// ## Combat heading at all.
+function findCombatSectionRange(lines) {
+  const start = lines.findIndex((line) => /^##\s+combat\b/i.test(line.trim()));
+  if (start === -1) return null;
+  let end = lines.length;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    if (/^##\s+/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+  return { start, end };
+}
+
+function writeUpdateCharacterResponse(id, ok, message) {
+  const response = { id, ok, message, respondedAt: new Date().toISOString() };
+  fs.writeFile(updateCharacterResponsePath, JSON.stringify(response, null, 2), (err) => {
+    if (err) console.error("[dm-bridge] failed to write update-character-response.json:", err.message);
+    else console.log(`[dm-bridge] update-character ${id} ${ok ? "succeeded" : "failed"}: ${message}`);
+  });
+}
+
+function handleUpdateCharacterRequest(request) {
+  console.log(`[dm-bridge] processing update-character ${request.id}`);
+  const dndRepoPath = process.env.DND_REPO_PATH;
+  if (!dndRepoPath) {
+    writeUpdateCharacterResponse(request.id, false,
+      "DND_REPO_PATH isn't set. Stop the watcher, set it to your campaign repo's path (e.g. " +
+      "DND_REPO_PATH=/path/to/DND/Campaign node dm-bridge/watch.js), and try again.");
+    return;
+  }
+  if (!fs.existsSync(dndRepoPath)) {
+    writeUpdateCharacterResponse(request.id, false, `DND_REPO_PATH is set to "${dndRepoPath}", but that path doesn't exist.`);
+    return;
+  }
+
+  const fileName = path.basename(String(request.fileName || "").trim());
+  if (!fileName.toLowerCase().endsWith(".md")) {
+    writeUpdateCharacterResponse(request.id, false, "Character file name must end in .md.");
+    return;
+  }
+  const hp = Number(request.hp);
+  const maxHp = Number(request.maxHp);
+  if (!Number.isFinite(hp) || !Number.isFinite(maxHp)) {
+    writeUpdateCharacterResponse(request.id, false, "HP and max HP must both be numbers.");
+    return;
+  }
+
+  const targetPath = path.join(dndRepoPath, "characters", fileName);
+  if (!fs.existsSync(targetPath)) {
+    writeUpdateCharacterResponse(request.id, false, `characters/${fileName} doesn't exist in the campaign repo.`);
+    return;
+  }
+
+  let text;
+  try {
+    text = fs.readFileSync(targetPath, "utf8");
+  } catch (err) {
+    writeUpdateCharacterResponse(request.id, false, `Couldn't read the character file: ${err.message}`);
+    return;
+  }
+
+  const lines = text.split(/\r?\n/);
+  const combatRange = findCombatSectionRange(lines);
+  if (!combatRange) {
+    writeUpdateCharacterResponse(request.id, false, `characters/${fileName} has no "## Combat" section to update.`);
+    return;
+  }
+  const hpLineIndex = lines.slice(combatRange.start, combatRange.end).findIndex((line) => HP_LINE_PATTERN.test(line));
+  if (hpLineIndex === -1) {
+    writeUpdateCharacterResponse(request.id, false,
+      `Couldn't find a "**HP:** current / max" line in characters/${fileName}'s Combat section -- ` +
+      "edit it by hand instead this time.");
+    return;
+  }
+
+  const targetLineIndex = combatRange.start + hpLineIndex;
+  lines[targetLineIndex] = lines[targetLineIndex].replace(HP_LINE_PATTERN, (full, prefix, oldHp, separator, oldMax, suffix) =>
+    `${prefix}${hp}${separator}${maxHp}${suffix}`
+  );
+  const updatedText = lines.join(text.includes("\r\n") ? "\r\n" : "\n");
+
+  try {
+    fs.writeFileSync(targetPath, updatedText, "utf8");
+  } catch (err) {
+    writeUpdateCharacterResponse(request.id, false, `Couldn't write the character file: ${err.message}`);
+    return;
+  }
+
+  writeUpdateCharacterResponse(request.id, true, `Updated characters/${fileName}: HP ${hp} / ${maxHp}.`);
+}
+
+function pollUpdateCharacter() {
+  fs.readFile(updateCharacterRequestPath, "utf8", (err, data) => {
+    if (!err) {
+      try {
+        const request = JSON.parse(data);
+        if (request.id && request.id !== lastProcessedUpdateCharacterId) {
+          lastProcessedUpdateCharacterId = request.id;
+          handleUpdateCharacterRequest(request);
+        }
+      } catch {
+        // partial write mid-poll -- try again next tick
+      }
+    }
+    setTimeout(pollUpdateCharacter, 1500);
+  });
+}
+
 console.log(`[dm-bridge] watching ${requestPath}`);
 console.log(`[dm-bridge] model: ${process.env.DM_BRIDGE_MODEL || "haiku"} (override with DM_BRIDGE_MODEL env var)`);
 console.log(`[dm-bridge] watching ${endSessionRequestPath}`);
 console.log(`[dm-bridge] watching ${createCharacterRequestPath}`);
-console.log(`[dm-bridge] DND_REPO_PATH: ${process.env.DND_REPO_PATH || "(not set -- End Session and Create Character will fail until this is set)"}`);
+console.log(`[dm-bridge] watching ${updateCharacterRequestPath}`);
+console.log(`[dm-bridge] DND_REPO_PATH: ${process.env.DND_REPO_PATH || "(not set -- End Session, Create Character, and character HP edits will fail until this is set)"}`);
 poll();
 pollEndSession();
 pollCreateCharacter();
+pollUpdateCharacter();

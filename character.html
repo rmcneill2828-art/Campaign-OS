@@ -16,10 +16,29 @@
         </div>
         <a href="index.html">Back to Board</a>
       </header>
+      <section id="hpEditor" class="hp-editor" hidden>
+        <h2>Hit Points</h2>
+        <div class="hp-editor-row">
+          <label>
+            Current
+            <input id="hpEditorCurrent" type="number" min="-999" max="999" aria-label="Current HP">
+          </label>
+          <span class="hp-editor-slash">/</span>
+          <label>
+            Max
+            <input id="hpEditorMax" type="number" min="1" max="999" aria-label="Max HP">
+          </label>
+          <button id="hpEditorSave" type="button">Save</button>
+          <button id="hpEditorConnect" type="button" hidden>Connect to Claude Code</button>
+        </div>
+        <p id="hpEditorStatus" class="hp-editor-status"></p>
+      </section>
       <article id="characterSheet" class="sheet-content">Loading character sheet...</article>
     </main>
 
     <script src="ui/domUtils.js"></script>
+    <script src="ui/idbUtils.js"></script>
+    <script src="ui/dmBridgeStore.js"></script>
     <script src="ui/character.js"></script>
   </body>
 </html>

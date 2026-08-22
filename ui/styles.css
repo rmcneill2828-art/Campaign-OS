@@ -1846,6 +1846,49 @@ body.grid-dragging {
   font-size: 0.85rem;
 }
 
+.hp-editor {
+  padding: 14px 20px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+}
+
+.hp-editor h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.hp-editor-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hp-editor-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.hp-editor-row input {
+  width: 70px;
+}
+
+.hp-editor-slash {
+  padding-bottom: 8px;
+  color: var(--muted);
+}
+
+.hp-editor-status {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .sheet-content {
   padding: 20px;
   border: 1px solid var(--line);

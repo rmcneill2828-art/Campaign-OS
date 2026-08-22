@@ -547,6 +547,23 @@ existing file with the same name, and like everything else that touches the camp
 only ever writes a file -- no git commands, no commits, no pushes. Re-import the campaign folder
 afterward to see the new character in the browser.
 
+## Player-editable HP
+
+A character's own sheet page (opened from a character card in the campaign browser -- see
+"Open imported character sheets" above) has one genuinely editable field: current/max HP, shown
+in a small **Hit Points** panel above the sheet itself. Click **Connect to Claude Code** (the
+same DM bridge folder/permission as everywhere else this app writes to the campaign repo -- no
+separate connection needed if you've already connected from the main board), edit the numbers,
+and **Save** writes straight into that character's `characters/<name>.md` file -- specifically
+the `**HP:** current / max` line under its `## Combat` heading, the one field on a real character
+sheet that's both consistently formatted and free of narrative prose. Deliberately narrow:
+everything else on a sheet -- ability scores, backstory, spell slots, class resources, the
+`## Current Status` section -- stays exactly as DM/Claude-authored today (edited on the token
+sheet during play, synced to the file at End Session), since that content mixes simple trackers
+with real, irreplaceable narrative prose line-by-line in a way a blind find/replace has no safe
+way to touch. Requires `DND_REPO_PATH` like Create Character/End Session; same-machine only, no
+new sync/server -- this doesn't change how the player window (a second monitor/TV) works.
+
 ## Token library
 
 The "Token Library" panel lets you save a portrait once and have it show up automatically from
@@ -615,7 +632,9 @@ Campaign OS
 |-- player.html     Read-only player-facing board view (map, tokens, initiative, combat log,
 |                   no editing) -- opened from index.html's "Open Player Window" button, kept
 |                   in sync by polling localStorage once a second (see ui/playerView.js)
-|-- character.html  Standalone character sheet viewer, opened from an imported character
+|-- character.html  Standalone character sheet viewer, opened from an imported character --
+|                   editable in one place (current/max HP), written back to the campaign
+|                   repo's .md file via the DM bridge (see Player-editable HP above)
 |-- engine/         Pure, unit-tested logic: encounter state, campaign import/parsing, the
 |                   dm-bridge action dispatcher, and the character creator's 5e math/markdown
 |                   generation -- no DOM, runnable under Node
@@ -625,8 +644,9 @@ Campaign OS
 |                   persists picked directory handles, folderAssets.js indexes/reads them)
 |-- dm-bridge/      watch.js -- the Node script that bridges the browser to the local
 |                   `claude` CLI for live combat narration and the End Session write-back,
-|                   plus a plain (Claude-free) file write for Create Character -- both
-|                   write into the DnD campaign repo (see above)
+|                   plus plain (Claude-free) file writes for Create Character and the
+|                   character sheet's HP edit -- all three write into the DnD campaign repo
+|                   (see above)
 `-- tests/          node:test suite for engine/ and the pure (non-IndexedDB, non-File-System-
                     Access) logic in ui/tokenLibrary.js, ui/mapLibrary.js, ui/folderAssets.js
 ```
