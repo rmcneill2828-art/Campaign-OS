@@ -39,8 +39,8 @@
                 <input id="showGrid" type="checkbox" checked>
                 Grid
               </label>
-              <button id="toggleRuler" type="button" title="While on, click-drag on the map to measure grid distance (using the map's ft/square scale and the RAW alternating-diagonal rule) instead of moving the selected token.">Ruler</button>
-              <button id="toggleTemplate" type="button" title="While on: for Circle, click the map to center it; for Cone/Line, click-drag from the origin to aim it. A visual aid for picking cast_area_spell targets -- the label also lists which tokens the shape currently covers.">Template</button>
+              <button id="toggleRuler" type="button" aria-pressed="false" title="While on, click-drag on the map to measure grid distance (using the map's ft/square scale and the RAW alternating-diagonal rule) instead of moving the selected token.">Ruler</button>
+              <button id="toggleTemplate" type="button" aria-pressed="false" title="While on: for Circle, click the map to center it; for Cone/Line, click-drag from the origin to aim it. A visual aid for picking cast_area_spell targets -- the label also lists which tokens the shape currently covers.">Template</button>
               <label class="template-shape-input">
                 Shape
                 <select id="templateShapeSelect" aria-label="AoE template shape">
@@ -57,13 +57,13 @@
                 Width (ft)
                 <input id="templateWidth" type="number" min="5" step="5" value="5" aria-label="AoE template width in feet (Line only)">
               </label>
-              <button id="toggleWalls" type="button" title="While on, click-drag to draw a wall (blocks line of sight in the player window); click near an existing wall to remove it instead. A map with no walls has no line-of-sight restriction at all.">Walls</button>
+              <button id="toggleWalls" type="button" aria-pressed="false" title="While on, click-drag to draw a wall (blocks line of sight in the player window); click near an existing wall to remove it instead. A map with no walls has no line-of-sight restriction at all.">Walls</button>
               <button id="clearWalls" type="button" title="Removes every wall drawn on this map.">Clear Walls</button>
               <button id="resetFog" type="button" title="Forgets every tile the party has explored on this map so far -- the player window will re-hide previously revealed terrain until heroes see it again. Only matters on a map with walls drawn (line of sight is what drives fog of war); a wall-free map has no fog to reset.">Reset Fog</button>
-              <button id="mapSettingsToggle" type="button">Map Settings</button>
+              <button id="mapSettingsToggle" type="button" aria-expanded="false" aria-controls="mapToolbarSecondary">Map Settings</button>
             </div>
             <div id="mapToolbarSecondary" class="map-toolbar-secondary" hidden>
-              <button id="adjustGrid" type="button">Adjust Grid</button>
+              <button id="adjustGrid" type="button" aria-pressed="false">Adjust Grid</button>
               <label class="range-input">
                 Opacity
                 <input id="gridOpacity" type="range" min="0" max="100" value="35">

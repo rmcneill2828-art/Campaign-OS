@@ -108,7 +108,17 @@ button:focus-visible {
 
 button:disabled {
   cursor: not-allowed;
-  opacity: 0.45;
+  /* 0.45 (the original value) computed to roughly 3.1:1 text contrast against
+     --panel-strong -- the worst-case surface a disabled button sits on -- below WCAG AA's
+     4.5:1 normal-text threshold. WCAG doesn't actually require disabled controls to meet
+     that (2026-08-22 accessibility pass, CLAUDE.md's Phase 12), but this app is meant to
+     be read fast at a real table, so legibility still matters here even where compliance
+     doesn't strictly demand it. 0.75 was computed the same way -- muted (--muted) composited
+     at this alpha over --panel-strong lands right at ~4.5:1 -- and is still visually
+     distinct from an enabled button (no hover glow/lift, cursor: not-allowed, and --muted
+     is already dimmer than --text) without being genuinely hard to read.
+  */
+  opacity: 0.75;
   color: var(--muted);
   border-color: var(--line);
 }

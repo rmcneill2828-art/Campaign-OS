@@ -340,6 +340,7 @@
     reconcileActiveMap();
     if (state.mapName !== previousMapName) saveEncounter();
     adjustGrid.classList.toggle("active-toggle", gridAdjusting);
+    adjustGrid.setAttribute("aria-pressed", String(gridAdjusting));
     adjustGrid.textContent = gridAdjusting ? "Adjusting Grid" : "Adjust Grid";
     document.querySelector("h1").textContent = state.mapName || "No map loaded";
     renderMapBackground();
@@ -1943,18 +1944,27 @@
   function handleMapClick(event) {
     if (rulerModeOn || wallsModeOn) return;
     if (event.target.closest(".token")) return;
+    // A keyboard-activated click (Enter/Space on a focused, tab-reachable .map-tile
+    // button) reports clientX/clientY as 0 rather than the tile's real screen position --
+    // gridCellFromEvent's pixel math would silently resolve that to the wrong cell
+    // (usually (1,1)) instead of the tile that was actually activated. Read the cell
+    // straight off the activated tile's own data whenever the click genuinely targeted
+    // one, which is exactly what a real mouse click on that same tile already computes
+    // via gridCellFromEvent -- this only changes the keyboard path, not pointer input.
+    const targetTile = event.target.closest(".map-tile");
+    const targetCell = targetTile ? { x: Number(targetTile.dataset.x), y: Number(targetTile.dataset.y) } : null;
     if (templateModeOn) {
       // Circle is the only shape a plain click can place -- Cone/Line need a direction, which
       // only a drag can express (see startTemplateDrag below). Still swallow the click either
       // way so a cone/line click (or the click that follows a completed drag) never falls
       // through to moveSelectedToken.
       if (templateShape === "circle") {
-        templateOrigin = gridCellFromEvent(event);
+        templateOrigin = targetCell || gridCellFromEvent(event);
         renderTemplateOverlay();
       }
       return;
     }
-    const { x, y } = gridCellFromEvent(event);
+    const { x, y } = targetCell || gridCellFromEvent(event);
     moveSelectedToken(x, y);
   }
 
@@ -2171,6 +2181,7 @@
     templateModeOn = !templateModeOn;
     toggleTemplate.textContent = templateModeOn ? "Template On" : "Template";
     toggleTemplate.classList.toggle("active-toggle", templateModeOn);
+    toggleTemplate.setAttribute("aria-pressed", String(templateModeOn));
     if (!templateModeOn) {
       templateOrigin = null;
       renderTemplateOverlay();
@@ -2323,6 +2334,7 @@
     wallsModeOn = !wallsModeOn;
     toggleWalls.textContent = wallsModeOn ? "Walls On" : "Walls";
     toggleWalls.classList.toggle("active-toggle", wallsModeOn);
+    toggleWalls.setAttribute("aria-pressed", String(wallsModeOn));
   });
 
   clearWallsButton.addEventListener("click", () => {
@@ -2907,12 +2919,43 @@
     dmBridgePollTimer = setInterval(checkDMBridgeResponse, 1500);
   }
 
+  // A revoked/lost File System Access permission mid-session used to fail completely
+  // silently: readBridgeJson() throws a NotAllowedError, the poll loop's catch block only
+  // console.warn'd and returned, and dmBridgeStatus kept showing "Connected" forever --
+  // both poll timers just kept firing and failing every 1.5-2s with nothing on screen ever
+  // changing. A DM had no way to tell Claude DM/live-session control had actually stopped
+  // working short of noticing commands silently go nowhere. This stops both timers, clears
+  // the now-invalid handle so a stray in-flight call becomes a no-op, and leaves the same
+  // "click Connect to re-grant access" hint tryRestoreDMBridge() already shows for a
+  // startup permission that needs re-confirming, so there's exactly one recovery message
+  // to know, not two.
+  function handleDMBridgeAccessLost(err) {
+    console.warn("[Campaign OS] Lost access to the dm-bridge folder -- stopping DM bridge polling:", err.message || err);
+    const handleName = dmBridgeDirHandle?.name;
+    dmBridgeDirHandle = null;
+    clearInterval(dmBridgePollTimer);
+    dmBridgePollTimer = null;
+    clearInterval(liveActionsPollTimer);
+    liveActionsPollTimer = null;
+    clearTimeout(dmBridgeTimeoutHandle);
+    dmBridgePendingId = null;
+    setDMBridgeBusy(false);
+    dmBridgeStatus.textContent = handleName
+      ? `Connection to "${handleName}" was lost -- click Connect to re-grant access.`
+      : "Connection lost -- click Connect to re-grant access.";
+    dmBridgeStatus.classList.remove("connected");
+  }
+
   async function checkDMBridgeResponse() {
     if (!dmBridgeDirHandle || !dmBridgePendingId) return;
     let response;
     try {
       response = await readBridgeJson("response.json");
     } catch (err) {
+      if (err.name === "NotAllowedError") {
+        handleDMBridgeAccessLost(err);
+        return;
+      }
       // This used to swallow every read error identically to "file doesn't exist yet",
       // which made a genuinely written-but-transiently-unreadable response (a sync/lock
       // hiccup on the underlying folder, an intermittent File System Access API read
@@ -2963,6 +3006,10 @@
     try {
       payload = await readBridgeJson("live-actions.json");
     } catch (err) {
+      if (err.name === "NotAllowedError") {
+        handleDMBridgeAccessLost(err);
+        return;
+      }
       console.warn("[Campaign OS] Couldn't read dm-bridge/live-actions.json this poll:", err.message || err);
       return;
     }
@@ -3136,6 +3183,7 @@
     rulerModeOn = !rulerModeOn;
     toggleRuler.textContent = rulerModeOn ? "Ruler On" : "Ruler";
     toggleRuler.classList.toggle("active-toggle", rulerModeOn);
+    toggleRuler.setAttribute("aria-pressed", String(rulerModeOn));
     if (!rulerModeOn) endRulerDrag();
   });
 
@@ -3217,6 +3265,10 @@
     mapSettingsOpen = !mapSettingsOpen;
     mapToolbarSecondary.hidden = !mapSettingsOpen;
     mapSettingsToggle.classList.toggle("active-toggle", mapSettingsOpen);
+    // aria-expanded, not aria-pressed -- this button discloses/hides mapToolbarSecondary
+    // rather than representing its own binary on/off state, the same distinction
+    // Ruler/Template/Walls/Adjust Grid's aria-pressed below don't need to make.
+    mapSettingsToggle.setAttribute("aria-expanded", String(mapSettingsOpen));
   });
 
   mapImageInput.addEventListener("change", async () => {

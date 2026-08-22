@@ -366,24 +366,51 @@ Phase 11 complete.
 
 ## Phase 12 -- Small fixes surfaced by this review (self-contained, no design decisions needed)
 
-- [ ] **DM-bridge disconnect is silent.** `checkDMBridgeResponse()`/`checkLiveActions()`
-  (`ui/app.js`) catch a lost File System Access permission (folder access revoked mid-session)
-  with only `console.warn` and keep polling forever -- the status bar still claims "Connected"
-  indefinitely. Should flip `dmBridgeStatus` to a visible "connection lost -- reconnect" state and
-  stop the poll timers, the same reconnect-prompt treatment `tryRestoreDMBridge()` already gives a
-  fresh page load, just triggered mid-session instead of only at load.
-- [ ] **Keyboard activation of a map tile doesn't move the token to the right cell.** Map tiles are
-  real, tab-reachable `<button>`s, but `handleMapClick()` derives the destination purely from the
-  mouse event's `clientX`/`clientY`, never the activated button's own coordinates -- a
-  keyboard-triggered click (Enter/Space) reports zeroed coordinates and resolves to the wrong
-  cell. Fix: read the cell from the event target's own data (already present in its `aria-label`
-  generation) when pixel coordinates aren't meaningful, rather than only trusting pointer position.
-- [ ] **Toggle buttons don't expose pressed state.** Ruler/Template/Walls toggles communicate
-  on/off purely via an `active-toggle` CSS class -- add `aria-pressed` alongside it so a
-  screen-reader user (or anyone using a11y tooling to sanity-check the app) can tell which mode is
-  active.
-- [ ] **Disabled-button text contrast is low** (~3.1:1, opacity stacked on `--muted`) -- bump it
-  enough to stay legible at a table without losing the "clearly disabled" visual cue.
+- [x] **DM-bridge disconnect is silent.** Done 2026-08-22. New `handleDMBridgeAccessLost()`
+  (`ui/app.js`) -- both `checkDMBridgeResponse()`'s and `checkLiveActions()`'s catch blocks now
+  check specifically for `err.name === "NotAllowedError"` (a revoked/lost File System Access
+  permission, as opposed to the transient read hiccups those catches already tolerated and still
+  do) and, on that specific error, clear `dmBridgeDirHandle`, stop both poll timers
+  (`dmBridgePollTimer`/`liveActionsPollTimer`), clear any pending request timeout, and flip
+  `dmBridgeStatus` to `Connection to "<name>" was lost -- click Connect to re-grant access.`
+  (removing the `.connected` class) -- the same recovery message `tryRestoreDMBridge()` already
+  shows for a startup permission that needs re-confirming, so there's one message to know, not
+  two. Verified with a one-off Playwright script using an OPFS directory as a same-interface
+  stand-in for a picked folder (same technique the Live-session control contract section already
+  documents), with `getFileHandle()` patched to throw `NotAllowedError` on demand to simulate a
+  revoked permission -- confirmed the status flips within one poll cycle, and that un-revoking
+  afterward does NOT resume anything (proving the timers were actually cleared, not just failing
+  silently and retrying). OPFS doesn't work under a plain `file://` origin in Chromium (throws a
+  SecurityError), so this one script specifically ran against a throwaway local static server
+  instead of the usual `file://` verification -- the app itself is unaffected either way.
+- [x] **Keyboard activation of a map tile doesn't move the token to the right cell.** Done
+  2026-08-22. `handleMapClick()` now checks `event.target.closest(".map-tile")` first and, when
+  the click actually targeted a tile, reads `x`/`y` straight off that tile's own `dataset`
+  (already set when tiles are built) instead of always going through `gridCellFromEvent()`'s pixel
+  math -- a keyboard-triggered click (Enter/Space on a focused tile button) reports
+  `clientX`/`clientY` as 0, which the pixel math would silently resolve to the wrong cell (usually
+  (1,1)) for. `gridCellFromEvent()` itself is untouched (still used for the ruler/template drag
+  paths, and as the fallback here for any click that didn't land on a tile's own button), so pixel
+  math is only bypassed exactly where a real, discrete tile identity is already known. Verified
+  with Playwright: focusing a specific off-origin tile and pressing Enter moves the token to that
+  exact cell (previously would not have); a real mouse click on a different tile still lands
+  correctly too (regression check).
+- [x] **Toggle buttons don't expose pressed state.** Done 2026-08-22. Ruler/Template/Walls/Adjust
+  Grid (all mode toggles, `active-toggle` CSS class already existed) now also set `aria-pressed`
+  alongside it. Map Settings is a disclosure toggle (shows/hides `mapToolbarSecondary`), not a
+  mode -- it got `aria-expanded`/`aria-controls` instead, the ARIA-correct pairing for that
+  pattern rather than reusing `aria-pressed` for something it doesn't quite mean. Verified with
+  Playwright: each attribute flips true/false correctly across on -> off, not just a one-way stamp.
+- [x] **Disabled-button text contrast is low.** Done 2026-08-22. The original `opacity: 0.45` on
+  `button:disabled` computed to roughly 3.1:1 against `--panel-strong` (the worst-case surface a
+  disabled button sits on), under WCAG AA's 4.5:1 normal-text threshold -- WCAG doesn't actually
+  require disabled controls to meet that, but this app is meant to be read fast at a real table,
+  so legibility still matters here regardless. Recomputed: 0.75 puts `--muted` right at ~4.5:1
+  against that same surface while staying visually distinct from an enabled button (no hover
+  glow/lift, `cursor: not-allowed`, and `--muted` is already dimmer than `--text`). Verified via
+  Playwright's `getComputedStyle()` against a real disabled button rather than eyeballing it.
+
+Phase 12 complete.
 
 ## Phase 13 -- Monster compendium expansion (medium)
 
