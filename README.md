@@ -317,6 +317,9 @@ dependencies to install for the app itself. See Tests, below, for running the te
   auto-match most of their contents that way -- both folders also have a search box so you
   can browse and manually pick an entry: Maps' "Use" loads it as the active map, Tokens'
   "Use" attaches it to whichever token is currently selected on the board.
+- Music Folder (Setup tab): connect a folder of audio files the same way, then **Loop** a
+  track as looping ambience (crossfades between tracks) or **Sting** one to play once over
+  it -- controls live in the Ambience panel on the Play tab (see below)
 - Character creator: build a new 5e character sheet (computed ability modifiers,
   proficiency bonus, HP, AC, saves, skills, one attack) and write it straight into
   the campaign repo's `characters/` folder (see below)
@@ -580,6 +583,27 @@ then on, without re-uploading it per token:
 - Spawning several tokens that all match the same library entry (or manually attaching the same
   Tokens Folder file to more than one token) stores that art once, not once per token -- three
   goblins sharing a portrait share one saved copy of it, not three.
+
+## Music / Ambience
+
+The **Music Folder** panel (Setup tab) connects a folder of audio files the same way
+Tokens/Maps Folder does -- pick a folder once, nothing is copied into the browser, files are
+read straight from disk. Supports MP3, OGG, WAV, M4A, FLAC, Opus, and AAC. Search by name and
+each result gets two buttons:
+
+- **Loop** -- starts that track as looping background ambience, fading out whatever was
+  already playing (1.5s crossfade) rather than a hard cut. Only one ambience track plays at a
+  time.
+- **Sting** -- plays that track once, over the ambience, without interrupting it. Several
+  stingers can overlap each other and the ambience freely.
+
+The **Ambience** panel (Play tab, below the Dice Roller) shows what's currently looping with
+Pause/Resume, Stop, and a volume slider shared by both ambience and stingers. This is
+deliberately simple: playback is entirely manual (you decide when the mood changes, nothing
+switches automatically with the map or combat state), plays through your own device's speakers
+only (not the Player Window -- there's no sync channel for it, same "same-machine" scope the
+player window itself already has), and isn't saved across a reload -- reconnect the folder and
+pick a track again next session, same as Tokens/Maps Folder already ask you to.
 
 ## Player window
 

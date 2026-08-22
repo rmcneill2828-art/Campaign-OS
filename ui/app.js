@@ -62,6 +62,14 @@
   const mapFolderStatus = document.querySelector("#mapFolderStatus");
   const mapFolderSearch = document.querySelector("#mapFolderSearch");
   const mapFolderResults = document.querySelector("#mapFolderResults");
+  const musicFolderConnect = document.querySelector("#musicFolderConnect");
+  const musicFolderStatus = document.querySelector("#musicFolderStatus");
+  const musicFolderSearch = document.querySelector("#musicFolderSearch");
+  const musicFolderResults = document.querySelector("#musicFolderResults");
+  const ambienceTrackName = document.querySelector("#ambienceTrackName");
+  const ambiencePauseResume = document.querySelector("#ambiencePauseResume");
+  const ambienceStop = document.querySelector("#ambienceStop");
+  const ambienceVolume = document.querySelector("#ambienceVolume");
   const mapSelect = document.querySelector("#mapSelect");
   const mapImageInput = document.querySelector("#mapImageInput");
   const adjustGrid = document.querySelector("#adjustGrid");
@@ -137,6 +145,8 @@
   let tokensFolderIndex = []; // [{ name, key, handle }] -- metadata only, no bytes read yet
   let mapsFolderHandle = null;
   let mapsFolderIndex = [];
+  let musicFolderHandle = null;
+  let musicFolderIndex = [];
   let dmBridgePendingId = null;
   let dmBridgePollTimer = null;
   let dmBridgeTimeoutHandle = null;
@@ -2746,6 +2756,13 @@
       if (permission === "granted") await indexMapsFolder(mapHandle);
       else mapFolderStatus.textContent = `Previously connected to "${mapHandle.name}" -- click Connect to re-grant access.`;
     }
+
+    const musicHandle = await window.CampaignOSAssetFolders.loadHandle("music").catch(() => null);
+    if (musicHandle) {
+      const permission = await musicHandle.queryPermission({ mode: "read" }).catch(() => "denied");
+      if (permission === "granted") await indexMusicFolder(musicHandle);
+      else musicFolderStatus.textContent = `Previously connected to "${musicHandle.name}" -- click Connect to re-grant access.`;
+    }
   }
 
   const MAP_FOLDER_RESULTS_LIMIT = 50;
@@ -2869,6 +2886,205 @@
     updateState(window.CampaignOS.updateToken(state, token.id, { image: key }));
     commandResult.textContent = `${entry.name} attached to ${token.name}.`;
   }
+
+  // --- Music Folder / Ambience (Phase 10, 2026-08-22) -----------------------------------
+  // Same connect/index/search pattern as Tokens/Maps Folder above, but audio never gets
+  // downscaled-and-cached the way an image does -- readEntryAsObjectUrl() streams straight
+  // from the picked file via a blob: URL instead (see folderAssets.js's own comment for
+  // why a data: URL, the image path's choice, would be the wrong tradeoff here). Playback
+  // is entirely local UI state -- never touches `state`, never persists across a reload,
+  // same "manual only, re-connect each session" simplicity the Tokens/Maps folders already
+  // accept. Plays through this tab's own speakers only, not the Player Window -- there's no
+  // sync channel for it, unlike everything else player.html mirrors.
+  musicFolderConnect.addEventListener("click", async () => {
+    try {
+      const handle = await connectAssetFolder("music", musicFolderStatus);
+      if (handle) await indexMusicFolder(handle);
+    } catch (err) {
+      if (err.name !== "AbortError") musicFolderStatus.textContent = `Connection failed: ${err.message}`;
+    }
+  });
+
+  async function indexMusicFolder(handle) {
+    musicFolderHandle = handle;
+    musicFolderStatus.textContent = `Indexing "${handle.name}"...`;
+    musicFolderStatus.classList.remove("connected");
+    musicFolderSearch.disabled = true;
+    musicFolderIndex = await window.CampaignOSFolderAssets.indexFolder(
+      handle,
+      window.CampaignOSMapLibrary.normalizeName, // no trailing-instance-number stripping -- same reasoning as maps, a track isn't spawned in numbered copies
+      window.CampaignOSFolderAssets.AUDIO_EXTENSION_PATTERN
+    );
+    musicFolderStatus.textContent = `Connected to "${handle.name}" -- ${musicFolderIndex.length} tracks indexed.`;
+    musicFolderStatus.classList.add("connected");
+    musicFolderSearch.disabled = false;
+    renderMusicFolderResults();
+  }
+
+  const MUSIC_FOLDER_RESULTS_LIMIT = 50;
+
+  function renderMusicFolderResults() {
+    musicFolderResults.innerHTML = "";
+    if (!musicFolderIndex.length) return;
+
+    const query = musicFolderSearch.value.trim().toLowerCase();
+    const matches = query
+      ? musicFolderIndex.filter((entry) => entry.name.toLowerCase().includes(query))
+      : musicFolderIndex.slice().sort((a, b) => a.name.localeCompare(b.name)).slice(0, MUSIC_FOLDER_RESULTS_LIMIT);
+
+    if (!query) {
+      const hint = document.createElement("p");
+      hint.className = "library-empty";
+      hint.textContent = `Showing the first ${Math.min(MUSIC_FOLDER_RESULTS_LIMIT, musicFolderIndex.length)} of ${musicFolderIndex.length} -- type to search.`;
+      musicFolderResults.appendChild(hint);
+    } else if (!matches.length) {
+      const empty = document.createElement("p");
+      empty.className = "library-empty";
+      empty.textContent = "No matches.";
+      musicFolderResults.appendChild(empty);
+      return;
+    }
+
+    matches.slice(0, MUSIC_FOLDER_RESULTS_LIMIT).forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "library-item music-library-item";
+      row.innerHTML = `
+        <span>${escapeHtml(entry.name)}</span>
+        <button type="button" data-action="loop" title="Start looping as background ambience, fading out whatever was playing.">Loop</button>
+        <button type="button" data-action="sting" title="Play once over the ambience without interrupting it.">Sting</button>
+      `;
+      row.querySelector('[data-action="loop"]').addEventListener("click", () => playAmbienceEntry(entry));
+      row.querySelector('[data-action="sting"]').addEventListener("click", () => playStingEntry(entry));
+      musicFolderResults.appendChild(row);
+    });
+  }
+
+  musicFolderSearch.addEventListener("input", renderMusicFolderResults);
+
+  // Two-audio-element crossfade rather than a hard cut when the DM manually swaps tracks --
+  // `outgoing`/`incoming` may each be null (starting from silence, or fading out to silence
+  // on Stop). Captures each element's OWN current volume as the fade's starting point
+  // (not assumed to be 0 or targetVolume) so a fade started mid-fade -- a fast double-click --
+  // still animates smoothly from wherever it actually was, not a discontinuous jump.
+  const AMBIENCE_CROSSFADE_MS = 1500;
+  function crossfadeAmbience(outgoing, incoming, targetVolume) {
+    const start = performance.now();
+    const outgoingStart = outgoing ? outgoing.volume : 0;
+    const incomingStart = incoming ? incoming.volume : 0;
+    function step(now) {
+      const t = Math.min(1, (now - start) / AMBIENCE_CROSSFADE_MS);
+      if (incoming) incoming.volume = incomingStart + (targetVolume - incomingStart) * t;
+      if (outgoing) outgoing.volume = outgoingStart * (1 - t);
+      if (t < 1) {
+        requestAnimationFrame(step);
+        return;
+      }
+      if (outgoing) outgoing.pause();
+    }
+    requestAnimationFrame(step);
+  }
+
+  let ambienceAudio = null; // the currently active looping <audio> element, or null
+  let ambienceObjectUrl = null;
+  let ambienceCurrentName = null;
+
+  function ambienceVolumeValue() {
+    return Number(ambienceVolume.value) / 100;
+  }
+
+  function renderAmbienceControls() {
+    ambienceTrackName.textContent = ambienceCurrentName || "Nothing playing";
+    const playing = Boolean(ambienceAudio);
+    ambiencePauseResume.disabled = !playing;
+    ambienceStop.disabled = !playing;
+    ambiencePauseResume.textContent = playing && ambienceAudio.paused ? "Resume" : "Pause";
+  }
+
+  async function playAmbienceEntry(entry) {
+    let url;
+    try {
+      url = await window.CampaignOSFolderAssets.readEntryAsObjectUrl(entry);
+    } catch (err) {
+      commandResult.textContent = `Couldn't read "${entry.name}": ${err.message}`;
+      return;
+    }
+
+    const incoming = new Audio(url);
+    incoming.loop = true;
+    incoming.volume = 0;
+
+    // Only commit to the new track as "current" once it's actually playing -- a browser
+    // autoplay restriction or a corrupt file shouldn't silently drop whatever was already
+    // looping, or leave the UI claiming a track is active that never actually started.
+    try {
+      await incoming.play();
+    } catch (err) {
+      URL.revokeObjectURL(url);
+      commandResult.textContent = `Couldn't play "${entry.name}": ${err.message}`;
+      return;
+    }
+
+    const outgoing = ambienceAudio;
+    const outgoingUrl = ambienceObjectUrl;
+    ambienceAudio = incoming;
+    ambienceObjectUrl = url;
+    ambienceCurrentName = entry.name;
+    renderAmbienceControls();
+
+    crossfadeAmbience(outgoing, incoming, ambienceVolumeValue());
+    if (outgoingUrl) {
+      setTimeout(() => URL.revokeObjectURL(outgoingUrl), AMBIENCE_CROSSFADE_MS + 100);
+    }
+  }
+
+  // One-shot, plays over the ambience without touching it -- each sting gets its own
+  // <audio> element (not pooled/tracked in module state) so overlapping stings just work,
+  // and cleans itself up via its own "ended"/"error" listener once it's done.
+  async function playStingEntry(entry) {
+    let url;
+    try {
+      url = await window.CampaignOSFolderAssets.readEntryAsObjectUrl(entry);
+    } catch (err) {
+      commandResult.textContent = `Couldn't read "${entry.name}": ${err.message}`;
+      return;
+    }
+    const sting = new Audio(url);
+    sting.volume = ambienceVolumeValue();
+    sting.addEventListener("ended", () => URL.revokeObjectURL(url));
+    sting.addEventListener("error", () => URL.revokeObjectURL(url));
+    try {
+      await sting.play();
+    } catch (err) {
+      URL.revokeObjectURL(url);
+      commandResult.textContent = `Couldn't play "${entry.name}": ${err.message}`;
+    }
+  }
+
+  ambiencePauseResume.addEventListener("click", () => {
+    if (!ambienceAudio) return;
+    if (ambienceAudio.paused) ambienceAudio.play();
+    else ambienceAudio.pause();
+    renderAmbienceControls();
+  });
+
+  ambienceStop.addEventListener("click", () => {
+    if (!ambienceAudio) return;
+    const outgoing = ambienceAudio;
+    const outgoingUrl = ambienceObjectUrl;
+    ambienceAudio = null;
+    ambienceObjectUrl = null;
+    ambienceCurrentName = null;
+    renderAmbienceControls();
+    crossfadeAmbience(outgoing, null, 0);
+    setTimeout(() => URL.revokeObjectURL(outgoingUrl), AMBIENCE_CROSSFADE_MS + 100);
+  });
+
+  // Live volume changes apply immediately to whatever's currently looping -- a fade in
+  // progress (crossfadeAmbience) will keep animating from wherever this lands, same as any
+  // other mid-fade adjustment.
+  ambienceVolume.addEventListener("input", () => {
+    if (ambienceAudio) ambienceAudio.volume = ambienceVolumeValue();
+  });
 
   // The board-state shape both the request/response flow (below) and the continuous
   // live-state.json export (further down) send -- kept in one place so the two channels

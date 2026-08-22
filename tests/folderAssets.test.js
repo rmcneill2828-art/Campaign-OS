@@ -31,3 +31,12 @@ test("findInIndex returns null for an empty or missing name", () => {
   assert.equal(CampaignOSFolderAssets.findInIndex([{ name: "A", key: "a" }], "", normalizeName), null);
   assert.equal(CampaignOSFolderAssets.findInIndex([{ name: "A", key: "a" }], undefined, normalizeName), null);
 });
+
+test("AUDIO_EXTENSION_PATTERN matches common web-playable formats and rejects everything else", () => {
+  for (const name of ["ambient-rain.mp3", "Tavern Loop.OGG", "sting.wav", "theme.m4a", "loop.flac", "voice.opus", "track.aac"]) {
+    assert.ok(CampaignOSFolderAssets.AUDIO_EXTENSION_PATTERN.test(name), `expected ${name} to match`);
+  }
+  for (const name of ["portrait.png", "notes.txt", "video.mp4", "no-extension"]) {
+    assert.ok(!CampaignOSFolderAssets.AUDIO_EXTENSION_PATTERN.test(name), `expected ${name} not to match`);
+  }
+});

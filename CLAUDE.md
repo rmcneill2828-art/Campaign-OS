@@ -798,6 +798,52 @@ See README.md for the full feature list and usage. Notes specific to working on 
   a live Playwright run throwing `ReferenceError: Cannot access 'HP_LINE_PATTERN' before
   initialization` rather than by inspection -- moved next to `escapeHtml` at the top of the
   file, same fix.
+- Music Folder / Ambience (Phase 10, 2026-08-22): reuses Tokens/Maps Folder's exact
+  connect/index/search machinery (`connectAssetFolder("music", musicFolderStatus)`,
+  `ui/folderAssets.js`'s `indexFolder()`) rather than inventing a parallel one --
+  `indexFolder()` picked up an optional third `extensionPattern` parameter specifically so
+  it could stay the one shared walker instead of forking a copy; the two existing
+  Tokens/Maps call sites are unchanged (no arg passed = the original hardcoded image
+  pattern, preserved as the default). Storage model is a live folder connection, not an
+  IndexedDB-uploaded library like the Token/Map Library's -- audio files run far larger
+  than portrait/map images and can't be downscaled the way an image can, so bulk-copying a
+  music collection into IndexedDB risked exactly the storage blowup that already crashed
+  this app once with images before downscaling existed (see the Token image dedup bullet's
+  own "Aw, Snap" mention above). `readEntryAsObjectUrl()` (new, alongside the existing
+  `readEntryAsDataUrl()`) returns a `blob:` URL via `URL.createObjectURL()` instead --
+  audio here is never persisted anywhere (no IndexedDB record, no token field), so there's
+  no reason to pay a data URL's ~33% size overhead and full-buffer-before-play cost; an
+  `<audio src="blob:...">` streams natively. **Caller must revoke the object URL** once
+  done with it (`URL.revokeObjectURL(...)`) or it leaks for the page's lifetime -- every
+  playback path here does: `playAmbienceEntry()` revokes the outgoing track's URL on a
+  `setTimeout` timed to the crossfade's own duration (so the file doesn't get revoked out
+  from under audio still audibly fading out), `ambienceStop`'s click handler does the same
+  for a fade-to-silence, and a sting's own `ended`/`error` listeners revoke its URL the
+  instant that one-shot instance is done.
+  Playback state (`ambienceAudio`/`ambienceObjectUrl`/`ambienceCurrentName`, all
+  module-local `let`s, never on `state`) is genuinely two independent channels: **ambience**
+  is at most one `<audio>` element at a time (`loop: true`), swapped via
+  `crossfadeAmbience(outgoing, incoming, targetVolume)` -- a `requestAnimationFrame` tween
+  that captures each element's *own current* volume as the fade's starting point (not an
+  assumed 0 or `targetVolume`), so a fade already in progress when a second swap/stop fires
+  keeps animating smoothly from wherever it actually was rather than jumping; **stingers**
+  are each their own detached `new Audio(url)` instance, never tracked in any array/pool,
+  so overlapping stings just work and each cleans up its own object URL independently.
+  `playAmbienceEntry()` only commits a new track as "current" (updating
+  `ambienceAudio`/the UI) *after* `incoming.play()` resolves -- a rejected `play()` (a
+  corrupt file, a browser autoplay restriction) leaves whatever was already looping
+  untouched rather than silently dropping it or claiming a track is active that never
+  actually started. Plays through the DM's own device only -- deliberately no Player Window
+  sync channel, unlike every other piece of state `player.html` mirrors; a scoping decision
+  (user choice), not a technical limitation of the existing localStorage-polling channel.
+  Entirely local UI state: never touches `state`, never persisted across a reload, matching
+  Tokens/Maps Folder's own "reconnect and re-pick each session" simplicity rather than
+  inventing new persistence. **Testing note**: `new Audio(...)` is deliberately never
+  inserted into the DOM (the standard, correct way to use the constructor) -- a Playwright
+  script that queries `document.querySelectorAll("audio")` to verify playback will always
+  find zero elements regardless of whether anything is actually playing; verify instead
+  through the same observable signals a real DM sees (the Ambience panel's track
+  name/button state, and the absence of a "Couldn't play" message in `commandResult`).
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

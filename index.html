@@ -206,6 +206,20 @@
             </section>
 
             <section class="panel-section">
+              <h2>Ambience</h2>
+              <p class="library-hint">Connect a Music Folder (Setup tab) to play tracks from here. Volume applies to both ambience and stingers -- this plays through your own speakers only, not the Player Window.</p>
+              <div id="ambienceNowPlaying" class="ambience-now-playing">
+                <span id="ambienceTrackName" class="ambience-track-name">Nothing playing</span>
+                <button id="ambiencePauseResume" type="button" disabled>Pause</button>
+                <button id="ambienceStop" type="button" disabled>Stop</button>
+              </div>
+              <label class="range-input ambience-volume">
+                Volume
+                <input id="ambienceVolume" type="range" min="0" max="100" value="70">
+              </label>
+            </section>
+
+            <section class="panel-section">
               <h2>Combat Log</h2>
               <ol id="combatLog" class="combat-log"></ol>
             </section>
@@ -295,6 +309,17 @@
               </div>
               <input id="mapFolderSearch" type="search" placeholder="Search maps by name..." aria-label="Search the connected maps folder" disabled>
               <div id="mapFolderResults" class="library-list map-library-list"></div>
+            </section>
+
+            <section class="panel-section">
+              <h2>Music Folder</h2>
+              <p class="library-hint">Connect a folder of ambience tracks and one-shot sounds (MP3/OGG/WAV/M4A/FLAC/Opus/AAC) -- same read-one-file-at-a-time connection as Tokens/Maps Folder above, nothing copied into the browser. Search below: <strong>Loop</strong> starts a track as looping background ambience (fades out whatever was already looping, one at a time), <strong>Sting</strong> plays a track once over the ambience without interrupting it. Playback controls live in the Ambience panel on the Play tab.</p>
+              <div class="folder-connect">
+                <button id="musicFolderConnect" type="button">Connect Music Folder</button>
+                <span id="musicFolderStatus" class="folder-status">Not connected.</span>
+              </div>
+              <input id="musicFolderSearch" type="search" placeholder="Search music by name..." aria-label="Search the connected music folder" disabled>
+              <div id="musicFolderResults" class="library-list music-library-list"></div>
             </section>
 
             <section class="panel-section">

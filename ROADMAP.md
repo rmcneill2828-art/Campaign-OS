@@ -346,12 +346,49 @@ Both of these are big enough, and open-ended enough, that they deserve the same
   `HP_LINE_PATTERN` constant was declared textually below the code path that calls it,
   the exact TDZ (`const` vs. hoisted `function`) footgun this very file's own top-of-file
   comment already warns about for `escapeHtml` -- moved up next to it.
-- [ ] **Audio/ambience/music layer.** No existing precedent anywhere in this codebase to extend
-  -- would be a wholly new subsystem: an asset-management layer for audio files (something like
-  the Token/Map Library's IndexedDB pattern, or a folder connection like Tokens/Maps Folder),
-  playback controls, and a decision about scope (looping ambience per map? one-shot stingers?
-  music tied to combat state?). The most speculative, highest-effort item on this whole list --
-  last for a reason, and still needs its own scoping conversation before starting.
+- [x] **Audio/ambience/music layer -- scoped and built, 2026-08-22.** Scoping conversation
+  (user decision) settled all four open questions: **trigger model** is manual only (the DM
+  picks a track and clicks Play -- no per-map or combat-state auto-switching, the lowest-risk
+  option and nothing to misfire mid-scene); **output** is the DM's own device only (no new
+  Player Window sync channel); **scope** is ambience plus one-shot stingers, not ambience
+  alone; **asset source** is a folder connection (File System Access, same pattern as
+  Tokens/Maps Folder), not an IndexedDB-uploaded library -- audio files run far larger than
+  images and can't be downscaled the way an image can, so bulk-copying them into IndexedDB
+  risked exactly the kind of storage blowup that already crashed this app once with images
+  before downscaling existed (see the Tokens/Maps Folder bullet above).
+  `ui/folderAssets.js`'s `indexFolder()` gained an optional third `extensionPattern`
+  parameter (defaulting to the existing image pattern, so Tokens/Maps Folder's own calls are
+  unchanged) plus a new `AUDIO_EXTENSION_PATTERN` (mp3/ogg/wav/m4a/flac/opus/aac) and
+  `readEntryAsObjectUrl()` -- a `blob:` URL via `URL.createObjectURL()`, not the
+  `readEntryAsDataUrl()` images use, since audio here is never persisted anywhere (a data
+  URL's ~33% size overhead and full-buffer-before-play cost only pays for itself when the
+  result gets stored, which nothing here does). New **Music Folder** panel (Setup tab, same
+  connect/index/search pattern as Tokens/Maps Folder, reusing the same generic
+  `connectAssetFolder()`) lists matches with **Loop** (starts looping ambience, one at a
+  time, crossfading out whatever was already playing over 1.5s rather than a hard cut --
+  `crossfadeAmbience()` captures each `<audio>` element's own current volume as the fade's
+  real starting point, not an assumed 0/target, so a fast double-click mid-fade still
+  animates smoothly) and **Sting** (a one-off `<audio>` element per play, self-cleaning via
+  its own `ended`/`error` listener, so overlapping stingers just work with no pooling
+  needed) buttons per track. New **Ambience** panel (Play tab, under Dice Roller) shows the
+  current track with Pause/Resume/Stop and a shared volume slider. Entirely local UI state
+  -- never touches `state`, never persisted across a reload, matching the "reconnect each
+  session" simplicity Tokens/Maps Folder already accept. Verified live against real WAV
+  files (not just UI plumbing) via Playwright, using an OPFS directory as a same-interface
+  stand-in for a picked folder populated with actual audio bytes (same technique this file's
+  own Live-session-control section documents) -- connect, index, Loop with a genuine
+  crossfade, Pause/Resume, live volume changes, an overlapping Sting that leaves the
+  ambience untouched, swapping the looping track, and Stop all confirmed via the same
+  observable signals a real DM would see (track name, button state, absence of an error
+  message) rather than inspecting `<audio>` elements directly -- `new Audio(...)` is
+  deliberately never inserted into the DOM, so `document.querySelectorAll("audio")` would
+  always find zero regardless of whether playback is actually working, a real gotcha this
+  verification had to work around. 1 new unit test (358 total, `AUDIO_EXTENSION_PATTERN`'s
+  own match/reject cases -- the rest of this feature touches the File System Access API and
+  real `<audio>` playback, neither available under Node, same reason `indexFolder`/
+  `readEntryAsDataUrl` were never unit-tested either).
+
+Phase 10 complete.
 
 ---
 
