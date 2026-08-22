@@ -717,6 +717,37 @@ See README.md for the full feature list and usage. Notes specific to working on 
   prompting convention, not an engine-enforced guarantee. `index.html`'s **Open Player Window**
   button uses a fixed `window.open()` target name (`"campaignOSPlayerWindow"`, not `"_blank"`)
   so repeated clicks focus the existing window instead of spawning duplicates.
+- Encounter difficulty: `evaluateEncounterDifficulty(state)` implements the DMG's actual
+  "Evaluating Encounter Difficulty" procedure (Chapter 3) against the *current* map's
+  tokens -- `XP_THRESHOLDS_BY_LEVEL` and the encounter-multiplier ladder
+  (`ENCOUNTER_MULTIPLIER_STEPS`/`baseEncounterMultiplier`/`encounterMultiplier`) were
+  transcribed directly from the Dungeon Master's Guide PDF, not approximated or recalled
+  from memory. It's a pure, read-only query -- same shape as `effectiveSpeed()`/
+  `damageTypeModifier()`/`savingThrowBonus()`, not a `{state, message}` mutator, since
+  nothing about it changes state. A hero token's character level (needed to look up its row
+  in `XP_THRESHOLDS_BY_LEVEL`) isn't tracked as its own field anywhere else in this engine --
+  `partyLevelFromToken()` sums every `hitDice[dieType].total` instead of adding a new one,
+  since one Hit Die per character level is a fixed 5e rule (RAW) regardless of class or
+  multiclass split, unlike everything else on a sheet this file already treats as
+  too-varied-to-reduce-to-one-field; a hero token with no Hit Dice pool at all (hand-added,
+  or imported without a Class & Level line) falls back to level 1, a documented
+  simplification rather than a guessed real level. `STAT_BLOCKS` gained a real `xp` field
+  per monster (all 24, page-checked against the SRD the same way the stat blocks themselves
+  were) -- deliberately NOT copied onto a spawned token the way `hp`/`ac`/etc. are, since
+  nothing about combat resolution needs it; `monsterXpFromToken()` looks a monster token's
+  XP up by re-deriving its STAT_BLOCKS key the same way `spawnMonster()`'s own `baseName`
+  does (strip a spawned instance's trailing number, lowercase). A monster token that isn't a
+  recognized name -- an imported NPC sheet, a hand-added or renamed token -- has no XP this
+  function can know, and is reported back in `unratedMonsterNames` rather than silently
+  contributing 0 or a guessed value to the total; `ui/app.js`'s panel surfaces that list so
+  the DM knows something wasn't counted, not just a smaller number than expected. Both dead
+  heroes and dead monsters are excluded from the whole calculation (`!token.dead`) -- a
+  defeated monster shouldn't count toward difficulty, and a `dying`-but-not-dead hero still
+  should, since they're still part of the party's resource pool this is measuring against.
+  `ui/app.js`'s **Encounter Difficulty** panel (`index.html`, directly under Initiative --
+  a live-board panel belongs with the other combat-state panels, not the Setup tab) calls
+  this fresh on every `render()`; there's no separate persisted state for it, the whole
+  thing is derived.
 
 ## Testing
 `npm test` (zero dependencies, Node's built-in `node:test`) covers `engine/*.js` and the pure

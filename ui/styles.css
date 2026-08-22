@@ -1267,6 +1267,88 @@ body.grid-dragging {
   background: rgba(185, 83, 76, 0.72);
 }
 
+.encounter-difficulty-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+}
+
+/* Same badge shape as .death-badge above, reused here for a five-tier difficulty scale
+   (Trivial/Easy/Medium/Hard/Deadly) instead of a three-state death status -- Trivial/Easy
+   read calm (muted/hero blue), Hard/Deadly escalate through the same monster-orange/
+   danger-red the rest of this stylesheet already uses for "getting dangerous." */
+.difficulty-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.difficulty-badge-trivial {
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.difficulty-badge-easy {
+  color: #d7ecf5;
+  background: rgba(111, 183, 216, 0.35);
+}
+
+.difficulty-badge-medium {
+  color: #f0dfa0;
+  background: rgba(215, 181, 109, 0.35);
+}
+
+.difficulty-badge-hard {
+  color: #ffdccf;
+  background: rgba(207, 113, 96, 0.4);
+}
+
+.difficulty-badge-deadly {
+  color: #ffd8d4;
+  background: rgba(185, 83, 76, 0.72);
+}
+
+.difficulty-thresholds {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.difficulty-threshold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.72rem;
+}
+
+.difficulty-threshold dt {
+  margin: 0;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+}
+
+.difficulty-threshold dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+
+.difficulty-threshold-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(215, 181, 109, 0.25);
+}
+
 .danger-button {
   width: 100%;
   margin-top: 12px;

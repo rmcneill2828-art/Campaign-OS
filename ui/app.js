@@ -6,6 +6,7 @@
   const sessionTranscriptStorageKey = "campaign-os-session-transcript";
   const map = document.querySelector("#battleMap");
   const initiativeList = document.querySelector("#initiativeList");
+  const encounterDifficultyPanel = document.querySelector("#encounterDifficulty");
   const turnStatus = document.querySelector("#turnStatus");
   const nextTurnButton = document.querySelector("#nextTurnButton");
   const lairActionForm = document.querySelector("#lairActionForm");
@@ -349,6 +350,7 @@
     renderMap();
     renderTurnTracker();
     renderInitiative();
+    renderEncounterDifficulty();
     renderTokenSheet();
     renderCombatLog();
     renderCampaign();
@@ -694,6 +696,48 @@
       item.querySelector("button").addEventListener("click", () => selectToken(token.id));
       initiativeList.appendChild(item);
     });
+  }
+
+  // Phase 14, 2026-08-22 -- reads straight off evaluateEncounterDifficulty(), a pure query
+  // over the current state (no separate panel-local state of its own), so this just needs
+  // to run every render() alongside everything else that reflects the live board; no extra
+  // save/load path, no new persisted field.
+  const DIFFICULTY_TIERS = ["easy", "medium", "hard", "deadly"];
+  const DIFFICULTY_TIER_LABELS = { easy: "Easy", medium: "Medium", hard: "Hard", deadly: "Deadly" };
+
+  function renderEncounterDifficulty() {
+    const result = window.CampaignOS.evaluateEncounterDifficulty(state);
+    if (result.heroCount === 0) {
+      encounterDifficultyPanel.innerHTML = `<p class="library-empty">Add hero tokens to this map to rate an encounter's difficulty.</p>`;
+      return;
+    }
+
+    const fmt = (n) => n.toLocaleString();
+    const activeTier = result.difficulty.toLowerCase();
+    const thresholdsHtml = DIFFICULTY_TIERS.map((tier) => `
+      <div class="difficulty-threshold ${tier === activeTier ? "difficulty-threshold-active" : ""}">
+        <dt>${DIFFICULTY_TIER_LABELS[tier]}</dt>
+        <dd>${fmt(result.thresholds[tier])}</dd>
+      </div>
+    `).join("");
+
+    const monsterNote = result.monsterCount === 0
+      ? "No monsters on this map yet."
+      : `${result.monsterCount} monster${result.monsterCount === 1 ? "" : "s"}, ${fmt(result.monsterXpTotal)} XP -- ×${result.multiplier} multiplier, ${fmt(result.adjustedXp)} adjusted XP`;
+
+    const unratedHtml = result.unratedMonsterNames.length
+      ? `<p class="library-hint">Not counted (no recognized XP value): ${result.unratedMonsterNames.map(escapeHtml).join(", ")}</p>`
+      : "";
+
+    encounterDifficultyPanel.innerHTML = `
+      <p class="encounter-difficulty-summary">
+        <span class="difficulty-badge difficulty-badge-${activeTier}">${escapeHtml(result.difficulty)}</span>
+        <span>Party of ${result.heroCount} (level${result.heroCount === 1 ? "" : "s"} ${result.partyLevels.join(", ")})</span>
+      </p>
+      <p class="library-hint">${monsterNote}</p>
+      <dl class="difficulty-thresholds">${thresholdsHtml}</dl>
+      ${unratedHtml}
+    `;
   }
 
   function renderTokenSheet() {

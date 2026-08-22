@@ -450,11 +450,35 @@ Phase 12 complete.
 
 ## Phase 14 -- Encounter difficulty / XP-budget calculator (medium)
 
-- [ ] Nothing in this app currently helps gauge whether a planned encounter is appropriately hard
-  for the party -- a common piece of session-prep tooling it doesn't have yet. Would need a real
-  design pass on where it lives (a Setup-tab panel reading the active party's levels from imported
-  characters, most likely) and how strictly to follow the DMG's budget math vs. a looser
-  approximation -- not started here, just identified as a real gap.
+- [x] Done 2026-08-22. New **Encounter Difficulty** panel (`index.html`, right after
+  Initiative -- a live-board panel, not a Setup-tab one; it reads the current map's tokens
+  directly, so it belongs next to the other combat-state panels) implements the DMG's
+  actual "Evaluating Encounter Difficulty" procedure (Chapter 3) exactly, not a looser
+  approximation -- the open design question the roadmap note above had left unresolved.
+  Both reference tables (XP Thresholds by Character Level, Encounter Multipliers +
+  the Party Size adjustment) were transcribed directly from the Dungeon Master's Guide PDF
+  at `I:\DND\Core Rulebooks` rather than trusted from memory. `engine/encounter.js` gained
+  `XP_THRESHOLDS_BY_LEVEL`, `encounterMultiplier()`, and the actual query,
+  `evaluateEncounterDifficulty(state)` -- a pure, read-only function (same shape as
+  `effectiveSpeed()`/`damageTypeModifier()`, not a `{state, message}` mutator) that: reads
+  hero-type tokens on the active map as the party, deriving each one's character level from
+  the sum of its Hit Dice pool (one Hit Die per level is a fixed 5e rule regardless of class
+  or multiclass split, so this needs no new extraction -- falls back to level 1 for a hero
+  token with no Hit Dice pool at all, a documented simplification rather than a guess);
+  reads monster-type tokens as the encounter, looking each one's XP up in `STAT_BLOCKS`
+  (which gained a real `xp` field per monster, also page-checked against the SRD, for all
+  24 entries) by the same trailing-instance-number-stripped name spawnMonster's own
+  baseName uses -- a monster token that isn't a recognized name (an imported NPC, a
+  hand-renamed token) is reported separately as "not counted," never guessed at; both dead
+  heroes and dead monsters are excluded from the count entirely. Verified two ways: the
+  DMG's own worked example from the book text itself (one bugbear + three hobgoblins
+  against three 3rd-level characters and one 2nd-level character = Hard, adjusted XP 1,000
+  against an 825/1,400 hard/deadly threshold) is reproduced exactly as a unit test, and a
+  live Playwright pass drove the real UI end to end (empty state, adding heroes via Quick
+  Add Token, spawning monsters via the command box, an unrecognized monster token
+  correctly reported as uncounted). 6 new unit tests (357 total).
+
+Phase 14 complete.
 
 ## Known, deliberately-deferred gaps (unchanged by this review -- already documented honestly)
 

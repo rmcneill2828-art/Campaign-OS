@@ -2882,3 +2882,89 @@ test("parseCommand resolves a lair action command", () => {
   const result = CampaignOS.parseCommand(state, "Lair action: the walls close in.");
   assert.equal(result.message, "Lair action: the walls close in");
 });
+
+// evaluateEncounterDifficulty (Phase 14, 2026-08-22) -- the DMG's own worked example
+// (Chapter 3, "Evaluating Encounter Difficulty": one bugbear + three hobgoblins against
+// three 3rd-level characters and one 2nd-level character = a Hard encounter, adjusted XP
+// 1,000 against an 825/1,400 hard/deadly threshold) is reproduced exactly as the primary
+// test here, since it's independently verifiable against the real book rather than only
+// against this codebase's own math.
+function heroToken(state, name, level) {
+  return CampaignOS.addToken(state, { name, type: "hero", hitDice: { d8: { total: level, current: level } } }).state;
+}
+
+test("evaluateEncounterDifficulty matches the DMG's own worked example exactly", () => {
+  let state = stateOnMap("Urskelde");
+  state = heroToken(state, "PC1", 3);
+  state = heroToken(state, "PC2", 3);
+  state = heroToken(state, "PC3", 3);
+  state = heroToken(state, "PC4", 2);
+  state = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one bugbear")).state;
+  state = withRandom([0], () => CampaignOS.parseCommand(state, "spawn three hobgoblins")).state;
+
+  const result = CampaignOS.evaluateEncounterDifficulty(state);
+  assert.deepEqual(result.partyLevels, [3, 3, 3, 2]);
+  assert.deepEqual(result.thresholds, { easy: 275, medium: 550, hard: 825, deadly: 1400 });
+  assert.equal(result.monsterCount, 4);
+  assert.equal(result.monsterXpTotal, 500); // 200 (bugbear) + 3 * 100 (hobgoblin)
+  assert.equal(result.multiplier, 2); // 3-6 monsters
+  assert.equal(result.adjustedXp, 1000);
+  assert.equal(result.difficulty, "Hard");
+  assert.deepEqual(result.unratedMonsterNames, []);
+});
+
+test("evaluateEncounterDifficulty derives a hero's level from its total Hit Dice, not a guess", () => {
+  let state = stateOnMap("Urskelde");
+  // Multiclass: 11 d12 + 4 d10 -- same shape campaign.js's extractHitDice produces for a
+  // real "Barbarian 11 / Fighter 4" sheet. Total character level is 15, not either number
+  // alone.
+  state = CampaignOS.addToken(state, {
+    name: "Darkhawk", type: "hero", hitDice: { d12: { total: 11, current: 11 }, d10: { total: 4, current: 4 } }
+  }).state;
+  const result = CampaignOS.evaluateEncounterDifficulty(state);
+  assert.deepEqual(result.partyLevels, [15]);
+});
+
+test("evaluateEncounterDifficulty falls back to level 1 for a hero token with no Hit Dice pool", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Wren", type: "hero" }).state;
+  const result = CampaignOS.evaluateEncounterDifficulty(state);
+  assert.deepEqual(result.partyLevels, [1]);
+});
+
+test("evaluateEncounterDifficulty reports a monster it doesn't recognize as unrated instead of guessing its XP", () => {
+  let state = stateOnMap("Urskelde");
+  state = heroToken(state, "PC1", 5);
+  state = CampaignOS.addToken(state, { name: "Homebrew Horror", type: "monster" }).state;
+  const result = CampaignOS.evaluateEncounterDifficulty(state);
+  assert.equal(result.monsterXpTotal, 0);
+  assert.deepEqual(result.unratedMonsterNames, ["Homebrew Horror"]);
+});
+
+test("evaluateEncounterDifficulty excludes dead monsters and dead heroes from the count", () => {
+  let state = stateOnMap("Urskelde");
+  state = heroToken(state, "PC1", 5);
+  state = CampaignOS.addToken(state, { name: "Fallen Ally", type: "hero" }).state;
+  state.tokens.find((t) => t.name === "Fallen Ally").dead = true;
+  state = withRandom([0], () => CampaignOS.parseCommand(state, "spawn one goblin")).state;
+  state.tokens.find((t) => t.name === "Goblin 1").dead = true;
+  const result = CampaignOS.evaluateEncounterDifficulty(state);
+  assert.equal(result.heroCount, 1);
+  assert.equal(result.monsterCount, 0);
+});
+
+test("encounterMultiplier follows the DMG table, and steps one tier per the Party Size rule", () => {
+  // Base table (3-5 PCs, the table's own assumed party size): 1/1.5/2/2.5/3/4.
+  assert.equal(CampaignOS.encounterMultiplier(1, 4), 1);
+  assert.equal(CampaignOS.encounterMultiplier(2, 4), 1.5);
+  assert.equal(CampaignOS.encounterMultiplier(6, 4), 2);
+  assert.equal(CampaignOS.encounterMultiplier(10, 4), 2.5);
+  assert.equal(CampaignOS.encounterMultiplier(14, 4), 3);
+  assert.equal(CampaignOS.encounterMultiplier(15, 4), 4);
+  // Small party (< 3): one tier up -- the DMG's own explicit example.
+  assert.equal(CampaignOS.encounterMultiplier(1, 2), 1.5);
+  // Large party (6+): one tier down -- including the DMG's own explicit 0.5 case, which
+  // only exists via this adjustment (never a base monster-count tier on its own).
+  assert.equal(CampaignOS.encounterMultiplier(1, 6), 0.5);
+  assert.equal(CampaignOS.encounterMultiplier(2, 6), 1);
+});

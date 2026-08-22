@@ -70,6 +70,17 @@ dependencies to install for the app itself. See Tests, below, for running the te
   nothing extra to read. Damage with no stated type (a flat DM-narrated amount, the HP panel's
   manual Damage button) always applies in full, ignoring resistances entirely, same as before
   this existed.
+- Encounter Difficulty: a sidebar panel (right below Initiative) rates the active map's
+  encounter using the DMG's real "Evaluating Encounter Difficulty" method (XP thresholds by
+  character level + the encounter multiplier table, not a looser approximation) -- reads
+  directly off the current board, no separate setup. A hero's level comes from its Hit Dice
+  pool total (one Hit Die per level is a fixed 5e rule regardless of class/multiclass split,
+  so it needs no extra data entry; falls back to level 1 for a hero token with none). A
+  monster needs a name `spawn` recognizes to have a known XP value -- an imported NPC or a
+  hand-renamed token is listed separately as "not counted" rather than guessed at. Shows a
+  Trivial/Easy/Medium/Hard/Deadly badge, the party's four XP thresholds with the one that
+  was hit highlighted, and the monsters' adjusted XP (their combined XP times the
+  encounter-size multiplier). Dead heroes and dead monsters are excluded either way.
 - Turn tracker: a "Next Turn" control in the Initiative panel steps through the current
   map's initiative order, shows the round number and whose turn it is, and resets that
   token's movement budget. Speed limits only apply to whichever token the tracker currently

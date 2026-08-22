@@ -119,7 +119,11 @@
   // `rechargeAbilities` (see nextTurn()) are set on the two monsters that have them --
   // Pack Tactics is still NOT automated below (it needs to know whether an ally is
   // adjacent to the same target, which attack() has no notion of); set advantage by hand
-  // when that condition is actually met.
+  // when that condition is actually met. `xp` (added Phase 14, 2026-08-22, one real SRD
+  // value per monster, page-checked the same way the stat blocks themselves were) is each
+  // monster's own published XP value -- read by `evaluateEncounterDifficulty()` below, not
+  // copied onto a spawned token (nothing about combat resolution needs it, only the
+  // difficulty calculator does, and it looks the name back up in this table directly).
   const STAT_BLOCKS = {
     // Hell Hound (added after checking the real campaign's session log -- its one actual
     // non-humanoid encounter, three hellhounds guarding a market entrance; everything else
@@ -136,24 +140,24 @@
     // which tokens that is, since this engine has no area-of-effect geometry (no cone/blast
     // shape against the grid), just the dice-and-save resolution once targets are named.
     hellhound: {
-      hp: 45, ac: 15, attackBonus: 5, damageDice: "4d6+1", initiativeMod: 1, speed: 50,
+      hp: 45, ac: 15, attackBonus: 5, damageDice: "4d6+1", initiativeMod: 1, speed: 50, xp: 700,
       abilityScores: { STR: 17, DEX: 12, CON: 14, INT: 6, WIS: 13, CHA: 6 },
       rechargeAbilities: { "Fire Breath": { rechargeMin: 5, available: true } }
     },
     goblin: {
-      hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", damageType: "slashing", initiativeMod: 2, speed: 30,
+      hp: 7, ac: 15, attackBonus: 4, damageDice: "1d6+2", damageType: "slashing", initiativeMod: 2, speed: 30, xp: 50,
       abilityScores: { STR: 8, DEX: 14, CON: 10, INT: 10, WIS: 8, CHA: 8 }
     },
     orc: {
-      hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", damageType: "slashing", initiativeMod: 1, speed: 30,
+      hp: 15, ac: 13, attackBonus: 5, damageDice: "1d12+3", damageType: "slashing", initiativeMod: 1, speed: 30, xp: 100,
       abilityScores: { STR: 16, DEX: 12, CON: 16, INT: 7, WIS: 11, CHA: 10 }
     },
     wolf: {
-      hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", damageType: "piercing", initiativeMod: 2, speed: 40,
+      hp: 11, ac: 13, attackBonus: 4, damageDice: "2d4+2", damageType: "piercing", initiativeMod: 2, speed: 40, xp: 50,
       abilityScores: { STR: 12, DEX: 15, CON: 12, INT: 3, WIS: 12, CHA: 6 }
     },
     bandit: {
-      hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", damageType: "slashing", initiativeMod: 1, speed: 30,
+      hp: 11, ac: 12, attackBonus: 3, damageDice: "1d6+1", damageType: "slashing", initiativeMod: 1, speed: 30, xp: 25,
       abilityScores: { STR: 11, DEX: 12, CON: 12, INT: 10, WIS: 10, CHA: 10 }
     },
     // Regeneration (10 HP at the start of its turn "unless it took acid or fire damage
@@ -172,6 +176,7 @@
       // full ability block, since the two were clearly meant to be the same number.
       initiativeMod: 1,
       speed: 30,
+      xp: 1800,
       abilityScores: { STR: 18, DEX: 13, CON: 20, INT: 7, WIS: 9, CHA: 7 },
       regeneration: { amount: 10 },
       attacks: [
@@ -183,7 +188,7 @@
     // Vulnerability to bludgeoning damage IS modeled now that damage types are tracked --
     // resistance/vulnerability/immunity checks against a token's damageVulnerabilities list.
     skeleton: {
-      hp: 13, ac: 13, attackBonus: 4, damageDice: "1d6+2", damageType: "piercing", initiativeMod: 2, speed: 30,
+      hp: 13, ac: 13, attackBonus: 4, damageDice: "1d6+2", damageType: "piercing", initiativeMod: 2, speed: 30, xp: 50,
       abilityScores: { STR: 10, DEX: 14, CON: 15, INT: 6, WIS: 8, CHA: 5 },
       damageVulnerabilities: ["bludgeoning"]
     },
@@ -193,14 +198,14 @@
     // machinery it already runs, even though damage type itself is now tracked; apply it by
     // hand.
     zombie: {
-      hp: 22, ac: 8, attackBonus: 3, damageDice: "1d6+1", damageType: "bludgeoning", initiativeMod: -2, speed: 20,
+      hp: 22, ac: 8, attackBonus: 3, damageDice: "1d6+1", damageType: "bludgeoning", initiativeMod: -2, speed: 20, xp: 50,
       abilityScores: { STR: 13, DEX: 6, CON: 16, INT: 3, WIS: 6, CHA: 5 }
     },
     // Ghoul's Claws (the second Multiattack hit) also inflict paralysis on a failed CON
     // save (elves immune) -- not automated, since there's no per-attack rider mechanic here;
     // issue a separate saving_throw + toggle_condition("Paralyzed") by hand if it hits.
     ghoul: {
-      hp: 22, ac: 12, attackBonus: 2, damageDice: "2d6+2", initiativeMod: 2, speed: 30,
+      hp: 22, ac: 12, attackBonus: 2, damageDice: "2d6+2", initiativeMod: 2, speed: 30, xp: 200,
       abilityScores: { STR: 13, DEX: 15, CON: 10, INT: 7, WIS: 10, CHA: 6 },
       attacks: [
         { name: "Bite", attackBonus: 2, damageDice: "2d6+2", damageType: "piercing" },
@@ -208,11 +213,11 @@
       ]
     },
     ogre: {
-      hp: 59, ac: 11, attackBonus: 6, damageDice: "2d8+4", damageType: "bludgeoning", initiativeMod: -1, speed: 40,
+      hp: 59, ac: 11, attackBonus: 6, damageDice: "2d8+4", damageType: "bludgeoning", initiativeMod: -1, speed: 40, xp: 450,
       abilityScores: { STR: 19, DEX: 8, CON: 16, INT: 5, WIS: 7, CHA: 7 }
     },
     owlbear: {
-      hp: 59, ac: 13, attackBonus: 7, damageDice: "1d10+5", initiativeMod: 1, speed: 40,
+      hp: 59, ac: 13, attackBonus: 7, damageDice: "1d10+5", initiativeMod: 1, speed: 40, xp: 700,
       abilityScores: { STR: 20, DEX: 12, CON: 17, INT: 3, WIS: 12, CHA: 7 },
       attacks: [
         { name: "Beak", attackBonus: 7, damageDice: "1d10+5", damageType: "piercing" },
@@ -220,7 +225,7 @@
       ]
     },
     worg: {
-      hp: 26, ac: 13, attackBonus: 5, damageDice: "2d6+3", damageType: "piercing", initiativeMod: 1, speed: 50,
+      hp: 26, ac: 13, attackBonus: 5, damageDice: "2d6+3", damageType: "piercing", initiativeMod: 1, speed: 50, xp: 100,
       abilityScores: { STR: 16, DEX: 13, CON: 13, INT: 7, WIS: 11, CHA: 8 }
     },
     // Bite RAW deals two damage types in one hit (1d8+3 piercing plus 2d8 poison) plus a
@@ -230,22 +235,22 @@
     // the poisoned-on-hit rider isn't automated for the same reason ghoul's paralysis rider
     // isn't.
     "giant spider": {
-      hp: 26, ac: 14, attackBonus: 5, damageDice: "3d8+4", initiativeMod: 3, speed: 30,
+      hp: 26, ac: 14, attackBonus: 5, damageDice: "3d8+4", initiativeMod: 3, speed: 30, xp: 200,
       abilityScores: { STR: 14, DEX: 16, CON: 12, INT: 2, WIS: 11, CHA: 4 }
     },
     cultist: {
-      hp: 9, ac: 12, attackBonus: 3, damageDice: "1d6+1", damageType: "slashing", initiativeMod: 1, speed: 30,
+      hp: 9, ac: 12, attackBonus: 3, damageDice: "1d6+1", damageType: "slashing", initiativeMod: 1, speed: 30, xp: 25,
       abilityScores: { STR: 11, DEX: 12, CON: 10, INT: 10, WIS: 11, CHA: 10 }
     },
     guard: {
-      hp: 11, ac: 16, attackBonus: 3, damageDice: "1d6+1", damageType: "piercing", initiativeMod: 1, speed: 30,
+      hp: 11, ac: 16, attackBonus: 3, damageDice: "1d6+1", damageType: "piercing", initiativeMod: 1, speed: 30, xp: 25,
       abilityScores: { STR: 13, DEX: 12, CON: 12, INT: 10, WIS: 11, CHA: 10 }
     },
     // The SRD Priest also has Channel Divinity/Spiritual Weapon-style spellcasting -- not
     // modeled here, same "melee stat line only" simplification noted where STAT_BLOCKS is
     // introduced above; only its Mace attack is represented.
     priest: {
-      hp: 27, ac: 13, attackBonus: 2, damageDice: "1d6", damageType: "bludgeoning", initiativeMod: 0, speed: 30,
+      hp: 27, ac: 13, attackBonus: 2, damageDice: "1d6", damageType: "bludgeoning", initiativeMod: 0, speed: 30, xp: 450,
       abilityScores: { STR: 10, DEX: 10, CON: 12, INT: 13, WIS: 16, CHA: 13 }
     },
     // The eight below (Phase 13, 2026-08-22) were transcribed directly from the System
@@ -260,7 +265,7 @@
     // bear-kin/bear-spirit motif per the paired DnD repo's session log, and a genuine gap:
     // no beast-type monster existed in STAT_BLOCKS at all before these two).
     "brown bear": {
-      hp: 34, ac: 11, attackBonus: 5, damageDice: "1d8+4", damageType: "piercing", initiativeMod: 0, speed: 40,
+      hp: 34, ac: 11, attackBonus: 5, damageDice: "1d8+4", damageType: "piercing", initiativeMod: 0, speed: 40, xp: 200,
       abilityScores: { STR: 19, DEX: 10, CON: 16, INT: 2, WIS: 13, CHA: 7 },
       attacks: [
         { name: "Bite", attackBonus: 5, damageDice: "1d8+4", damageType: "piercing" },
@@ -268,19 +273,19 @@
       ]
     },
     "dire wolf": {
-      hp: 37, ac: 14, attackBonus: 5, damageDice: "2d6+3", damageType: "piercing", initiativeMod: 2, speed: 50,
+      hp: 37, ac: 14, attackBonus: 5, damageDice: "2d6+3", damageType: "piercing", initiativeMod: 2, speed: 50, xp: 200,
       abilityScores: { STR: 17, DEX: 15, CON: 15, INT: 3, WIS: 12, CHA: 7 }
     },
     bugbear: {
-      hp: 27, ac: 16, attackBonus: 4, damageDice: "2d8+2", damageType: "piercing", initiativeMod: 2, speed: 30,
+      hp: 27, ac: 16, attackBonus: 4, damageDice: "2d8+2", damageType: "piercing", initiativeMod: 2, speed: 30, xp: 200,
       abilityScores: { STR: 15, DEX: 14, CON: 13, INT: 8, WIS: 11, CHA: 9 }
     },
     hobgoblin: {
-      hp: 11, ac: 18, attackBonus: 3, damageDice: "1d8+1", damageType: "slashing", initiativeMod: 1, speed: 30,
+      hp: 11, ac: 18, attackBonus: 3, damageDice: "1d8+1", damageType: "slashing", initiativeMod: 1, speed: 30, xp: 100,
       abilityScores: { STR: 13, DEX: 12, CON: 12, INT: 10, WIS: 10, CHA: 9 }
     },
     gnoll: {
-      hp: 22, ac: 15, attackBonus: 4, damageDice: "1d4+2", damageType: "piercing", initiativeMod: 1, speed: 30,
+      hp: 22, ac: 15, attackBonus: 4, damageDice: "1d4+2", damageType: "piercing", initiativeMod: 1, speed: 30, xp: 100,
       abilityScores: { STR: 14, DEX: 12, CON: 11, INT: 6, WIS: 10, CHA: 7 }
     },
     // Incorporeal Movement and Sunlight Sensitivity aren't modeled (same "no per-attack/
@@ -289,7 +294,7 @@
     // 50 ft. hover -- this engine has one speed field, not a per-mode set, same
     // simplification every other flier here already uses).
     specter: {
-      hp: 22, ac: 12, attackBonus: 4, damageDice: "3d6", damageType: "necrotic", initiativeMod: 2, speed: 50,
+      hp: 22, ac: 12, attackBonus: 4, damageDice: "3d6", damageType: "necrotic", initiativeMod: 2, speed: 50, xp: 200,
       abilityScores: { STR: 1, DEX: 14, CON: 11, INT: 10, WIS: 10, CHA: 11 },
       damageResistances: ["acid", "cold", "fire", "lightning", "thunder"],
       damageImmunities: ["necrotic", "poison"]
@@ -300,7 +305,7 @@
     // Invisibility (its other real tools) aren't modeled either, same "melee stat line
     // only" simplification the SRD Priest note above already documents.
     imp: {
-      hp: 10, ac: 13, attackBonus: 5, damageDice: "1d4+3", damageType: "piercing", initiativeMod: 3, speed: 20,
+      hp: 10, ac: 13, attackBonus: 5, damageDice: "1d4+3", damageType: "piercing", initiativeMod: 3, speed: 20, xp: 200,
       abilityScores: { STR: 6, DEX: 17, CON: 13, INT: 11, WIS: 12, CHA: 14 },
       damageResistances: ["cold"],
       damageImmunities: ["fire", "poison"]
@@ -311,7 +316,7 @@
     // "model the default Multiattack, not every optional variant" precedent Troll/Ghoul/
     // Owlbear already set.
     veteran: {
-      hp: 58, ac: 17, attackBonus: 5, damageDice: "1d8+3", damageType: "slashing", initiativeMod: 1, speed: 30,
+      hp: 58, ac: 17, attackBonus: 5, damageDice: "1d8+3", damageType: "slashing", initiativeMod: 1, speed: 30, xp: 700,
       abilityScores: { STR: 16, DEX: 13, CON: 14, INT: 10, WIS: 11, CHA: 10 },
       attacks: [
         { name: "Longsword", attackBonus: 5, damageDice: "1d8+3", damageType: "slashing" },
@@ -326,6 +331,154 @@
     hp: 10, ac: 13, attackBonus: 3, damageDice: "1d8+1", initiativeMod: 2, speed: 30,
     abilityScores: { STR: 10, DEX: 10, CON: 10, INT: 10, WIS: 10, CHA: 10 }
   };
+
+  // DMG "XP Thresholds by Character Level" table (Chapter 3, Combat Encounter Difficulty),
+  // transcribed directly from the Dungeon Master's Guide PDF at I:\DND\Core Rulebooks
+  // rather than approximated -- Phase 14's roadmap note flagged "how strictly to follow
+  // the DMG's budget math vs. a looser approximation" as an open question; having the
+  // real table on hand settled it in favor of the real thing. Keyed by character level
+  // 1-20 (not 0-indexed); each entry is that one character's own XP budget per difficulty
+  // tier, added up across the whole party by evaluateEncounterDifficulty() below.
+  const XP_THRESHOLDS_BY_LEVEL = {
+    1: { easy: 25, medium: 50, hard: 75, deadly: 100 },
+    2: { easy: 50, medium: 100, hard: 150, deadly: 200 },
+    3: { easy: 75, medium: 150, hard: 225, deadly: 400 },
+    4: { easy: 125, medium: 250, hard: 375, deadly: 500 },
+    5: { easy: 250, medium: 500, hard: 750, deadly: 1100 },
+    6: { easy: 300, medium: 600, hard: 900, deadly: 1400 },
+    7: { easy: 350, medium: 750, hard: 1100, deadly: 1700 },
+    8: { easy: 450, medium: 900, hard: 1400, deadly: 2100 },
+    9: { easy: 550, medium: 1100, hard: 1600, deadly: 2400 },
+    10: { easy: 600, medium: 1200, hard: 1900, deadly: 2800 },
+    11: { easy: 800, medium: 1600, hard: 2400, deadly: 3600 },
+    12: { easy: 1000, medium: 2000, hard: 3000, deadly: 4500 },
+    13: { easy: 1100, medium: 2200, hard: 3400, deadly: 5100 },
+    14: { easy: 1250, medium: 2500, hard: 3800, deadly: 5700 },
+    15: { easy: 1400, medium: 2800, hard: 4300, deadly: 6400 },
+    16: { easy: 1600, medium: 3200, hard: 4800, deadly: 7200 },
+    17: { easy: 2000, medium: 3900, hard: 5900, deadly: 8800 },
+    18: { easy: 2100, medium: 4200, hard: 6300, deadly: 9500 },
+    19: { easy: 2400, medium: 4900, hard: 7300, deadly: 10900 },
+    20: { easy: 2800, medium: 5700, hard: 8500, deadly: 12700 }
+  };
+
+  // DMG "Encounter Multipliers" table -- the more monsters in a fight, the more attack
+  // rolls happen per round regardless of their individual XP total, so the DMG scales the
+  // monsters' combined XP up before comparing it to the party's thresholds. Ladder order
+  // matters: the "Party Size" adjustment just below steps one tier up/down this same list.
+  const ENCOUNTER_MULTIPLIER_STEPS = [0.5, 1, 1.5, 2, 2.5, 3, 4];
+  function baseEncounterMultiplier(monsterCount) {
+    if (monsterCount <= 1) return 1;
+    if (monsterCount === 2) return 1.5;
+    if (monsterCount <= 6) return 2;
+    if (monsterCount <= 10) return 2.5;
+    if (monsterCount <= 14) return 3;
+    return 4;
+  }
+  // DMG "Party Size" note: the multiplier table above assumes 3-5 PCs. Fewer than 3 steps
+  // UP one tier (a small party feels a given monster count's action economy harder); 6 or
+  // more steps DOWN one tier (a big party spreads the same monster actions thinner) --
+  // including the DMG's own explicit example, a 0.5 multiplier for a single monster against
+  // 6+ PCs, which only exists via this adjustment (0.5 is never a monster-count tier on its
+  // own). Clamped at both ends of ENCOUNTER_MULTIPLIER_STEPS rather than stepping past it.
+  function encounterMultiplier(monsterCount, partySize) {
+    const base = baseEncounterMultiplier(monsterCount);
+    const index = ENCOUNTER_MULTIPLIER_STEPS.indexOf(base);
+    if (partySize > 0 && partySize < 3) return ENCOUNTER_MULTIPLIER_STEPS[Math.min(index + 1, ENCOUNTER_MULTIPLIER_STEPS.length - 1)];
+    if (partySize >= 6) return ENCOUNTER_MULTIPLIER_STEPS[Math.max(index - 1, 0)];
+    return base;
+  }
+
+  // A hero token's true class level isn't tracked as a single number anywhere else in this
+  // engine -- ability scores/spellcasting/resources all vary too much per class to reduce
+  // to one field, the same reason this file's other "trust the sheet" fields exist. Hit
+  // Dice pools come closest for free: one Hit Die per character level is a fixed 5e rule
+  // (RAW) regardless of class or multiclass split, unlike everything else on a sheet, so
+  // summing every hitDice[dieType].total already gives the real total character level with
+  // no new extraction needed. A hero token with no Hit Dice pool at all (added by hand, or
+  // imported without the campaign markdown's Class & Level line) falls back to level 1 --
+  // a documented simplification, not a guess at their actual level; edit the party
+  // manually in that case by giving that token a Hit Dice entry.
+  function partyLevelFromToken(token) {
+    if (!token.hitDice) return 1;
+    const total = Object.values(token.hitDice).reduce((sum, pool) => sum + (pool.total || 0), 0);
+    return clampNumber(total || 1, 1, 20);
+  }
+
+  // Looks a monster token's XP up the same way spawnMonster's own baseName does -- strip a
+  // spawned instance's trailing number, lowercase, look up STAT_BLOCKS. A monster token
+  // that didn't come from spawnMonster (an imported NPC sheet, a hand-added or renamed
+  // token, a monster spawned before this field existed) has no known XP and is reported
+  // separately by evaluateEncounterDifficulty() rather than guessed -- the same "don't
+  // invent a number" rule the damage resistance/vulnerability fields already follow.
+  function monsterXpFromToken(token) {
+    const key = token.name.trim().toLowerCase().replace(/\s+\d+$/, "");
+    const stats = STAT_BLOCKS[key];
+    return stats && typeof stats.xp === "number" ? stats.xp : null;
+  }
+
+  // The actual DMG "Evaluating Encounter Difficulty" procedure (steps 1-5, Chapter 3),
+  // read straight off the current encounter -- hero-type tokens on the active map are the
+  // party, monster-type tokens are the encounter, both filtered to exclude anything already
+  // `dead` (a defeated monster shouldn't count toward difficulty; a `dying`-but-not-dead
+  // hero still does, since they're still part of the party's resource pool this is
+  // measuring against). Deliberately a read-only query, not a {state, message} mutator --
+  // same shape as effectiveSpeed()/damageTypeModifier()/savingThrowBonus() above, since
+  // nothing here changes state.
+  function evaluateEncounterDifficulty(state) {
+    const tokens = tokensOnCurrentMap(state).filter((token) => !token.dead);
+    const heroes = tokens.filter((token) => token.type === "hero");
+    const monsters = tokens.filter((token) => token.type === "monster");
+
+    const partyLevels = heroes.map(partyLevelFromToken);
+    const thresholds = partyLevels.reduce(
+      (totals, level) => {
+        const row = XP_THRESHOLDS_BY_LEVEL[level];
+        return {
+          easy: totals.easy + row.easy,
+          medium: totals.medium + row.medium,
+          hard: totals.hard + row.hard,
+          deadly: totals.deadly + row.deadly
+        };
+      },
+      { easy: 0, medium: 0, hard: 0, deadly: 0 }
+    );
+
+    const unratedMonsterNames = [];
+    const monsterXpTotal = monsters.reduce((sum, token) => {
+      const xp = monsterXpFromToken(token);
+      if (xp === null) {
+        unratedMonsterNames.push(token.name);
+        return sum;
+      }
+      return sum + xp;
+    }, 0);
+
+    const multiplier = encounterMultiplier(monsters.length, heroes.length);
+    const adjustedXp = Math.round(monsterXpTotal * multiplier);
+
+    // "Compare XP... the threshold that equals the adjusted XP value determines the
+    // encounter's difficulty. If there's no match, use the closest threshold that is
+    // lower than the adjusted XP value" -- checked highest-first so an adjusted XP past
+    // Deadly still reports Deadly (there's no tier above it), not falls through unmatched.
+    let difficulty = "Trivial";
+    if (thresholds.deadly > 0 && adjustedXp >= thresholds.deadly) difficulty = "Deadly";
+    else if (thresholds.hard > 0 && adjustedXp >= thresholds.hard) difficulty = "Hard";
+    else if (thresholds.medium > 0 && adjustedXp >= thresholds.medium) difficulty = "Medium";
+    else if (thresholds.easy > 0 && adjustedXp >= thresholds.easy) difficulty = "Easy";
+
+    return {
+      heroCount: heroes.length,
+      partyLevels,
+      thresholds,
+      monsterCount: monsters.length,
+      monsterXpTotal,
+      multiplier,
+      adjustedXp,
+      unratedMonsterNames,
+      difficulty
+    };
+  }
 
   const initialState = {
     mapName: "",
@@ -2745,6 +2898,8 @@
     dropConcentration,
     currentGrid,
     effectiveSpeed,
+    encounterMultiplier,
+    evaluateEncounterDifficulty,
     feetPerSquare,
     findNearestWallIndex,
     gridMoveCost,
@@ -2786,6 +2941,7 @@
     tokensLeavingReach,
     tokensOnCurrentMap,
     toggleCondition,
-    updateToken
+    updateToken,
+    XP_THRESHOLDS_BY_LEVEL
   };
 })();
