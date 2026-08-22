@@ -263,12 +263,37 @@
       }
     });
 
+    // Mirrors ui/app.js's handleDMBridgeAccessLost() -- a revoked/lost File System Access
+    // permission mid-poll used to fail completely silently here (fixed on the main board in
+    // Phase 12, but this page's own independent DM-bridge connection was never updated to
+    // match): readBridgeJson() throws NotAllowedError, checkResponse()'s old catch-all just
+    // returned and kept polling forever, leaving "Saving..." on screen indefinitely until
+    // the 20s timeout fired with the wrong, misleading message ("make sure watch.js is
+    // running" -- it is; the permission just expired). This stops the poll timer, clears the
+    // now-invalid handle, and shows the same "click Connect to re-grant access" recovery
+    // message the startup restore path already uses.
+    function handleAccessLost(err) {
+      console.warn("[Campaign OS] Lost access to the dm-bridge folder:", err.message || err);
+      const handleName = dirHandle?.name;
+      dirHandle = null;
+      clearInterval(pollTimer);
+      pollTimer = null;
+      clearTimeout(timeoutHandle);
+      pendingId = null;
+      saveButton.disabled = false;
+      connectButton.hidden = false;
+      status.textContent = handleName
+        ? `Connection to "${handleName}" was lost -- click Connect to re-grant access.`
+        : "Connection lost -- click Connect to re-grant access.";
+    }
+
     async function checkResponse() {
       if (!dirHandle || !pendingId) return;
       let response;
       try {
         response = await readBridgeJson("update-character-response.json");
-      } catch {
+      } catch (err) {
+        if (err.name === "NotAllowedError") handleAccessLost(err);
         return;
       }
       if (!response || response.id !== pendingId) return;

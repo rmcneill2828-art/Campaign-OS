@@ -724,8 +724,12 @@
 
     const fmt = (n) => n.toLocaleString();
     const activeTier = result.difficulty.toLowerCase();
+    // Which of the four threshold cells was actually hit is otherwise only a
+    // border/box-shadow difference (.difficulty-threshold-active) -- aria-current marks the
+    // same cell as "the current one in this set" for a screen reader, the ARIA-correct
+    // pairing for exactly this pattern (one highlighted item among several peers).
     const thresholdsHtml = DIFFICULTY_TIERS.map((tier) => `
-      <div class="difficulty-threshold ${tier === activeTier ? "difficulty-threshold-active" : ""}">
+      <div class="difficulty-threshold ${tier === activeTier ? "difficulty-threshold-active" : ""}"${tier === activeTier ? ' aria-current="true"' : ""}>
         <dt>${DIFFICULTY_TIER_LABELS[tier]}</dt>
         <dd>${fmt(result.thresholds[tier])}</dd>
       </div>
@@ -2545,7 +2549,12 @@
     } catch {
       parsed = null;
     }
-    if (!parsed || !Array.isArray(parsed.entries)) {
+    // The type check specifically catches a Map Library export fed into this input (or
+    // vice versa below) -- both export shapes are structurally compatible
+    // ({displayName, image[, aspectRatio]}), so without this a cross-library import would
+    // silently succeed and cross-contaminate the wrong library instead of being rejected
+    // the same clear way genuinely malformed JSON already is.
+    if (!parsed || parsed.type !== "campaign-os-token-library" || !Array.isArray(parsed.entries)) {
       commandResult.textContent = "Import failed: not a valid token library file.";
       return;
     }
@@ -2591,7 +2600,9 @@
     } catch {
       parsed = null;
     }
-    if (!parsed || !Array.isArray(parsed.entries)) {
+    // See the token library import handler's identical comment above -- same
+    // cross-library-type check, same reason.
+    if (!parsed || parsed.type !== "campaign-os-map-library" || !Array.isArray(parsed.entries)) {
       commandResult.textContent = "Import failed: not a valid map library file.";
       return;
     }
@@ -2995,9 +3006,16 @@
   function renderAmbienceControls() {
     ambienceTrackName.textContent = ambienceCurrentName || "Nothing playing";
     const playing = Boolean(ambienceAudio);
+    const showingResume = playing && ambienceAudio.paused;
     ambiencePauseResume.disabled = !playing;
     ambienceStop.disabled = !playing;
-    ambiencePauseResume.textContent = playing && ambienceAudio.paused ? "Resume" : "Pause";
+    ambiencePauseResume.textContent = showingResume ? "Resume" : "Pause";
+    // Same toggle-button treatment Phase 12 gave Ruler/Template/Walls/Adjust Grid --
+    // unlike those, though, "pressed" here doesn't track the button's own currently
+    // displayed verb (that's what the label text is for); it tracks whether ambience is
+    // actually audible right now, independent of the idle/disabled state before anything's
+    // ever played.
+    ambiencePauseResume.setAttribute("aria-pressed", String(playing && !ambienceAudio.paused));
   }
 
   async function playAmbienceEntry(entry) {
@@ -3060,10 +3078,23 @@
     }
   }
 
-  ambiencePauseResume.addEventListener("click", () => {
+  ambiencePauseResume.addEventListener("click", async () => {
     if (!ambienceAudio) return;
-    if (ambienceAudio.paused) ambienceAudio.play();
-    else ambienceAudio.pause();
+    if (ambienceAudio.paused) {
+      // Unlike playAmbienceEntry/playStingEntry (both already try/caught), this bare
+      // .play() call had no error handling -- a rejected resume (an autoplay-policy
+      // re-trigger, a device error) was an unhandled promise rejection with no user-visible
+      // message. Only flip the button label on an actual successful resume, same
+      // "commit only once real" pattern playAmbienceEntry uses.
+      try {
+        await ambienceAudio.play();
+      } catch (err) {
+        commandResult.textContent = `Couldn't resume playback: ${err.message}`;
+        return;
+      }
+    } else {
+      ambienceAudio.pause();
+    }
     renderAmbienceControls();
   });
 

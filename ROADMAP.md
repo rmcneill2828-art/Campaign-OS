@@ -554,3 +554,88 @@ poison/a zombie's Undead Fortitude riders aren't automated, exhaustion level 4's
 isn't applied automatically, and Blinded doesn't auto-fail a sight-dependent check. None of these
 block real play -- same "handle it by hand" spirit as Troll's Regeneration before it got wired up.
 Not promoted to a phase above; revisit only if one of them causes real friction at the table.
+
+---
+
+# Fresh review pass (2026-08-22, after Phases 11-14 + both halves of Phase 10)
+
+Health check first: 358/358 tests passing before this pass, CI green on every commit since the
+last review, working tree clean, git/DnD-repo state unchanged. A subagent audited the six
+features that shipped since the last full review (library export/import, the four small fixes,
+the 8 new monsters, Encounter Difficulty, player-editable HP, Music Folder/Ambience) specifically
+for convention drift, new accessibility gaps, new error-handling gaps, dead code, and test
+coverage gaps -- not just re-reading CLAUDE.md's own prose and assuming it's still accurate.
+Cross-checked its two sharpest claims independently before trusting them: recomputed the
+disabled-button contrast ratio by hand (confirmed ~2.56:1 at the old opacity, not the ~3.1:1 an
+earlier comment claimed -- the fix itself was already correct, only that one number was off), and
+diffed `STAT_BLOCKS` keys / `monsterPattern` / `MONSTER_LIST` programmatically (all three: the
+same 24 names, no drift). All findings below were fixed and verified live in this same pass, not
+just logged for later.
+
+## Fixed this pass
+
+- [x] **`character.html`'s own DM-bridge connection silently failed on a lost permission --
+  the exact bug class Phase 12 had just fixed on the main board, reintroduced one feature later
+  by a second, independent implementation that was never updated to match.** `ui/character.js`'s
+  `checkResponse()` caught every `readBridgeJson()` error identically and just returned, so a
+  revoked folder permission mid-save left "Saving..." on screen forever, the poll `setInterval`
+  failing silently every 1.5s, until a misleading 20s timeout message ("make sure watch.js is
+  running" -- it was; the permission had just expired). New `handleAccessLost()` mirrors
+  `ui/app.js`'s `handleDMBridgeAccessLost()`: on `NotAllowedError` specifically, stops the poll
+  timer, clears the stale handle, re-shows the Connect button, and shows the same "click Connect
+  to re-grant access" message the startup restore path already uses. Verified live (OPFS
+  stand-in, `getFileHandle()` patched to throw `NotAllowedError` mid-poll, same technique Phase
+  12's own version of this test used).
+- [x] **Token Library / Map Library import didn't check the export's own `type` field.** Both
+  export shapes are structurally compatible (`{displayName, image[, aspectRatio]}`), so feeding a
+  Map Library export into the Token Library's import input (or vice versa) silently succeeded and
+  cross-contaminated the wrong library instead of being rejected the way genuinely malformed JSON
+  already was. Both import handlers (`ui/app.js`) now check `parsed.type` against the exact
+  string their own export writes. Verified live: exported a real Map Library entry, fed the file
+  into the Token Library's import input, confirmed rejection with the library left empty.
+- [x] **Ambience Pause/Resume's `.play()` call on Resume had no error handling** -- an unhandled
+  promise rejection on a failed resume (autoplay-policy re-trigger, device error), unlike
+  `playAmbienceEntry`/`playStingEntry` right next to it, both already try/caught. Now awaited,
+  and the button label only flips to "Pause" on an actual successful resume rather than assuming
+  success -- same "commit only once real" pattern the rest of this feature already uses.
+- [x] **Two new stateful controls from this pass were missing the same ARIA treatment Phase 12
+  gave the map toolbar's toggles.** Ambience Pause/Resume now sets `aria-pressed` (true = audibly
+  playing right now, independent of the button's own currently-displayed verb). The Encounter
+  Difficulty panel's active threshold cell -- previously a border/box-shadow-only signal -- now
+  also gets `aria-current="true"`, the ARIA-correct pairing for "the current one among several
+  peer cells" rather than reusing `aria-pressed` for something it doesn't mean here. Verified
+  live for both.
+- [x] **A shipped code comment's own contrast-ratio claim was wrong.** `ui/styles.css`'s
+  `button:disabled` comment said the pre-Phase-12 `opacity: 0.45` computed to "~3.1:1" -- actually
+  recomputing it against the real `--muted`/`--panel-strong` hex values gives ~2.56:1. The fix
+  itself (0.75 -> ~4.5:1, independently reconfirmed) was already correct; only the "before" number
+  in the comment was off. Corrected, with a note on why.
+- [x] **Four boundary/claim gaps in the test suite** the review specifically flagged as
+  "correct today, but nothing would catch it if it drifted": `encounterMultiplier` at exactly 3
+  monsters (the low edge of the DMG's "3-6" row) and exactly 3 party members (the low edge of the
+  unadjusted 3-5 range); a `dying`-but-not-dead hero still counting toward the party (only `dead`
+  was actually tested before); and `partyLevelFromToken`'s upper clamp at a total Hit Dice count
+  above 20. 4 new tests (362 total).
+
+## Noted, not changed
+
+- **`XP_THRESHOLDS_BY_LEVEL` is exported but has zero external call sites** (only
+  `evaluateEncounterDifficulty()`'s own internal reference uses it). Left alone rather than
+  trimmed -- this codebase's own prior audit found several similarly harmless dead exports
+  (`ABILITY_KEYS`, `hasCondition`, `savingThrowBonus`, `tokensLeavingReach`, others) and left all
+  of them in place too; removing this one and not those would be an inconsistent standard applied
+  after the fact, not a real problem being solved.
+- **`HP_LINE_PATTERN` is duplicated, byte-identical today, between `dm-bridge/watch.js` and
+  `ui/character.js`, with no automated test catching future drift between the two copies.**
+  Confirmed identical by direct diff this pass. Considered adding a dedicated cross-file
+  drift-detector test, but that would be new test *infrastructure* this codebase doesn't
+  otherwise use anywhere -- every other duplicated reference list here (`MONSTER_LIST`,
+  `CONDITION_LIST`, `DAMAGE_TYPE_LIST`, `SKILL_LIST`) is kept in sync by manual audit during a
+  review pass like this one, not by a committed parity test. Matching that existing convention
+  rather than introducing a one-off exception for this specific duplicate; re-verify by hand at
+  the next review pass, the same way this one just did.
+- **Neither Token/Map Library export/import nor the four small accessibility/reliability fixes
+  ever got a dedicated CLAUDE.md writeup** (only Encounter Difficulty, player-editable HP, and
+  Music Folder/Ambience did, among the six features reviewed this pass) -- noted so it's not
+  mistaken for an oversight of this review specifically; both are still fully covered by their
+  own commit messages and this file's own Phase 11/12 sections above.

@@ -2968,3 +2968,33 @@ test("encounterMultiplier follows the DMG table, and steps one tier per the Part
   assert.equal(CampaignOS.encounterMultiplier(1, 6), 0.5);
   assert.equal(CampaignOS.encounterMultiplier(2, 6), 1);
 });
+
+// 2026-08-22 fresh-review pass: the two tier-boundary values the DMG's own tables pivot on
+// (exactly 3 monsters, the low edge of the "3-6" row; exactly 3 party members, the low edge
+// of the "party size" rule's unadjusted 3-5 range) were verified by hand during that review
+// but had no regression guard -- these two lock them in.
+test("encounterMultiplier at exactly 3 monsters uses the 3-6 tier (x2), not the 2-monster tier below it", () => {
+  assert.equal(CampaignOS.encounterMultiplier(3, 4), 2);
+});
+
+test("encounterMultiplier at exactly 3 party members is unadjusted -- the low edge of the DMG's own assumed 3-5 range", () => {
+  assert.equal(CampaignOS.encounterMultiplier(1, 3), 1);
+  assert.equal(CampaignOS.encounterMultiplier(6, 3), 2);
+});
+
+test("evaluateEncounterDifficulty still counts a dying-but-not-dead hero -- only `dead` excludes, not `dying`", () => {
+  let state = stateOnMap("Urskelde");
+  state = heroToken(state, "PC1", 5);
+  state = CampaignOS.addToken(state, { name: "PC2", type: "hero", hitDice: { d8: { total: 5, current: 5 } } }).state;
+  state.tokens.find((t) => t.name === "PC2").dying = { successes: 1, failures: 0, stable: false };
+  const result = CampaignOS.evaluateEncounterDifficulty(state);
+  assert.equal(result.heroCount, 2);
+  assert.deepEqual(result.partyLevels.sort(), [5, 5]);
+});
+
+test("evaluateEncounterDifficulty clamps a hero's derived level at 20, even with more total Hit Dice than that", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Epic Hero", type: "hero", hitDice: { d12: { total: 25, current: 25 } } }).state;
+  const result = CampaignOS.evaluateEncounterDifficulty(state);
+  assert.deepEqual(result.partyLevels, [20]);
+});
