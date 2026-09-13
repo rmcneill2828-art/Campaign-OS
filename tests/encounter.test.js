@@ -699,6 +699,38 @@ test("rollAbilityCheck reports the token as not found without changing state", (
   assert.deepEqual(result.state, state);
 });
 
+test("rollInitiative rolls 1d20 + the token's real DEX modifier and sets initiative directly", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Wren", abilityScores: { DEX: 14 } });
+  const result = withRandom([0.45], () => CampaignOS.rollInitiative(withToken, token.id));
+  // floor(0.45*20)+1 = 10, DEX 14 -> +2 modifier.
+  assert.match(result.message, /Wren rolls initiative: 10 \+2 = 12\./);
+  const updated = CampaignOS.tokensOnCurrentMap(result.state).find((item) => item.id === token.id);
+  assert.equal(updated.initiative, 12);
+});
+
+test("rollInitiative treats a missing DEX score as a +0 modifier rather than throwing", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Mystery" });
+  const result = withRandom([0], () => CampaignOS.rollInitiative(withToken, token.id));
+  assert.match(result.message, /Mystery rolls initiative: 1 \+0 = 1\./);
+});
+
+test("rollInitiative reports the token as not found without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const result = CampaignOS.rollInitiative(state, "nonexistent-id");
+  assert.match(result.message, /token was not found/);
+  assert.deepEqual(result.state, state);
+});
+
+test("updateToken sets initiative directly with no roll -- the mechanism the 2D app's own plain number field uses", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk" });
+  const updated = CampaignOS.updateToken(withToken, token.id, { initiative: 17 });
+  const found = CampaignOS.tokensOnCurrentMap(updated).find((item) => item.id === token.id);
+  assert.equal(found.initiative, 17);
+});
+
 test("addToken normalizes ability scores -- clamping out-of-range values and leaving unset abilities absent", () => {
   const state = stateOnMap("Urskelde");
   const { token } = CampaignOS.addToken(state, { name: "Odd Scores", abilityScores: { STR: 99, DEX: -5, CON: 14 } });
