@@ -480,6 +480,27 @@ test("applyActions logs an unresolved-name message for a drop_concentration targ
   assert.match(messages[0], /could not find "Nonexistent Goblin" to drop concentration/);
 });
 
+test("applyActions resolves a remove_token action, deleting the token entirely", () => {
+  let state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Summoned Wolf" });
+  state = withToken;
+
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "remove_token", target: "Summoned Wolf" }
+  ]);
+
+  assert.match(messages[0], /Summoned Wolf is removed from the encounter\./);
+  assert.ok(!next.tokens.some((t) => t.id === token.id), "token should no longer exist in state");
+});
+
+test("applyActions logs an unresolved-name message for a remove_token targeting an unknown token", () => {
+  const state = stateOnMap("Urskelde");
+  const { messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "remove_token", target: "Nonexistent Goblin" }
+  ]);
+  assert.match(messages[0], /could not find "Nonexistent Goblin" to remove/);
+});
+
 test("applyActions folds a concentration-check result into apply_damage's combined message", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Sael", hp: 50, maxHp: 50, abilityScores: { CON: 10 } }).state;
