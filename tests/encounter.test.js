@@ -602,6 +602,27 @@ test("rollSavingThrow reports the token as not found without changing state", ()
   assert.deepEqual(result.state, state);
 });
 
+test("rollSavingThrow grants advantage when explicitly declared (a Bless-like effect, not derived from the token's own state)", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Wren", abilityScores: { WIS: 10 } });
+  const result = withRandom([0.9, 0.1], () =>
+    CampaignOS.rollSavingThrow(withToken, token.id, "wisdom", 10, { advantage: true })
+  );
+  assert.match(result.message, /rolls a WIS save: 19 \(advantage: 19, 3\)/);
+});
+
+test("rollSavingThrow's explicit advantage cancels out an automatic disadvantage source into a normal roll", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", abilityScores: { DEX: 10 } });
+  withToken = CampaignOS.toggleCondition(withToken, token.id, "Restrained");
+  const result = withRandom([0.5], () =>
+    CampaignOS.rollSavingThrow(withToken, token.id, "dex", 10, { advantage: true })
+  );
+  // A single roll, no "(advantage: ...)"/"(disadvantage: ...)" suffix -- RAW: they cancel,
+  // neither silently wins.
+  assert.match(result.message, /rolls a DEX save: 11 /);
+});
+
 test("rollAbilityCheck rolls a named skill using the governing ability's modifier when no stated skill bonus exists", () => {
   const state = stateOnMap("Urskelde");
   const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael", abilityScores: { WIS: 16 } });
@@ -650,6 +671,25 @@ test("rollAbilityCheck forces disadvantage for a Poisoned token", () => {
   withToken = CampaignOS.toggleCondition(withToken, token.id, "Poisoned");
   const result = withRandom([0.9, 0.1], () => CampaignOS.rollAbilityCheck(withToken, token.id, "Perception", 10));
   assert.match(result.message, /poisoned disadvantage: 19, 3/);
+});
+
+test("rollAbilityCheck grants advantage when explicitly declared (a Bless-like effect, not derived from the token's own state)", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Sael", abilityScores: { WIS: 10 } });
+  const result = withRandom([0.9, 0.1], () =>
+    CampaignOS.rollAbilityCheck(withToken, token.id, "Perception", 10, { advantage: true })
+  );
+  assert.match(result.message, /rolls a Perception check: 19 \(advantage: 19, 3\)/);
+});
+
+test("rollAbilityCheck's explicit advantage cancels out an automatic disadvantage source into a normal roll", () => {
+  const state = stateOnMap("Urskelde");
+  let { state: withToken, token } = CampaignOS.addToken(state, { name: "Darkhawk", abilityScores: { WIS: 10 } });
+  withToken = CampaignOS.setExhaustion(withToken, token.id, 1).state;
+  const result = withRandom([0.5], () =>
+    CampaignOS.rollAbilityCheck(withToken, token.id, "Perception", 10, { advantage: true })
+  );
+  assert.match(result.message, /rolls a Perception check: 11 /);
 });
 
 test("rollAbilityCheck reports the token as not found without changing state", () => {
