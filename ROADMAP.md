@@ -639,3 +639,34 @@ just logged for later.
   Music Folder/Ambience did, among the six features reviewed this pass) -- noted so it's not
   mistaken for an oversight of this review specifically; both are still fully covered by their
   own commit messages and this file's own Phase 11/12 sections above.
+
+## `add_token` DM-bridge action -- 2026-09-16
+
+A real gap, found from the 3D client's side (see Campaign-OS-3D's own
+ROADMAP.md): there was no way to create a new hero/NPC token in a live
+session other than `ui/app.js`'s own unbridged "Add Token" UI (calls
+`addToken()` directly in-browser) or hand-editing a state file --
+`spawn_monster` only covers the fixed SRD monster list, and no
+`add_token`/`add_hero` case existed in `dmBridge.js` at all, so neither
+narration nor the 3D client's `/action` API could create one.
+
+Added `add_token` to `engine/dmBridge.js`'s `applyAction()` (deliberately
+generic -- `tokenType` "hero" or "monster", matching `addToken()`'s own
+default -- for a custom hero, ally, or non-SRD monster; `spawn_monster`
+remains the right action for a real SRD monster, since it gets an
+accurate stat block this can't provide) and a matching `isValidAction()`
+case + `SYSTEM_PROMPT` documentation + usage guidance in
+`dm-bridge/watch.js`, so narration introducing a new named character
+actually creates a resolvable token instead of leaving `findTokenByName`
+with nothing to find on a later action. `abilityScores` is accepted and
+passed through -- a hero created this way needs real ability scores or
+every saving throw/check/attack roll silently shows a flat +0, exactly
+the bug Phase 3 already found and fixed once for the seeded Darkhawk/Wren
+seed data; not something to reintroduce here.
+
+4 new tests in `tests/dmBridge.test.js` (375/375 passing): a full-fidelity
+add with ability scores, an all-defaults add (name only), a `tokenType:
+"monster"` add, and confirming the new token is real and resolvable
+afterward. Synced to Campaign-OS-3D (`engine/dmBridge.js` and
+`dm-bridge/watch.js` both confirmed byte-identical via direct `diff`
+after copying) with its own integration test added there too.

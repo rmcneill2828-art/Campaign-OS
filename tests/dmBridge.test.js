@@ -501,6 +501,46 @@ test("applyActions logs an unresolved-name message for a remove_token targeting 
   assert.match(messages[0], /could not find "Nonexistent Goblin" to remove/);
 });
 
+// add_token's counterpart to remove_token above -- covers the case that used to have no
+// bridge path at all: a narration-introduced hero/NPC that isn't a listed SRD monster.
+test("applyActions resolves an add_token action, creating a real hero token with real ability scores", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    {
+      type: "add_token", name: "Barbarian", tokenType: "hero", hp: 45, maxHp: 45, ac: 15,
+      abilityScores: { STR: 18, DEX: 12, CON: 16, INT: 8, WIS: 10, CHA: 10 }
+    }
+  ]);
+  assert.match(messages[0], /Barbarian joins the encounter\./);
+  const token = next.tokens.find((t) => t.name === "Barbarian");
+  assert.ok(token, "the new token should actually exist in state");
+  assert.equal(token.type, "hero");
+  assert.equal(token.hp, 45);
+  assert.equal(token.maxHp, 45);
+  assert.equal(token.ac, 15);
+  assert.deepEqual(token.abilityScores, { STR: 18, DEX: 12, CON: 16, INT: 8, WIS: 10, CHA: 10 });
+});
+
+test("applyActions resolves an add_token action with no fields beyond a name using addToken()'s own generic defaults", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: next } = CampaignOSDMBridge.applyActions(state, [{ type: "add_token", name: "Mysterious Stranger" }]);
+  const token = next.tokens.find((t) => t.name === "Mysterious Stranger");
+  assert.ok(token);
+  assert.equal(token.type, "hero", "tokenType defaults to hero when omitted");
+  assert.equal(token.hp, 10);
+  assert.equal(token.ac, 12);
+});
+
+test("applyActions resolves an add_token action with tokenType \"monster\"", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: next } = CampaignOSDMBridge.applyActions(state, [
+    { type: "add_token", name: "Shopkeeper", tokenType: "monster", hp: 8, maxHp: 8, ac: 10 }
+  ]);
+  const token = next.tokens.find((t) => t.name === "Shopkeeper");
+  assert.ok(token);
+  assert.equal(token.type, "monster");
+});
+
 test("applyActions folds a concentration-check result into apply_damage's combined message", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Sael", hp: 50, maxHp: 50, abilityScores: { CON: 10 } }).state;
