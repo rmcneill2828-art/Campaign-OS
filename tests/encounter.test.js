@@ -1245,6 +1245,7 @@ test("applyDamage zeroes damage outright for an immune token and reports it, wit
   const result = CampaignOS.applyDamage(withToken, token.id, 20, { damageType: "poison" });
   assert.equal(result.state.tokens[0].hp, 10);
   assert.equal(result.message, "Golem is immune to poison -- no damage taken.");
+  assert.equal(result.appliedAmount, 0);
   assert.equal(result.state.tokens[0].dying, undefined);
 });
 
@@ -1254,6 +1255,7 @@ test("applyDamage halves (rounded down) damage for a resistant token and reports
   const result = CampaignOS.applyDamage(withToken, token.id, 7, { damageType: "fire" });
   assert.equal(result.state.tokens[0].hp, 17); // 7 halved, rounded down to 3
   assert.equal(result.message, "Fire Elemental resists fire -- damage reduced to 3.");
+  assert.equal(result.appliedAmount, 3);
 });
 
 test("applyDamage doubles damage for a vulnerable token and reports the adjusted amount", () => {
@@ -1262,6 +1264,19 @@ test("applyDamage doubles damage for a vulnerable token and reports the adjusted
   const result = CampaignOS.applyDamage(withToken, token.id, 6, { damageType: "bludgeoning" });
   assert.equal(result.state.tokens[0].hp, 8); // 6 doubled to 12
   assert.equal(result.message, "Skeleton 1 is vulnerable to bludgeoning -- damage increased to 12.");
+  assert.equal(result.appliedAmount, 12);
+});
+
+test("applyDamage rejects negative and non-finite amounts without changing state", () => {
+  const state = stateOnMap("Urskelde");
+  const { state: withToken, token } = CampaignOS.addToken(state, { name: "Golem", hp: 10, maxHp: 10 });
+  const negative = CampaignOS.applyDamage(withToken, token.id, -5);
+  assert.equal(negative.state, withToken);
+  assert.match(negative.message, /finite, non-negative/);
+  const invalid = CampaignOS.applyDamage(withToken, token.id, Infinity);
+  assert.equal(invalid.state, withToken);
+  assert.match(invalid.message, /finite, non-negative/);
+  assert.equal(CampaignOS.applyHealing(withToken, token.id, -5), withToken);
 });
 
 test("applyDamage applies the full amount, with no modifier message, when no damageType is given", () => {

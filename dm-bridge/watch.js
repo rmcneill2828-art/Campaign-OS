@@ -373,10 +373,10 @@ function isValidAction(action) {
         && (action.disadvantage === undefined || typeof action.disadvantage === "boolean")
         && (action.actionType === undefined || action.actionType === "action" || action.actionType === "bonusAction" || action.actionType === "reaction");
     case "apply_damage":
-      return typeof action.target === "string" && Number.isFinite(action.amount)
+      return typeof action.target === "string" && Number.isFinite(action.amount) && action.amount >= 0
         && (action.damageType === undefined || DAMAGE_TYPE_LIST.includes(String(action.damageType).toLowerCase()));
     case "apply_healing":
-      return typeof action.target === "string" && Number.isFinite(action.amount);
+      return typeof action.target === "string" && Number.isFinite(action.amount) && action.amount >= 0;
     case "toggle_condition":
       return typeof action.target === "string" && CONDITION_LIST.includes(action.condition);
     case "set_visibility":
@@ -535,9 +535,23 @@ function buildPrompt(request) {
   return lines.join("\n");
 }
 
+function writeJsonAtomically(filePath, value, callback) {
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFile(tempPath, JSON.stringify(value, null, 2), "utf8", (writeErr) => {
+    if (writeErr) {
+      callback(writeErr);
+      return;
+    }
+    fs.rename(tempPath, filePath, (renameErr) => {
+      if (renameErr) fs.unlink(tempPath, () => {});
+      callback(renameErr);
+    });
+  });
+}
+
 function writeResponse(id, payload) {
   const response = { id, respondedAt: new Date().toISOString(), ...payload };
-  fs.writeFile(responsePath, JSON.stringify(response, null, 2), (err) => {
+  writeJsonAtomically(responsePath, response, (err) => {
     if (err) console.error("[dm-bridge] failed to write response.json:", err.message);
     else console.log(`[dm-bridge] responded to ${id}: ${payload.message}`);
   });
@@ -607,9 +621,15 @@ function handleRequest(request) {
       return;
     }
 
+    const actions = Array.isArray(inner.actions) ? inner.actions : [];
+    const rejectedActions = actions
+      .map((action, index) => ({ action, index }))
+      .filter(({ action }) => !isValidAction(action))
+      .map(({ action, index }) => ({ index, type: action?.type || null, reason: "Unsupported or invalid action shape." }));
     writeResponse(request.id, {
       message: typeof inner.message === "string" ? inner.message : "",
-      actions: Array.isArray(inner.actions) ? inner.actions.filter(isValidAction) : []
+      actions: actions.filter(isValidAction),
+      rejectedActions
     });
   });
 }
@@ -698,7 +718,7 @@ function buildEndSessionPrompt(request) {
 
 function writeEndSessionResponse(id, ok, message) {
   const response = { id, ok, message, respondedAt: new Date().toISOString() };
-  fs.writeFile(endSessionResponsePath, JSON.stringify(response, null, 2), (err) => {
+  writeJsonAtomically(endSessionResponsePath, response, (err) => {
     if (err) console.error("[dm-bridge] failed to write end-session-response.json:", err.message);
     else console.log(`[dm-bridge] end-session ${id} ${ok ? "succeeded" : "failed"}: ${message}`);
   });
@@ -796,7 +816,7 @@ let lastProcessedCreateCharacterId = primeLastProcessedId(createCharacterRequest
 
 function writeCreateCharacterResponse(id, ok, message) {
   const response = { id, ok, message, respondedAt: new Date().toISOString() };
-  fs.writeFile(createCharacterResponsePath, JSON.stringify(response, null, 2), (err) => {
+  writeJsonAtomically(createCharacterResponsePath, response, (err) => {
     if (err) console.error("[dm-bridge] failed to write create-character-response.json:", err.message);
     else console.log(`[dm-bridge] create-character ${id} ${ok ? "succeeded" : "failed"}: ${message}`);
   });
@@ -915,7 +935,7 @@ function findCombatSectionRange(lines) {
 
 function writeUpdateCharacterResponse(id, ok, message) {
   const response = { id, ok, message, respondedAt: new Date().toISOString() };
-  fs.writeFile(updateCharacterResponsePath, JSON.stringify(response, null, 2), (err) => {
+  writeJsonAtomically(updateCharacterResponsePath, response, (err) => {
     if (err) console.error("[dm-bridge] failed to write update-character-response.json:", err.message);
     else console.log(`[dm-bridge] update-character ${id} ${ok ? "succeeded" : "failed"}: ${message}`);
   });

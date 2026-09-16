@@ -56,7 +56,7 @@
         // "takes N damage" line plus whatever it reports still goes through appendLog below
         // as one combined entry, same as attack()/castSpell() fold it into their own message.
         const result = window.CampaignOS.applyDamage(state, target.id, action.amount, { damageType: action.damageType });
-        const baseMessage = `${target.name} takes ${action.amount} damage.`;
+        const baseMessage = `${target.name} takes ${result.appliedAmount} damage.`;
         return {
           state: result.state,
           message: result.message ? `${baseMessage} ${result.message}` : baseMessage,

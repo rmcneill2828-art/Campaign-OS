@@ -460,6 +460,11 @@ already have installed and authenticated on this machine:
    script asks Claude what should happen and writes `dm-bridge/response.json`; the app polls for
    it and applies the result.
 
+The bridge rejects malformed actions instead of applying them; the app displays a warning when
+Claude returns any rejected actions. Damage and healing amounts must be finite and non-negative,
+and resistance/vulnerability/immunity is reflected in the reported damage amount. Response files
+are written atomically so the browser does not read a partially-written JSON document.
+
 Costs are billed to whatever the `claude` CLI on your machine is authenticated with (API key or
 subscription) -- there's no separate key stored in the browser. The first call in a while is the
 most expensive (Claude Code's own tool/system scaffolding has to populate the prompt cache);
@@ -519,8 +524,10 @@ happened. The **End Session** button (below the command box) closes that loop:
    existing narrative style (the same kind of prose you'd get writing it by hand with Claude Code)
    rather than dumping a raw combat log.
 
-**This only ever edits files -- it never runs git, never commits, never pushes.** Review the
-diff in the campaign repo afterward the same way you would any other edit, and commit it
+**This only ever edits files -- it never runs git, never commits, never pushes.** End Session grants
+the local Claude CLI file-edit access under `DND_REPO_PATH`; point that variable at a dedicated
+campaign checkout rather than a broad directory, and review the resulting diff before committing.
+Review the diff in the campaign repo afterward the same way you would any other edit, and commit it
 yourself when you're happy with it. If `DND_REPO_PATH` isn't set (or doesn't exist), End Session
 fails with a message telling you so rather than guessing at a path or writing anywhere unexpected.
 

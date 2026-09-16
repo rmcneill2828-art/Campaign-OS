@@ -115,6 +115,29 @@ test("applyActions applies damage, healing, and condition toggles by token name"
   assert.equal(messages.length, 3);
 });
 
+test("applyActions reports adjusted damage rather than the raw amount", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, {
+    name: "Fire Elemental", hp: 20, maxHp: 20, damageResistances: ["fire"]
+  }).state;
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "apply_damage", target: "Fire Elemental", amount: 7, damageType: "fire" }
+  ]);
+  assert.equal(next.tokens[0].hp, 17);
+  assert.match(messages[0], /takes 3 damage/);
+  assert.doesNotMatch(messages[0], /takes 7 damage/);
+});
+
+test("applyActions rejects invalid negative damage without changing HP", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addToken(state, { name: "Mara Fenn", hp: 50, maxHp: 50 }).state;
+  const { state: next, messages } = CampaignOSDMBridge.applyActions(state, [
+    { type: "apply_damage", target: "Mara Fenn", amount: -4 }
+  ]);
+  assert.equal(next.tokens[0].hp, 50);
+  assert.match(messages[0], /finite, non-negative/);
+});
+
 test("applyActions applies set_visibility both ways", () => {
   let state = stateOnMap("Urskelde");
   state = CampaignOS.addToken(state, { name: "Ambush Troll" }).state;

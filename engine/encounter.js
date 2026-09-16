@@ -1134,6 +1134,10 @@
           if (result.damageTotal > 0) {
             const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical, damageType: options.damageType });
             nextState = damageResult.state;
+            if (damageResult.appliedAmount !== result.damageTotal) {
+              messages[messages.length - 1] = messages[messages.length - 1]
+                .replace(`Damage ${result.damageTotal}`, `Damage ${damageResult.appliedAmount}`);
+            }
             if (damageResult.message) messages.push(damageResult.message);
           }
         } else {
@@ -1217,7 +1221,7 @@
       if (amount > 0) {
         const damageResult = applyDamage(nextState, target.id, amount, { damageType: options.damageType });
         nextState = damageResult.state;
-        messages.push(`${target.name} takes ${amount} damage (${damage.notation}).${damageResult.message ? ` ${damageResult.message}` : ""}`);
+        messages.push(`${target.name} takes ${damageResult.appliedAmount} damage (${damage.notation}).${damageResult.message ? ` ${damageResult.message}` : ""}`);
       } else {
         messages.push(`${target.name} takes no damage.`);
       }
@@ -1527,16 +1531,20 @@
   }
 
   function applyDamage(state, tokenId, amount, options = {}) {
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount < 0) {
+      return { state, message: "Damage failed: amount must be a finite, non-negative number.", appliedAmount: 0 };
+    }
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
-    if (!token) return { state: nextState, message: null };
+    if (!token) return { state: nextState, message: null, appliedAmount: 0 };
 
     const modifier = damageTypeModifier(token, options.damageType);
     const adjustedAmount = modifier === "immune" ? 0
-      : modifier === "resistant" ? Math.floor(amount / 2)
-      : modifier === "vulnerable" ? amount * 2
-      : amount;
-    const modifierNote = modifier && amount > 0
+      : modifier === "resistant" ? Math.floor(numericAmount / 2)
+      : modifier === "vulnerable" ? numericAmount * 2
+      : numericAmount;
+    const modifierNote = modifier && numericAmount > 0
       ? modifier === "immune" ? `${token.name} is immune to ${options.damageType} -- no damage taken.`
         : modifier === "resistant" ? `${token.name} resists ${options.damageType} -- damage reduced to ${adjustedAmount}.`
         : `${token.name} is vulnerable to ${options.damageType} -- damage increased to ${adjustedAmount}.`
@@ -1544,7 +1552,7 @@
 
     const wasAboveZero = token.hp > 0;
     token.hp = clampNumber(token.hp - adjustedAmount, 0, token.maxHp);
-    if (adjustedAmount <= 0) return { state: nextState, message: modifierNote };
+    if (adjustedAmount <= 0) return { state: nextState, message: modifierNote, appliedAmount: 0 };
 
     const amountTaken = adjustedAmount;
     const messages = modifierNote ? [modifierNote] : [];
@@ -1591,7 +1599,7 @@
       }
     }
 
-    return { state: nextState, message: messages.length ? messages.join(" ") : null };
+    return { state: nextState, message: messages.length ? messages.join(" ") : null, appliedAmount: amountTaken };
   }
 
   // Rolls a death saving throw for a token currently making them: a flat d20, no modifiers.
@@ -1689,10 +1697,12 @@
   // token flagged dead, that's a deliberate narrative revival (Revivify, Raise Dead, DM
   // ruling), not something this engine should second-guess.
   function applyHealing(state, tokenId, amount) {
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount < 0) return state;
     const nextState = clone(state);
     const token = nextState.tokens.find((item) => item.id === tokenId);
     if (token) {
-      token.hp = clampNumber(token.hp + amount, 0, token.maxHp);
+      token.hp = clampNumber(token.hp + numericAmount, 0, token.maxHp);
       if (token.hp > 0) {
         delete token.dying;
         delete token.dead;
@@ -2432,6 +2442,10 @@
       if (result.damageTotal > 0) {
         const damageResult = applyDamage(nextState, target.id, result.damageTotal, { critical: result.isCritical, damageType: profile.damageType });
         nextState = damageResult.state;
+        if (damageResult.appliedAmount !== result.damageTotal) {
+          messages[messages.length - 1] = messages[messages.length - 1]
+            .replace(`Damage ${result.damageTotal}`, `Damage ${damageResult.appliedAmount}`);
+        }
         if (damageResult.message) messages.push(damageResult.message);
       }
 

@@ -3267,7 +3267,10 @@
     saveEncounter();
     actionMessages.forEach(recordTranscript);
     recordTranscript(response.message);
-    commandResult.textContent = response.message || "(The DM assistant didn't include a narration.)";
+    const rejectedCount = Array.isArray(response.rejectedActions) ? response.rejectedActions.length : 0;
+    commandResult.textContent = rejectedCount
+      ? `${response.message || "(The DM assistant didn't include a narration.)"} Warning: ${rejectedCount} invalid action${rejectedCount === 1 ? "" : "s"} were rejected.`
+      : (response.message || "(The DM assistant didn't include a narration.)");
     render();
   }
 
