@@ -2287,27 +2287,50 @@
   map.addEventListener("mousedown", startTemplateDrag);
 
   // Walls: click-drag between two grid VERTICES (not cells -- see gridVertexFromEvent) draws
-  // a wall while toggleWalls is active; clicking near an existing wall without dragging
-  // removes it instead (start/end vertex land on the same spot, so no genuine drag happened).
-  // Unlike the ruler/template overlays, walls are real persisted map data (state.maps[name]
-  // .walls, via engine/encounter.js's addWall/removeWall/clearWalls) that feeds line-of-sight
-  // in the player window -- so they're always visible on the DM's own map (renderWallsOverlay
-  // doesn't check wallsModeOn), the same way the grid itself always shows regardless of
-  // whether Map Settings is open; only DRAWING/DELETING requires the toggle to be on.
+  // a wall while toggleWalls is active; clicking near an existing wall without dragging far
+  // enough to count as a real drag removes it instead (see endWallDrag's own
+  // movedEnoughToBeADrag). Unlike the ruler/template overlays, walls are real persisted map
+  // data (state.maps[name].walls, via engine/encounter.js's addWall/removeWall/clearWalls)
+  // that feeds line-of-sight in the player window -- so they're always visible on the DM's
+  // own map (renderWallsOverlay doesn't check wallsModeOn), the same way the grid itself
+  // always shows regardless of whether Map Settings is open; only DRAWING/DELETING requires
+  // the toggle to be on.
   let wallsModeOn = false;
   let wallDragStart = null;
   let wallDragPreviewEl = null;
   let wallsOverlayEl = null;
+
+  // Snaps to the nearest grid CORNER by default -- correct for the overwhelming
+  // majority of hand-authored maps (a rectangular room's walls really do sit on
+  // grid lines). A real published map's art doesn't reliably follow that grid
+  // itself, though (confirmed tracing Redbrand Hideout, see ROADMAP.md's
+  // "Freeform map annotation" entry) -- several real walls end partway across a
+  // square. Holding Shift while placing an endpoint (checked independently per
+  // point, not just once for the whole drag, so a mostly-square wall can still
+  // snap at one end and land precisely at the other) switches that one point to
+  // the nearest 20th of a square instead of the nearest whole one -- effectively
+  // freeform (a 20th of a typical 5ft square is 3 inches) while still avoiding
+  // storing meaningless 15-digit floating-point noise straight from the mouse
+  // event. Neither addWall()/hasLineOfSight() in the shared engine nor
+  // GridManager.gd's wall-mesh generation on the 3D side require integer
+  // vertices -- both already do plain float arithmetic, confirmed by reading
+  // them, so this needed no changes anywhere else.
+  const PRECISE_SNAP_DIVISIONS = 20;
 
   function gridVertexFromEvent(event) {
     const rect = map.getBoundingClientRect();
     const grid = currentGrid();
     const fracX = ((event.clientX - rect.left) / rect.width) * grid.columns;
     const fracY = ((event.clientY - rect.top) / rect.height) * grid.rows;
-    return {
-      x: Math.min(grid.columns, Math.max(0, Math.round(fracX))),
-      y: Math.min(grid.rows, Math.max(0, Math.round(fracY)))
-    };
+    const clampedX = Math.min(grid.columns, Math.max(0, fracX));
+    const clampedY = Math.min(grid.rows, Math.max(0, fracY));
+    if (event.shiftKey) {
+      return {
+        x: Math.round(clampedX * PRECISE_SNAP_DIVISIONS) / PRECISE_SNAP_DIVISIONS,
+        y: Math.round(clampedY * PRECISE_SNAP_DIVISIONS) / PRECISE_SNAP_DIVISIONS
+      };
+    }
+    return { x: Math.round(clampedX), y: Math.round(clampedY) };
   }
 
   function vertexPercent(vertex, grid) {
@@ -2375,7 +2398,16 @@
     if (!start) return;
 
     const end = gridVertexFromEvent(event);
-    if (start.x === end.x && start.y === end.y) {
+    // Exact equality worked when every point snapped to an integer vertex (no
+    // real mouse movement meant no rounding could ever separate start/end), but
+    // a Shift-precise point is a plain float straight from the mouse position --
+    // an ordinary hand-jitter click (a couple of screen pixels) can easily move
+    // it more than one PRECISE_SNAP_DIVISIONS step (0.05 squares) without any
+    // drag being intended. 0.15 squares is generous enough to absorb that same
+    // jitter reliably while still well under the length of any real wall
+    // segment anyone would intentionally draw.
+    const movedEnoughToBeADrag = Math.hypot(end.x - start.x, end.y - start.y) > 0.15;
+    if (!movedEnoughToBeADrag) {
       const index = window.CampaignOS.findNearestWallIndex(state, state.mapName, start.x, start.y, 0.35);
       if (index === null) return;
       updateState(window.CampaignOS.removeWall(state, state.mapName, index));

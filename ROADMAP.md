@@ -670,3 +670,47 @@ add with ability scores, an all-defaults add (name only), a `tokenType:
 afterward. Synced to Campaign-OS-3D (`engine/dmBridge.js` and
 `dm-bridge/watch.js` both confirmed byte-identical via direct `diff`
 after copying) with its own integration test added there too.
+
+## Precise (non-grid-snapped) wall placement -- 2026-09-20
+
+Found tracing a real published map into Campaign-OS-3D (see its own
+ROADMAP.md's "Adventure map import"/"Freeform map annotation" entries):
+several of a real hand-painted dungeon's actual walls end partway across a
+square, not on a grid corner, but the Walls tool's `gridVertexFromEvent()`
+hard-rounded every click to the nearest whole vertex (`Math.round` on both
+axes) -- there was no way to place one exactly, only approximate it to the
+nearest corner.
+
+Checked directly before assuming this needed engine work: it didn't.
+`addWall(state, mapName, x1, y1, x2, y2)` stores whatever numbers it's
+given with no rounding, and `hasLineOfSight`'s `segmentsIntersect`/
+`orientation`/`onSegment` are plain float geometry -- nothing about the
+shared engine requires integer vertices, that's always been a UI
+convention, not a constraint. (Campaign-OS-3D's own `GridManager.gd` wall-
+mesh generation is the same story: `float(wall.get("x1", 0)) * cell_size`,
+no rounding.) So the fix is entirely local to this one function.
+
+`gridVertexFromEvent()` now checks `event.shiftKey`: unheld, behavior is
+unchanged (round to the nearest whole vertex -- still correct for the
+overwhelming majority of hand-authored/rectangular rooms); held, it snaps
+to the nearest 20th of a square instead (`PRECISE_SNAP_DIVISIONS = 20`) --
+effectively freeform (a 20th of a typical 5ft square is 3 real inches)
+while still avoiding storing meaningless 15-digit floating-point noise
+straight off the mouse event. Checked independently per endpoint (not
+once for the whole drag), so a mostly-square wall can snap cleanly at one
+end and land precisely at the other in the same drag.
+
+One knock-on fix needed: `endWallDrag`'s "was this a click-to-remove or a
+real drag" check used exact equality (`start.x === end.x && start.y ===
+end.y`), which only ever worked because snapping to a whole vertex made a
+still mouse produce bit-identical start/end points. A Shift-precise point
+is a raw float, so an ordinary hand-jitter click can move it a hair
+without any drag being intended -- exact equality would misread that as
+"draw a wall." Replaced with a distance threshold (`Math.hypot(...) >
+0.15` squares) generous enough to absorb real jitter while still well
+under any wall segment anyone would intentionally draw.
+
+No test added -- `ui/app.js`'s DOM/mouse-event code has never had
+automated coverage (confirmed: no test file references it), consistent
+with this project's existing browser-only-verified convention for this
+file. Manually verified in-browser by the user who found the original gap.

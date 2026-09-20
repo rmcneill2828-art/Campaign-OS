@@ -328,6 +328,9 @@ dependencies to install for the app itself. See Tests, below, for running the te
   -- kept in sync automatically while the DM's tab is open (see below)
 - Line of sight / walls: a **Walls** toggle in the map toolbar lets you click-drag a wall
   segment onto the map (click near an existing one, without dragging, to remove it instead);
+  each endpoint snaps to the nearest grid corner by default, or hold **Shift** while placing
+  one for precise (non-grid-snapped) placement -- useful for a real published map whose art
+  doesn't reliably follow the grid the way a hand-built room does.
   **Clear Walls** removes every wall on the current map at once. Walls block line of sight in
   the player window only -- a token not in line of sight of any hero-type token is left out of
   the player window's map and initiative list entirely (on top of, not instead of, manually
