@@ -714,3 +714,64 @@ No test added -- `ui/app.js`'s DOM/mouse-event code has never had
 automated coverage (confirmed: no test file references it), consistent
 with this project's existing browser-only-verified convention for this
 file. Manually verified in-browser by the user who found the original gap.
+
+## Doors tool -- 2026-09-20
+
+Added because guessing where doors go, from either side of the map-import
+pipeline, kept being wrong on Campaign-OS-3D's Redbrand Hideout import (see
+its own ROADMAP.md): first every wall gap was rendered as a door
+regardless of the source map's own artwork, then -- after the user caught
+real doors missing and fake ones present -- an image-by-image audit of the
+map's actual door icons against those gaps *still* mis-marked some
+(closing a couple of real doorways to solid wall). Both were attempts to
+reverse-engineer door placement after the fact from a wall list and/or a
+picture. The reliable fix is the same one walls themselves already went
+through: let the DM mark doors by hand, in this app, the same trusted way
+walls are drawn, instead of any tool inferring them.
+
+`engine/encounter.js` gained `addDoor`/`removeDoor`/`clearDoors`/
+`findNearestDoorIndex`, mirroring `addWall`/`removeWall`/`clearWalls`/
+`findNearestWallIndex` exactly (`state.maps[mapName].doors`, same
+`{x1,y1,x2,y2}` vertex-space shape). Doors deliberately never touch
+`hasLineOfSight` -- this engine still has no open/closed-door state, so
+what blocks sight is `walls`, full stop, unchanged. A door is purely an
+explicit "there's a doorway here" marker for a consumer (Campaign-OS-3D's
+`GridManager.gd`, already reading `map.doors` in this exact shape) to
+render a door model at, instead of inferring one from a wall gap.
+
+`ui/app.js` got a Doors tool that's a straight copy of the Walls tool's
+own interaction model -- same `gridVertexFromEvent()` (so Shift-precise
+placement works identically), same click-drag-to-add /
+click-without-dragging-far-enough-to-remove convention, same
+`findNearestDoorIndex`-based hit-testing -- rendered in its own gold color
+(`.doors-overlay`, `#d9a441`) so both overlays read clearly at once
+instead of doors being mistaken for more wall.
+
+One deliberate cross-tool behavior, not present between any other two
+tools in this app: drawing a wall on top of an existing door removes that
+door, and marking a door on top of an existing wall removes that wall
+(both check `findNearestDoorIndex`/`findNearestWallIndex` at the new
+segment's midpoint immediately after adding it). Without this, "replace a
+solid wall with a doorway" -- exactly the mistake that prompted this whole
+feature -- would still require a separate manual cleanup step the DM could
+forget, leaving a door model rendering inside solid rock that still blocks
+sight, or a wall silently re-blocking a marked door. The two tools staying independent otherwise (no shared "single active
+tool" gating -- Ruler/Template/Walls already don't enforce that between
+each other either, confirmed reading their toggle handlers, so Doors
+follows the same existing precedent rather than introducing new
+cross-tool exclusivity logic) is unchanged; only freshly-drawn segments
+trigger the other type's cleanup, never a bulk pass over existing data.
+
+Synced to Campaign-OS-3D via `sync-engine.sh` (source of truth for
+`engine/*.js` is this repo -- see that project's own copy of this
+script's header comment). Its `import-redbrand-hideout.js` no longer
+needs to hand-write `state.maps[name].doors` directly now that a real
+`CampaignOS.addDoor()` exists -- see that project's own ROADMAP.md for the
+follow-up pass that re-traces Redbrand Hideout's actual doors with this
+tool instead of guessing from map art a third time.
+
+4 new engine tests (`addDoor`/`removeDoor`/`clearDoors`, hit-testing, and
+one confirming a door never affects `hasLineOfSight` on its own -- only a
+real wall does). No UI test, matching the Walls tool's own precedent
+above (`ui/app.js` mouse-event code has no automated coverage in this
+project at all). 378/378 engine tests pass.

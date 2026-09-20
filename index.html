@@ -57,8 +57,10 @@
                 Width (ft)
                 <input id="templateWidth" type="number" min="5" step="5" value="5" aria-label="AoE template width in feet (Line only)">
               </label>
-              <button id="toggleWalls" type="button" aria-pressed="false" title="While on, click-drag to draw a wall (blocks line of sight in the player window); click near an existing wall to remove it instead. Hold Shift while placing an endpoint for precise (non-grid-snapped) placement, for a real map whose walls don't land exactly on grid corners. A map with no walls has no line-of-sight restriction at all.">Walls</button>
+              <button id="toggleWalls" type="button" aria-pressed="false" title="While on, click-drag to draw a wall (blocks line of sight in the player window); click near an existing wall to remove it instead. Hold Shift while placing an endpoint for precise (non-grid-snapped) placement, for a real map whose walls don't land exactly on grid corners. A map with no walls has no line-of-sight restriction at all. Drawing a wall over an existing door removes that door.">Walls</button>
               <button id="clearWalls" type="button" title="Removes every wall drawn on this map.">Clear Walls</button>
+              <button id="toggleDoors" type="button" aria-pressed="false" title="While on, click-drag to mark a doorway (shown in gold); click near an existing one to remove it instead. Same Shift-for-precise-placement as Walls. Doors are informational only -- they never block line of sight themselves, so also draw (or leave open) the wall gap they sit in. Marking a door over an existing wall removes that wall.">Doors</button>
+              <button id="clearDoors" type="button" title="Removes every door marked on this map.">Clear Doors</button>
               <button id="resetFog" type="button" title="Forgets every tile the party has explored on this map so far -- the player window will re-hide previously revealed terrain until heroes see it again. Only matters on a map with walls drawn (line of sight is what drives fog of war); a wall-free map has no fog to reset.">Reset Fog</button>
               <button id="mapSettingsToggle" type="button" aria-expanded="false" aria-controls="mapToolbarSecondary">Map Settings</button>
             </div>

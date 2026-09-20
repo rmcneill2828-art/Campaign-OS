@@ -345,6 +345,14 @@ dependencies to install for the app itself. See Tests, below, for running the te
   distance only, a deliberate first-cut simplification. The Claude DM bridge can draw or remove
   a wall too (`add_wall`/`remove_wall_near`), reserved for an actual narrated change to the map
   (a section of wall collapsing, a secret door) rather than something it does casually.
+- Doors: a **Doors** toggle right next to Walls works exactly the same way (click-drag to mark
+  one, click an existing one without dragging to remove it, Shift for precise placement) but
+  draws in gold instead of cream so the two overlays stay distinguishable. A door is purely
+  informational -- unlike a wall, it never blocks line of sight on its own, so drawing one
+  doesn't replace drawing (or leaving open) the wall gap it sits in; it only exists so a door's
+  location is explicit and hand-verified rather than guessed. **Clear Doors** removes every door
+  on the current map. Marking a door directly on top of an existing wall removes that wall (and
+  vice versa) so the two can't silently contradict each other.
 - Fog of war: on any map with walls drawn (see above -- walls are what make this mean anything;
   a wall-free map has none), the player window automatically tracks which tiles the party has
   ever seen. A tile is either never explored (hidden entirely), explored but not currently

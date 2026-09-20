@@ -543,6 +543,25 @@ h1 {
   stroke-dasharray: 6 4;
 }
 
+.doors-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.doors-overlay .walls-shape line {
+  stroke: #d9a441;
+  stroke-width: 4;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.doors-drag-preview .walls-shape line {
+  stroke: var(--accent);
+  stroke-dasharray: 6 4;
+}
+
 .grid-handle {
   position: absolute;
   z-index: 4;

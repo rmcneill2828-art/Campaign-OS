@@ -86,6 +86,8 @@
   const templateWidthInput = document.querySelector("#templateWidth");
   const toggleWalls = document.querySelector("#toggleWalls");
   const clearWallsButton = document.querySelector("#clearWalls");
+  const toggleDoors = document.querySelector("#toggleDoors");
+  const clearDoorsButton = document.querySelector("#clearDoors");
   const clearMapImage = document.querySelector("#clearMapImage");
   const mapSettingsToggle = document.querySelector("#mapSettingsToggle");
   const mapToolbarSecondary = document.querySelector("#mapToolbarSecondary");
@@ -618,6 +620,7 @@
     renderGridHandles();
     renderTemplateOverlay();
     renderWallsOverlay();
+    renderDoorsOverlay();
   }
 
   let lastRenderedMapImageValue = undefined;
@@ -2414,8 +2417,23 @@
       commandResult.textContent = "Wall removed.";
       return;
     }
-    updateState(window.CampaignOS.addWall(state, state.mapName, start.x, start.y, end.x, end.y));
-    commandResult.textContent = "Wall added -- blocks line of sight in the player window.";
+    let nextState = window.CampaignOS.addWall(state, state.mapName, start.x, start.y, end.x, end.y);
+    // A solid wall drawn directly over an existing door would silently defeat
+    // it (blocks line of sight again, and leaves a door model rendering
+    // inside solid rock on the 3D side) -- the DM's own act of drawing a wall
+    // there is strong evidence that spot should no longer be a doorway, so
+    // clear it automatically rather than leaving a stale door behind. Mirrors
+    // endDoorDrag's own auto-clear of an overlapping wall, below.
+    const midX = (start.x + end.x) / 2;
+    const midY = (start.y + end.y) / 2;
+    const overlappingDoorIndex = window.CampaignOS.findNearestDoorIndex(nextState, state.mapName, midX, midY, 0.25);
+    let message = "Wall added -- blocks line of sight in the player window.";
+    if (overlappingDoorIndex !== null) {
+      nextState = window.CampaignOS.removeDoor(nextState, state.mapName, overlappingDoorIndex);
+      message = "Wall added -- also removed the door underneath it.";
+    }
+    updateState(nextState);
+    commandResult.textContent = message;
   }
 
   map.addEventListener("mousedown", startWallDrag);
@@ -2432,6 +2450,113 @@
     if (!window.confirm(`Remove every wall drawn on ${state.mapName}? This can't be undone.`)) return;
     updateState(window.CampaignOS.clearWalls(state, state.mapName));
     commandResult.textContent = "Walls cleared.";
+  });
+
+  // Doors: same click-drag-between-two-vertices tool as Walls (same gridVertexFromEvent,
+  // same Shift-for-precise-placement, same click-without-dragging-far-enough-removes-instead
+  // convention), over a separate persisted list (state.maps[name].doors, via engine/
+  // encounter.js's addDoor/removeDoor/clearDoors) rendered in its own color so both overlays
+  // stay visually distinct at once. Unlike walls, doors never affect hasLineOfSight -- they're
+  // purely a marker for "there's a doorway here" that a 3D (or other) consumer renders a real
+  // door model at, replacing what used to be either "every wall gap is a door" or an
+  // image-by-image audit of the source map's own door icons against those gaps -- both tried,
+  // on Redbrand Hideout (see Campaign-OS-3D's ROADMAP.md), both got some wrong. This tool lets
+  // the DM mark real doors the same trusted, by-hand way walls themselves are already drawn.
+  //
+  // A door and a wall occupying the same spot would be a silent contradiction (the door model
+  // renders sitting inside solid rock that still blocks sight) -- endWallDrag and endDoorDrag
+  // each auto-clear the other's overlapping segment when one is freshly drawn, so "draw a door
+  // where a wall used to be" and "wall over a door" both just do the obviously-intended thing
+  // in one action instead of requiring the DM to separately clean up the leftover.
+  let doorsModeOn = false;
+  let doorDragStart = null;
+  let doorDragPreviewEl = null;
+  let doorsOverlayEl = null;
+
+  function renderDoorsOverlay() {
+    doorsOverlayEl?.remove();
+    doorsOverlayEl = null;
+    const doors = state.maps?.[state.mapName]?.doors;
+    if (!Array.isArray(doors) || !doors.length) return;
+    const grid = currentGrid();
+    const segments = doors.map((door) => [
+      vertexPercent({ x: door.x1, y: door.y1 }, grid),
+      vertexPercent({ x: door.x2, y: door.y2 }, grid)
+    ]);
+    doorsOverlayEl = wallsSvg("doors-overlay", segments);
+    map.appendChild(doorsOverlayEl);
+  }
+
+  function updateDoorDragPreview(start, current) {
+    doorDragPreviewEl?.remove();
+    const grid = currentGrid();
+    doorDragPreviewEl = wallsSvg(
+      "doors-overlay doors-drag-preview",
+      [[vertexPercent(start, grid), vertexPercent(current, grid)]]
+    );
+    map.appendChild(doorDragPreviewEl);
+  }
+
+  function startDoorDrag(event) {
+    if (!doorsModeOn || event.button !== 0 || event.target.closest(".token") || !state.mapName) return;
+    event.preventDefault();
+    doorDragStart = gridVertexFromEvent(event);
+    updateDoorDragPreview(doorDragStart, doorDragStart);
+    window.addEventListener("mousemove", dragDoor);
+    window.addEventListener("mouseup", endDoorDrag);
+  }
+
+  function dragDoor(event) {
+    if (!doorDragStart) return;
+    updateDoorDragPreview(doorDragStart, gridVertexFromEvent(event));
+  }
+
+  function endDoorDrag(event) {
+    const start = doorDragStart;
+    doorDragStart = null;
+    doorDragPreviewEl?.remove();
+    doorDragPreviewEl = null;
+    window.removeEventListener("mousemove", dragDoor);
+    window.removeEventListener("mouseup", endDoorDrag);
+    if (!start) return;
+
+    const end = gridVertexFromEvent(event);
+    const movedEnoughToBeADrag = Math.hypot(end.x - start.x, end.y - start.y) > 0.15;
+    if (!movedEnoughToBeADrag) {
+      const index = window.CampaignOS.findNearestDoorIndex(state, state.mapName, start.x, start.y, 0.35);
+      if (index === null) return;
+      updateState(window.CampaignOS.removeDoor(state, state.mapName, index));
+      commandResult.textContent = "Door removed.";
+      return;
+    }
+
+    let nextState = window.CampaignOS.addDoor(state, state.mapName, start.x, start.y, end.x, end.y);
+    const midX = (start.x + end.x) / 2;
+    const midY = (start.y + end.y) / 2;
+    const overlappingWallIndex = window.CampaignOS.findNearestWallIndex(nextState, state.mapName, midX, midY, 0.25);
+    let message = "Door added.";
+    if (overlappingWallIndex !== null) {
+      nextState = window.CampaignOS.removeWall(nextState, state.mapName, overlappingWallIndex);
+      message = "Door added -- also removed the wall segment underneath it.";
+    }
+    updateState(nextState);
+    commandResult.textContent = message;
+  }
+
+  map.addEventListener("mousedown", startDoorDrag);
+
+  toggleDoors.addEventListener("click", () => {
+    doorsModeOn = !doorsModeOn;
+    toggleDoors.textContent = doorsModeOn ? "Doors On" : "Doors";
+    toggleDoors.classList.toggle("active-toggle", doorsModeOn);
+    toggleDoors.setAttribute("aria-pressed", String(doorsModeOn));
+  });
+
+  clearDoorsButton.addEventListener("click", () => {
+    if (!state.mapName) return;
+    if (!window.confirm(`Remove every door marked on ${state.mapName}? This can't be undone.`)) return;
+    updateState(window.CampaignOS.clearDoors(state, state.mapName));
+    commandResult.textContent = "Doors cleared.";
   });
 
   document.querySelector("#resetFog").addEventListener("click", () => {

@@ -2644,6 +2644,46 @@ test("findNearestWallIndex finds the closest wall within the given distance, nul
   assert.equal(CampaignOS.findNearestWallIndex(state, "Urskelde", 50, 50, 0.5), null);
 });
 
+test("addDoor/removeDoor/clearDoors manage a map's door list", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addDoor(state, "Urskelde", 5, 4, 5, 5);
+  assert.deepEqual(state.maps.Urskelde.doors, [{ x1: 5, y1: 4, x2: 5, y2: 5 }]);
+
+  state = CampaignOS.addDoor(state, "Urskelde", 0, 3, 1, 3);
+  assert.equal(state.maps.Urskelde.doors.length, 2);
+
+  const afterRemove = CampaignOS.removeDoor(state, "Urskelde", 0);
+  assert.deepEqual(afterRemove.maps.Urskelde.doors, [{ x1: 0, y1: 3, x2: 1, y2: 3 }]);
+
+  const noOp = CampaignOS.removeDoor(state, "Urskelde", 99);
+  assert.equal(noOp, state, "removing a nonexistent index is a no-op, same state reference");
+
+  const cleared = CampaignOS.clearDoors(afterRemove, "Urskelde");
+  assert.deepEqual(cleared.maps.Urskelde.doors, []);
+});
+
+test("findNearestDoorIndex finds the closest door within the given distance, null beyond it", () => {
+  let state = stateOnMap("Urskelde");
+  state = CampaignOS.addDoor(state, "Urskelde", 5, 4, 5, 5);
+  state = CampaignOS.addDoor(state, "Urskelde", 0, 8, 1, 8);
+
+  assert.equal(CampaignOS.findNearestDoorIndex(state, "Urskelde", 5, 4.5, 0.5), 0);
+  assert.equal(CampaignOS.findNearestDoorIndex(state, "Urskelde", 0.5, 8, 0.5), 1);
+  assert.equal(CampaignOS.findNearestDoorIndex(state, "Urskelde", 50, 50, 0.5), null);
+});
+
+test("doors never affect hasLineOfSight -- only walls do", () => {
+  let state = stateOnMap("Urskelde");
+  // A door with no wall drawn anywhere: line of sight is unaffected (no walls at all).
+  state = CampaignOS.addDoor(state, "Urskelde", 5, 0, 5, 10);
+  assert.equal(CampaignOS.hasLineOfSight(state, "Urskelde", 3, 3, 7, 3), true);
+
+  // Adding a real wall on top of that same door still blocks sight -- the door
+  // marker itself carries no line-of-sight meaning, only `walls` does.
+  state = CampaignOS.addWall(state, "Urskelde", 5, 0, 5, 10);
+  assert.equal(CampaignOS.hasLineOfSight(state, "Urskelde", 3, 3, 7, 3), false);
+});
+
 test("pointInCircle: inside at or under the radius, outside beyond it", () => {
   assert.equal(CampaignOS.pointInCircle(0, 0, 0, 0, 5), true, "exactly the center");
   assert.equal(CampaignOS.pointInCircle(5, 0, 0, 0, 5), true, "exactly at the radius");
