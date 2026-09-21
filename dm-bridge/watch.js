@@ -1224,6 +1224,15 @@ function handleImportCampaignRequest(request) {
   });
 
   CampaignEngine.importMarkdownFiles(fileList).then((campaign) => {
+    // Pre-computed here (not left for Godot/engine-server to ask for separately later)
+    // since tokenDraftFromItem() is a cheap, synchronous, pure function already loaded
+    // in this same process -- one less round trip before a DM can actually spawn someone.
+    // Mutating item.draft in place is enough: campaign.categories.characters and
+    // campaign.files hold the SAME object references per item (see campaign.js's own
+    // importMarkdownFiles(), which pushes one item into both arrays), not copies.
+    campaign.categories.characters.forEach((item) => {
+      item.draft = CampaignEngine.tokenDraftFromItem(item);
+    });
     writeImportCampaignResponse(request.id, true, `Imported ${campaign.files.length} file(s) from the campaign repo.`, campaign);
   }).catch((err) => {
     writeImportCampaignResponse(request.id, false, `Import failed: ${err.message}`);
